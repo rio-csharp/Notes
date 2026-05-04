@@ -48,7 +48,7 @@ jobs:
           SSH_PORT: ${{ secrets.TEST_SSH_PORT }}
           SSH_USER: ${{ secrets.TEST_SSH_USER }}
         run: |
-          ARCHIVE="notes-${GITHUB_SHA}.tgz"
+          ARCHIVE="$RUNNER_TEMP/notes-${GITHUB_SHA}.tgz"
           REMOTE_DIR="/tmp/notes-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test"
           tar --exclude='.git' --exclude='.github' --exclude='README.md' -czf "$ARCHIVE" .
           ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
@@ -124,7 +124,7 @@ jobs:
           SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
           SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
         run: |
-          ARCHIVE="notes-${GITHUB_SHA}.tgz"
+          ARCHIVE="$RUNNER_TEMP/notes-${GITHUB_SHA}.tgz"
           REMOTE_DIR="/tmp/notes-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production"
           tar --exclude='.git' --exclude='.github' --exclude='README.md' -czf "$ARCHIVE" .
           ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
