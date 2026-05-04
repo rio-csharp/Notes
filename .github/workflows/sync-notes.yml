@@ -1,0 +1,178 @@
+name: Sync Notes
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: Branch, tag, or commit SHA to sync
+        required: true
+        default: main
+      target:
+        description: Target environment
+        required: true
+        default: test
+        type: choice
+        options:
+          - test
+          - production
+          - both
+
+permissions:
+  contents: read
+
+env:
+  NOTES_CONTENT_PATH: ${{ vars.NOTES_CONTENT_PATH || '/home/deploy/codecafe/notes' }}
+
+jobs:
+  sync-test:
+    name: Sync test notes
+    if: github.event_name == 'push' || inputs.target == 'test' || inputs.target == 'both'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
+
+      - name: Upload notes to test server
+        env:
+          SSH_HOST: ${{ secrets.TEST_SSH_HOST }}
+          SSH_PORT: ${{ secrets.TEST_SSH_PORT }}
+          SSH_USER: ${{ secrets.TEST_SSH_USER }}
+        run: |
+          ARCHIVE="notes-${GITHUB_SHA}.tgz"
+          REMOTE_DIR="/tmp/notes-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test"
+          tar --exclude='.git' --exclude='.github' --exclude='README.md' -czf "$ARCHIVE" .
+          ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
+          scp -P "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$ARCHIVE" "$SSH_USER@$SSH_HOST:$REMOTE_DIR/notes.tgz"
+          ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \
+            "REMOTE_DIR='$REMOTE_DIR' NOTES_CONTENT_PATH='$NOTES_CONTENT_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -rf "$REMOTE_DIR"' EXIT
+          export PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+          STAGE_DIR="$REMOTE_DIR/stage"
+          mkdir -p "$STAGE_DIR" "$NOTES_CONTENT_PATH"
+          tar -xzf "$REMOTE_DIR/notes.tgz" -C "$STAGE_DIR"
+          python3 - "$STAGE_DIR" "$NOTES_CONTENT_PATH" <<'PY'
+          import os
+          import shutil
+          import sys
+
+          source_root = os.path.abspath(sys.argv[1])
+          target_root = os.path.abspath(sys.argv[2])
+
+          if target_root in {"", "/", "/home", "/home/deploy", "/home/deploy/codecafe"}:
+              raise SystemExit(f"Refusing unsafe target path: {target_root}")
+
+          os.makedirs(target_root, exist_ok=True)
+
+          for name in os.listdir(target_root):
+              path = os.path.join(target_root, name)
+              if os.path.isdir(path) and not os.path.islink(path):
+                  shutil.rmtree(path)
+              else:
+                  os.unlink(path)
+
+          for name in os.listdir(source_root):
+              source_path = os.path.join(source_root, name)
+              target_path = os.path.join(target_root, name)
+              if os.path.isdir(source_path) and not os.path.islink(source_path):
+                  shutil.copytree(source_path, target_path)
+              else:
+                  shutil.copy2(source_path, target_path)
+          PY
+          REMOTE
+
+      - name: Summarize test sync
+        run: |
+          {
+            echo "## Notes Sync"
+            echo
+            echo "Environment: \`test\`"
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo "Target path: \`${NOTES_CONTENT_PATH}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sync-production:
+    name: Sync production notes
+    if: |
+      (github.event_name == 'workflow_dispatch' && (inputs.target == 'production' || inputs.target == 'both')) ||
+      (github.event_name == 'push' && vars.NOTES_SYNC_PRODUCTION_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.git_ref || github.sha }}
+
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+
+      - name: Upload notes to production server
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+          SSH_PORT: ${{ secrets.PRODUCTION_SSH_PORT }}
+          SSH_USER: ${{ secrets.PRODUCTION_SSH_USER }}
+        run: |
+          ARCHIVE="notes-${GITHUB_SHA}.tgz"
+          REMOTE_DIR="/tmp/notes-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production"
+          tar --exclude='.git' --exclude='.github' --exclude='README.md' -czf "$ARCHIVE" .
+          ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
+          scp -P "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$ARCHIVE" "$SSH_USER@$SSH_HOST:$REMOTE_DIR/notes.tgz"
+          ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \
+            "REMOTE_DIR='$REMOTE_DIR' NOTES_CONTENT_PATH='$NOTES_CONTENT_PATH' bash -s" <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -rf "$REMOTE_DIR"' EXIT
+          export PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+          STAGE_DIR="$REMOTE_DIR/stage"
+          mkdir -p "$STAGE_DIR" "$NOTES_CONTENT_PATH"
+          tar -xzf "$REMOTE_DIR/notes.tgz" -C "$STAGE_DIR"
+          python3 - "$STAGE_DIR" "$NOTES_CONTENT_PATH" <<'PY'
+          import os
+          import shutil
+          import sys
+
+          source_root = os.path.abspath(sys.argv[1])
+          target_root = os.path.abspath(sys.argv[2])
+
+          if target_root in {"", "/", "/home", "/home/deploy", "/home/deploy/codecafe"}:
+              raise SystemExit(f"Refusing unsafe target path: {target_root}")
+
+          os.makedirs(target_root, exist_ok=True)
+
+          for name in os.listdir(target_root):
+              path = os.path.join(target_root, name)
+              if os.path.isdir(path) and not os.path.islink(path):
+                  shutil.rmtree(path)
+              else:
+                  os.unlink(path)
+
+          for name in os.listdir(source_root):
+              source_path = os.path.join(source_root, name)
+              target_path = os.path.join(target_root, name)
+              if os.path.isdir(source_path) and not os.path.islink(source_path):
+                  shutil.copytree(source_path, target_path)
+              else:
+                  shutil.copy2(source_path, target_path)
+          PY
+          REMOTE
+
+      - name: Summarize production sync
+        run: |
+          {
+            echo "## Notes Sync"
+            echo
+            echo "Environment: \`production\`"
+            echo "Commit: \`${GITHUB_SHA}\`"
+            echo "Target path: \`${NOTES_CONTENT_PATH}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
