@@ -1,0 +1,503 @@
+# React Rendering Model
+
+## Core Idea
+
+React rendering is the process of turning component state and props into UI.
+
+Chinese notes:
+
+- `render`: 渲染.
+- `reconciliation`: 协调，比较新旧 UI 树.
+- `commit`: 提交到真实 DOM.
+- `stale closure`: 陈旧闭包.
+
+## Render Does Not Always Mean DOM Update
+
+When a component renders, React calls the component function again.
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  console.log("render");
+
+  return (
+    <button onClick={() => setCount(count + 1)}>
+      Count: {count}
+    </button>
+  );
+}
+```
+
+Each click updates state and causes render.
+
+React then compares the result with the previous result and updates the DOM only where needed.
+
+## Render Phase And Commit Phase
+
+Render phase:
+
+- call components;
+- calculate what UI should look like;
+- can be interrupted in concurrent rendering;
+- should be pure.
+
+Commit phase:
+
+- apply DOM changes;
+- run layout effects;
+- update refs.
+
+Rule:
+
+Do not perform side effects during render.
+
+Bad:
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  localStorage.setItem("lastUser", userId); // side effect during render
+  return <div>{userId}</div>;
+}
+```
+
+Better:
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  useEffect(() => {
+    localStorage.setItem("lastUser", userId);
+  }, [userId]);
+
+  return <div>{userId}</div>;
+}
+```
+
+## Under The Hood: Fiber Mental Model
+
+React uses an internal architecture commonly called Fiber.
+
+You do not need private implementation details for everyday React work, but the Fiber mental model helps explain modern rendering behavior.
+
+Fiber lets React:
+
+- represent component work as units;
+- pause and resume rendering work in concurrent rendering;
+- prioritize updates;
+- separate render phase from commit phase;
+- keep enough information to compare old and new UI trees.
+
+Conceptual model:
+
+```text
+Component tree
+  App
+    OrdersPage
+      SearchBox
+      OrderTable
+
+Fiber tree
+  Fiber(App)
+    Fiber(OrdersPage)
+      Fiber(SearchBox)
+      Fiber(OrderTable)
+```
+
+Each fiber represents work for a component or host element.
+
+Practical answer:
+
+> Fiber is React's internal unit-of-work architecture. It allows React to split rendering work, prioritize updates, and separate calculating the next UI from committing changes to the DOM.
+
+## Trigger, Render, Commit
+
+A good review explanation:
+
+```text
+1. Trigger: state, props, context, or external store update happens.
+2. Render: React calls components to calculate the next UI.
+3. Reconcile: React compares new output with previous fiber tree.
+4. Commit: React applies changes to the DOM and runs effects.
+```
+
+Render phase should be pure:
+
+- no API calls;
+- no subscriptions;
+- no `localStorage` writes;
+- no DOM mutations.
+
+Commit phase is where DOM changes happen.
+
+Effects run after commit:
+
+- `useLayoutEffect` runs synchronously after DOM mutations before paint;
+- `useEffect` runs after paint in most cases.
+
+## Batching
+
+React can batch multiple state updates into one render.
+
+Example:
+
+```tsx
+function handleClick() {
+  setFirstName("Ada");
+  setLastName("Lovelace");
+  setAge(36);
+}
+```
+
+React can process these together instead of rendering three separate times.
+
+Modern React supports automatic batching in more scenarios than older versions.
+
+Key point:
+
+> State updates are scheduled. React may batch them, so reading state immediately after calling `setState` may still show the value from the current render.
+
+Example:
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+    console.log(count); // old value from current render
+  }
+}
+```
+
+Use functional update when depending on previous state:
+
+```tsx
+setCount(c => c + 1);
+```
+
+## Priority And Concurrent Rendering
+
+React can treat updates with different priority.
+
+Examples:
+
+- typing in an input should feel urgent;
+- filtering a huge list can be lower priority;
+- route transition may be interruptible.
+
+React APIs such as `useTransition` help mark non-urgent updates:
+
+```tsx
+const [isPending, startTransition] = useTransition();
+
+function handleSearch(value: string) {
+  setInput(value);
+
+  startTransition(() => {
+    setSearchQuery(value);
+  });
+}
+```
+
+Important:
+
+- concurrent rendering does not mean JavaScript runs on multiple threads;
+- it means React can interrupt, pause, discard, and restart rendering work before commit;
+- committed UI remains consistent.
+
+Engineering perspective:
+
+> Concurrent rendering allows React to keep the UI responsive by prioritizing urgent work and interrupting non-urgent rendering. It does not make component code run in parallel threads.
+
+## State Updates Are Scheduled
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+    setCount(count + 1);
+  }
+
+  return <button onClick={handleClick}>{count}</button>;
+}
+```
+
+This increments by 1, not 2, because both updates read the same `count` from the current render.
+
+Correct:
+
+```tsx
+function handleClick() {
+  setCount(c => c + 1);
+  setCount(c => c + 1);
+}
+```
+
+Use functional updates when the next state depends on previous state.
+
+## Stale Closure
+
+Example:
+
+```tsx
+function Timer() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setCount(count + 1);
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, []);
+
+  return <div>{count}</div>;
+}
+```
+
+Bug:
+
+`count` inside the interval is always the value from the first render.
+
+Fix:
+
+```tsx
+useEffect(() => {
+  const id = setInterval(() => {
+    setCount(c => c + 1);
+  }, 1000);
+
+  return () => clearInterval(id);
+}, []);
+```
+
+## Keys And Reconciliation
+
+React uses `key` to identify list items.
+
+Bad:
+
+```tsx
+{users.map((user, index) => (
+  <UserRow key={index} user={user} />
+))}
+```
+
+Better:
+
+```tsx
+{users.map(user => (
+  <UserRow key={user.id} user={user} />
+))}
+```
+
+Using index as key can cause bugs when items are inserted, removed, or reordered.
+
+## Reconciliation Details: Type And Key
+
+React uses component type and key to decide whether to preserve or recreate state.
+
+Same type and same key:
+
+```tsx
+<UserForm key="edit" mode="edit" />
+<UserForm key="edit" mode="edit" />
+```
+
+React can preserve component state.
+
+Different key:
+
+```tsx
+<UserForm key={userId} mode="edit" />
+```
+
+When `userId` changes, React treats it as a different component instance and resets state.
+
+Useful pattern:
+
+```tsx
+<OrderForm key={orderId} orderId={orderId} />
+```
+
+This can intentionally reset form state when switching records.
+
+Bad key choice:
+
+```tsx
+{items.map((item, index) => (
+  <Row key={index} item={item} />
+))}
+```
+
+If list order changes, React may preserve state on the wrong row.
+
+## Why Derived State Can Be A Bug
+
+Bad:
+
+```tsx
+function UserName({ user }: { user: User }) {
+  const [name, setName] = useState(user.name);
+
+  return <input value={name} onChange={e => setName(e.target.value)} />;
+}
+```
+
+If `user` changes, `name` does not automatically update.
+
+Better options:
+
+- make it controlled by parent;
+- use `key` to reset intentionally;
+- derive directly during render if no editing is needed;
+- use effect carefully only when synchronization is truly needed.
+
+Practical explanation:
+
+> I avoid copying props into state unless I need a separate editable draft. Derived values should usually be computed during render or memoized if expensive.
+
+## React.memo
+
+```tsx
+const UserRow = memo(function UserRow({ user }: { user: User }) {
+  return <div>{user.name}</div>;
+});
+```
+
+`React.memo` skips re-render when props are shallowly equal.
+
+But this fails if parent creates new object every render:
+
+```tsx
+<UserRow user={{ id: user.id, name: user.name }} />
+```
+
+Better:
+
+```tsx
+const rowUser = useMemo(
+  () => ({ id: user.id, name: user.name }),
+  [user.id, user.name]
+);
+```
+
+Use memoization only when it solves a measured or obvious problem. Do not wrap everything blindly.
+
+## useMemo vs useCallback
+
+`useMemo` memoizes a value.
+
+```tsx
+const filteredUsers = useMemo(() => {
+  return users.filter(u => u.name.includes(search));
+}, [users, search]);
+```
+
+`useCallback` memoizes a function reference.
+
+```tsx
+const handleSelect = useCallback((id: string) => {
+  setSelectedId(id);
+}, []);
+```
+
+Common Practical explanation:
+
+> `useMemo` is for expensive derived values. `useCallback` is for stable function references, often when passing callbacks to memoized children or hooks that depend on function identity.
+
+## Server State vs Client State
+
+Server state:
+
+- data from API;
+- can be stale;
+- needs caching and refetching;
+- often managed by React Query.
+
+Client state:
+
+- modal open/close;
+- selected tab;
+- unsaved form input;
+- local UI state.
+
+Do not put all server data into Redux by default.
+
+## Practical Data Fetching Example
+
+```tsx
+function OrdersPage() {
+  const [page, setPage] = useState(1);
+
+  const query = useQuery({
+    queryKey: ["orders", page],
+    queryFn: () => fetchOrders({ page }),
+    staleTime: 30_000
+  });
+
+  if (query.isLoading) return <div>Loading...</div>;
+  if (query.isError) return <div>Failed to load orders.</div>;
+
+  return (
+    <>
+      <OrderTable orders={query.data.items} />
+      <Pagination
+        page={page}
+        total={query.data.total}
+        onChange={setPage}
+      />
+    </>
+  );
+}
+```
+
+## Review Questions
+
+### What causes a React component to re-render?
+
+> A component re-renders when its state changes, its parent renders and passes new props, context it consumes changes, or an external store subscription updates.
+
+### What is reconciliation?
+
+> Reconciliation is React's process of comparing the previous UI tree with the new UI tree and deciding what changes need to be committed to the real DOM.
+
+### What is React Fiber?
+
+> Fiber is React's internal unit-of-work architecture. It lets React split rendering work, prioritize updates, support concurrent rendering, and separate the render phase from the commit phase.
+
+### Why are keys important?
+
+> Keys help React preserve identity of list items across renders. Stable keys prevent incorrect state reuse when list items are reordered, inserted, or removed.
+
+### How do you optimize React rendering?
+
+> First measure. Then reduce unnecessary state changes, keep state close to where it is used, split components, use stable keys, memoize expensive calculations, use `React.memo` carefully, virtualize large lists, and avoid recreating heavy objects unnecessarily.
+
+## Common Mistakes
+
+- Side effects during render.
+- Missing dependencies in `useEffect`.
+- Overusing `useEffect` for derived state.
+- Using index as key for dynamic lists.
+- Putting all state in global state.
+- Overusing memoization.
+- Not handling loading, error, and empty states.
+- Copying props into state without a synchronization strategy.
+- Assuming concurrent rendering means multi-threaded JavaScript.
+- Performing expensive work during render without measuring.
+
+## Practice Task
+
+Build a paginated users table with:
+
+- search box;
+- debounced search;
+- React Query;
+- loading state;
+- error state;
+- empty state;
+- stable row keys;
+- memoized expensive filtering only when needed.

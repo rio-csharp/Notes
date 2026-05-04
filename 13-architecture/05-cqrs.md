@@ -1,0 +1,448 @@
+# CQRS
+
+## Core Idea
+
+CQRS means Command Query Responsibility Segregation.
+
+Chinese notes:
+
+- `command`: 命令，改变系统状态.
+- `query`: 查询，不改变状态.
+- `segregation`: 分离.
+
+CQRS separates write operations from read operations.
+
+## Basic Idea
+
+Command:
+
+```text
+CreateOrder
+ApproveOrder
+CancelOrder
+```
+
+Query:
+
+```text
+GetOrderById
+SearchOrders
+GetDashboardMetrics
+```
+
+Commands change state.
+
+Queries return data.
+
+## Simple CQRS In One Database
+
+You do not need separate databases to use CQRS.
+
+```text
+API
+  -> Command Handler -> EF Core -> SQL
+  -> Query Handler   -> EF Core/Dapper -> SQL
+```
+
+This is often enough for normal applications.
+
+## Command Example
+
+```csharp
+public sealed record ApproveOrderCommand(int OrderId, int ApproverId);
+
+public sealed class ApproveOrderHandler
+{
+    private readonly AppDbContext _dbContext;
+
+    public ApproveOrderHandler(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task Handle(ApproveOrderCommand command, CancellationToken ct)
+    {
+        var order = await _dbContext.Orders
+            .FirstOrDefaultAsync(o => o.Id == command.OrderId, ct);
+
+        if (order is null)
+        {
+            throw new NotFoundException("Order not found.");
+        }
+
+        order.Approve(command.ApproverId);
+
+        await _dbContext.SaveChangesAsync(ct);
+    }
+}
+```
+
+## Query Example
+
+```csharp
+public sealed record SearchOrdersQuery(
+    string? Status,
+    int Page,
+    int PageSize);
+
+public sealed class SearchOrdersHandler
+{
+    private readonly AppDbContext _dbContext;
+
+    public SearchOrdersHandler(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<PagedResult<OrderListItemDto>> Handle(
+        SearchOrdersQuery query,
+        CancellationToken ct)
+    {
+        var orders = _dbContext.Orders.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(query.Status))
+        {
+            orders = orders.Where(o => o.Status == query.Status);
+        }
+
+        var total = await orders.CountAsync(ct);
+
+        var items = await orders
+            .OrderByDescending(o => o.CreatedAt)
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(o => new OrderListItemDto
+            {
+                Id = o.Id,
+                Status = o.Status,
+                Total = o.Total,
+                CreatedAt = o.CreatedAt
+            })
+            .ToListAsync(ct);
+
+        return new PagedResult<OrderListItemDto>(items, total, query.Page, query.PageSize);
+    }
+}
+```
+
+## CQRS With Separate Read Model
+
+For complex systems:
+
+```text
+Write Database -> Events -> Projection Worker -> Read Database
+```
+
+Benefits:
+
+- optimized read models;
+- independent scaling;
+- simpler queries for UI;
+- event-driven integration.
+
+Costs:
+
+- eventual consistency（最终一致性）;
+- more moving parts;
+- projection rebuild complexity;
+- operational overhead.
+
+## MediatR Example
+
+```csharp
+public sealed record CreateOrderCommand(int CustomerId)
+    : IRequest<int>;
+
+public sealed class CreateOrderHandler
+    : IRequestHandler<CreateOrderCommand, int>
+{
+    public Task<int> Handle(CreateOrderCommand request, CancellationToken ct)
+    {
+        // create order
+        return Task.FromResult(123);
+    }
+}
+```
+
+Controller:
+
+```csharp
+[HttpPost]
+public async Task<ActionResult<int>> Create(CreateOrderRequest request)
+{
+    var orderId = await _mediator.Send(new CreateOrderCommand(request.CustomerId));
+    return CreatedAtAction(nameof(GetById), new { id = orderId }, orderId);
+}
+```
+
+## Command Validation Pipeline
+
+CQRS pairs well with pipeline behaviors because commands and queries have explicit request types.
+
+```csharp
+public sealed class ValidationBehavior<TRequest, TResponse>
+    : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : notnull
+{
+    private readonly IEnumerable<IValidator<TRequest>> _validators;
+
+    public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
+    {
+        _validators = validators;
+    }
+
+    public async Task<TResponse> Handle(
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken ct)
+    {
+        var context = new ValidationContext<TRequest>(request);
+        var failures = _validators
+            .Select(validator => validator.Validate(context))
+            .SelectMany(result => result.Errors)
+            .Where(error => error is not null)
+            .ToList();
+
+        if (failures.Count > 0)
+        {
+            throw new ValidationException(failures);
+        }
+
+        return await next();
+    }
+}
+```
+
+Registration:
+
+```csharp
+builder.Services.AddMediatR(config =>
+{
+    config.RegisterServicesFromAssembly(typeof(CreateOrderCommand).Assembly);
+    config.AddOpenBehavior(typeof(ValidationBehavior<,>));
+});
+
+builder.Services.AddValidatorsFromAssembly(typeof(CreateOrderCommand).Assembly);
+```
+
+Command validator:
+
+```csharp
+public sealed class ApproveOrderCommandValidator
+    : AbstractValidator<ApproveOrderCommand>
+{
+    public ApproveOrderCommandValidator()
+    {
+        RuleFor(x => x.OrderId).GreaterThan(0);
+        RuleFor(x => x.ApproverId).GreaterThan(0);
+    }
+}
+```
+
+## Logging Pipeline
+
+Cross-cutting behavior can be added without putting logging into every handler.
+
+```csharp
+public sealed class LoggingBehavior<TRequest, TResponse>
+    : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : notnull
+{
+    private readonly ILogger<LoggingBehavior<TRequest, TResponse>> _logger;
+
+    public LoggingBehavior(ILogger<LoggingBehavior<TRequest, TResponse>> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task<TResponse> Handle(
+        TRequest request,
+        RequestHandlerDelegate<TResponse> next,
+        CancellationToken ct)
+    {
+        var requestName = typeof(TRequest).Name;
+        var startedAt = Stopwatch.GetTimestamp();
+
+        try
+        {
+            _logger.LogInformation("Handling {RequestName}", requestName);
+
+            var response = await next();
+
+            var elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+            _logger.LogInformation(
+                "Handled {RequestName} in {ElapsedMs} ms",
+                requestName,
+                elapsedMs);
+
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed handling {RequestName}", requestName);
+            throw;
+        }
+    }
+}
+```
+
+## Separate Read Model Example
+
+For heavy read pages, create a read model optimized for the UI.
+
+```sql
+CREATE TABLE reporting.OrderSummaryReadModels
+(
+    OrderId int NOT NULL PRIMARY KEY,
+    OrderNumber nvarchar(50) NOT NULL,
+    CustomerName nvarchar(200) NOT NULL,
+    Status nvarchar(40) NOT NULL,
+    TotalAmount decimal(18, 2) NOT NULL,
+    ItemCount int NOT NULL,
+    LastUpdatedAt datetimeoffset NOT NULL
+);
+```
+
+Query handler:
+
+```csharp
+public sealed record SearchOrderSummariesQuery(
+    string? Status,
+    string? Search,
+    int Page,
+    int PageSize) : IRequest<PagedResult<OrderSummaryDto>>;
+
+public sealed class SearchOrderSummariesHandler
+    : IRequestHandler<SearchOrderSummariesQuery, PagedResult<OrderSummaryDto>>
+{
+    private readonly ReportingDbContext _dbContext;
+
+    public SearchOrderSummariesHandler(ReportingDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<PagedResult<OrderSummaryDto>> Handle(
+        SearchOrderSummariesQuery query,
+        CancellationToken ct)
+    {
+        var source = _dbContext.OrderSummaryReadModels.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(query.Status))
+        {
+            source = source.Where(x => x.Status == query.Status);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            source = source.Where(x =>
+                x.OrderNumber.Contains(query.Search) ||
+                x.CustomerName.Contains(query.Search));
+        }
+
+        var total = await source.CountAsync(ct);
+
+        var items = await source
+            .OrderByDescending(x => x.LastUpdatedAt)
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(x => new OrderSummaryDto(
+                x.OrderId,
+                x.OrderNumber,
+                x.CustomerName,
+                x.Status,
+                x.TotalAmount,
+                x.ItemCount))
+            .ToListAsync(ct);
+
+        return new PagedResult<OrderSummaryDto>(
+            items,
+            total,
+            query.Page,
+            query.PageSize);
+    }
+}
+```
+
+The read model can be denormalized because it is optimized for reading.
+
+## Projection Worker
+
+When using events, a projection updates the read model.
+
+```csharp
+public sealed class OrderSubmittedProjection
+{
+    private readonly ReportingDbContext _dbContext;
+
+    public OrderSubmittedProjection(ReportingDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task HandleAsync(OrderSubmittedIntegrationEvent message, CancellationToken ct)
+    {
+        var existing = await _dbContext.OrderSummaryReadModels
+            .FirstOrDefaultAsync(x => x.OrderId == message.OrderId, ct);
+
+        if (existing is null)
+        {
+            _dbContext.OrderSummaryReadModels.Add(new OrderSummaryReadModel
+            {
+                OrderId = message.OrderId,
+                OrderNumber = message.OrderNumber,
+                CustomerName = message.CustomerName,
+                Status = "Submitted",
+                TotalAmount = message.TotalAmount,
+                ItemCount = message.ItemCount,
+                LastUpdatedAt = message.SubmittedAt
+            });
+        }
+        else
+        {
+            existing.Status = "Submitted";
+            existing.TotalAmount = message.TotalAmount;
+            existing.ItemCount = message.ItemCount;
+            existing.LastUpdatedAt = message.SubmittedAt;
+        }
+
+        await _dbContext.SaveChangesAsync(ct);
+    }
+}
+```
+
+This creates eventual consistency（最终一致性）. The write succeeds first; the read model catches up shortly after.
+
+## Knowledge Checks
+
+### What is CQRS?
+
+CQRS separates commands that change state from queries that read data. It can be implemented simply with separate handlers or more deeply with separate read and write models.
+
+### Does CQRS require event sourcing?
+
+No. CQRS and event sourcing are separate patterns. They are often used together, but CQRS can be implemented without event sourcing.
+
+### When would you use CQRS?
+
+Use CQRS when read and write models have different complexity, when commands need clear business workflows, or when queries need optimized projections. Avoid it for simple CRUD if it adds unnecessary complexity.
+
+## Common Mistakes
+
+- Using CQRS for every tiny CRUD feature.
+- Confusing CQRS with event sourcing.
+- Creating too many empty handlers with no value.
+- Ignoring transaction boundaries.
+- Ignoring eventual consistency in separate read models.
+
+## Practice Task
+
+Implement:
+
+1. `CreateOrderCommand`;
+2. `ApproveOrderCommand`;
+3. `GetOrderByIdQuery`;
+4. `SearchOrdersQuery`;
+5. validation behavior;
+6. logging behavior;
+7. one query optimized with projection.
