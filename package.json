@@ -1,0 +1,27 @@
+{
+  "name": "notes",
+  "version": "1.0.0",
+  "description": "Private Markdown notes content for CodeCafe.",
+  "main": "index.js",
+  "scripts": {
+    "build:books": "node ./tools/build_books.mjs",
+    "build:epub-pdf": "node ./tools/build_books.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rio-csharp/Notes.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/rio-csharp/Notes/issues"
+  },
+  "homepage": "https://github.com/rio-csharp/Notes#readme",
+  "dependencies": {
+    "marked": "^18.0.3",
+    "playwright": "^1.59.1"
+  }
+}

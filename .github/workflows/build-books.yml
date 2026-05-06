@@ -1,0 +1,83 @@
+name: Build Books
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-books:
+    name: Build EPUB, PDF, and HTML
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Pandoc
+        uses: r-lib/actions/setup-pandoc@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Build books
+        run: npm run build:books
+
+      - name: Upload book artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: notes-books
+          path: |
+            dist/notes.epub
+            dist/notes.pdf
+            dist/notes.html
+          if-no-files-found: error
+
+      - name: Publish rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Notes Latest Build
+          body: |
+            Auto-generated latest build from `main`.
+
+            Included files:
+            - `notes.epub`
+            - `notes.pdf`
+            - `notes.html`
+          draft: false
+          prerelease: false
+          make_latest: true
+          generate_release_notes: false
+          files: |
+            dist/notes.epub
+            dist/notes.pdf
+            dist/notes.html
+
+      - name: Summarize build
+        run: |
+          {
+            echo "## Book Build"
+            echo
+            echo "Generated files:"
+            echo "- \`dist/notes.epub\`"
+            echo "- \`dist/notes.pdf\`"
+            echo "- \`dist/notes.html\`"
+            echo
+            echo "Release:"
+            echo "- tag: \`latest\`"
+            echo "- name: \`Notes Latest Build\`"
+          } >> "$GITHUB_STEP_SUMMARY"
