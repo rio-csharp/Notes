@@ -4,12 +4,6 @@
 
 Binary search finds a target or boundary in a sorted search space.
 
-Chinese notes:
-
-- `binary search`: 二分查找.
-- `boundary`: 边界.
-- `monotonic`: 单调性.
-
 Binary search is not only for arrays. It works whenever the answer space is monotonic.
 
 ## Standard Binary Search
@@ -351,28 +345,6 @@ Monotonic property:
 ```text
 If capacity works, any larger capacity also works.
 ```
-
-## Knowledge Checks
-
-### When can you use binary search?
-
-Use binary search when the data is sorted or when the answer space has a monotonic true/false property.
-
-### Why do binary search bugs happen?
-
-Usually because of unclear interval definition, wrong loop condition, or incorrect boundary updates.
-
-### What does lower bound return?
-
-It returns the first index where `nums[index] >= target`. If every value is smaller, it returns `nums.Length`.
-
-## Common Mistakes
-
-- Infinite loop from not moving boundaries.
-- Wrong `left <= right` vs `left < right`.
-- Off-by-one errors.
-- Not recognizing binary search on answer.
-- No monotonic property.
 
 ## Practice Problems
 

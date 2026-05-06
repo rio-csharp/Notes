@@ -22,6 +22,12 @@ const pdfHtmlFile = path.join(tempDir, "notes-for-pdf.html");
 const epubCssFile = path.join(tempDir, "epub.css");
 
 const ignoredDirs = new Set([".git", ".github", "node_modules", "dist", "tools"]);
+const preferredFrontMatter = [
+  "01-README.md",
+  "02-learning-path.md",
+  "README.md",
+  "05-fullstack-engineering-checklist.md",
+];
 
 const bookTitle = ".NET + Fullstack Engineering Notes";
 
@@ -89,6 +95,33 @@ async function collectMarkdownFiles(currentDir = rootDir, relativeDir = "") {
   return files;
 }
 
+function sortBookFiles(files) {
+  const preferredOrder = new Map(
+    preferredFrontMatter.map((item, index) => [normalizeSlashes(item), index]),
+  );
+
+  return [...files].sort((a, b) => {
+    const aRel = normalizeSlashes(a.relativePath);
+    const bRel = normalizeSlashes(b.relativePath);
+    const aPreferred = preferredOrder.has(aRel);
+    const bPreferred = preferredOrder.has(bRel);
+
+    if (aPreferred && bPreferred) {
+      return preferredOrder.get(aRel) - preferredOrder.get(bRel);
+    }
+
+    if (aPreferred) {
+      return -1;
+    }
+
+    if (bPreferred) {
+      return 1;
+    }
+
+    return aRel.localeCompare(bRel, "en");
+  });
+}
+
 async function extractTitle(filePath, fallbackTitle) {
   const content = await readFile(filePath, "utf8");
   const match = content.match(/^#\s+(.+)$/m);
@@ -112,11 +145,8 @@ async function buildCombinedMarkdown(files) {
 
   for (const file of files) {
     const content = await readFile(file.fullPath, "utf8");
-    const relativeDisplayPath = normalizeSlashes(file.relativePath);
     sections.push("");
     sections.push("\\newpage");
-    sections.push("");
-    sections.push(`## Source: \`${relativeDisplayPath}\``);
     sections.push("");
     sections.push(content.trim());
     sections.push("");
@@ -326,10 +356,9 @@ function buildPdfHtml(files, renderedSections) {
     .join("\n");
 
   const chapters = renderedSections
-    .map(({ title, relativePath, html }) => {
+    .map(({ html }) => {
       return `
       <section class="chapter">
-        <div class="source-path">${escapeHtml(normalizeSlashes(relativePath))}</div>
         ${html}
       </section>`;
     })
@@ -453,7 +482,7 @@ async function buildPdf() {
 
 async function main() {
   const pandocPath = await resolvePandocPath();
-  const markdownFiles = await collectMarkdownFiles();
+  const markdownFiles = sortBookFiles(await collectMarkdownFiles());
 
   if (markdownFiles.length === 0) {
     throw new Error("No Markdown files found.");

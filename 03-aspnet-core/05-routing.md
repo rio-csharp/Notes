@@ -2,15 +2,13 @@
 
 ## Core Idea
 
-Routing maps incoming HTTP requests to endpoints.
+Routing is the mechanism that matches an incoming HTTP request to an executable endpoint. In ASP.NET Core, that match is not only about choosing a method or delegate. Routing also attaches metadata that later pipeline stages use for authorization, filters, and endpoint-specific behavior.
 
-Chinese notes:
+For that reason, routing should be understood as a core part of application design rather than a mere URL convenience feature. Clear routing makes APIs predictable for clients, reduces ambiguity in the framework, and creates a stable public surface for the system.
 
-- `routing`: 路由.
-- `route parameter`: 路由参数.
-- `endpoint routing`: 端点路由.
+## Endpoint Matching And Route Shape
 
-## Attribute Routing
+At a basic level, routing considers request path, HTTP method, and route template shape.
 
 ```csharp
 [ApiController]
@@ -25,26 +23,13 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-Route:
+This endpoint matches requests such as:
 
 ```http
 GET /api/orders/123
 ```
 
-How matching works:
-
-```text
-Request method: GET
-Request path:   /api/orders/123
-
-Controller route: api/orders
-Action route:     {id:int}
-
-Matched endpoint:
-  OrdersController.GetById(int id)
-```
-
-The route parameter `id` is bound to the action parameter.
+The route parameter becomes part of endpoint selection and is then bound into the action parameter:
 
 ```csharp
 [HttpGet("{id:int}")]
@@ -54,84 +39,26 @@ public IActionResult GetById([FromRoute] int id)
 }
 ```
 
-`[FromRoute]` is often inferred, but writing it can make teaching examples clearer.
+The important point is that route design shapes both the external API and the framework's ability to choose the correct endpoint unambiguously.
 
-## Route Constraints
+## Route Parameters Versus Query Parameters
 
-```csharp
-[HttpGet("{id:int}")]
-```
+One of the most useful design distinctions is between resource identity and query modifiers.
 
-Other examples:
-
-- `{id:guid}`
-- `{slug:alpha}`
-- `{date:datetime}`
-
-Examples:
-
-```csharp
-[HttpGet("{id:guid}")]
-public IActionResult GetByGuid(Guid id)
-{
-    return Ok();
-}
-
-[HttpGet("by-slug/{slug:alpha}")]
-public IActionResult GetBySlug(string slug)
-{
-    return Ok();
-}
-```
-
-Why constraints matter:
-
-> They reduce ambiguous matches and reject invalid route shapes before action logic runs.
-
-Important:
-
-> Route constraints are not business validation. `{id:int}` proves the route segment is an integer, not that the order exists or belongs to the user.
-
-## Optional Parameters
-
-```csharp
-[HttpGet("{category?}")]
-```
-
-Use carefully. Query string is often clearer for optional filters.
-
-Less clear:
+Route parameters usually identify resources or nested resources:
 
 ```http
-GET /api/products/electronics
-GET /api/products
+GET /api/orders/123
+GET /api/orders/123/items
 ```
 
-Often clearer:
-
-```http
-GET /api/products?category=electronics
-GET /api/products
-```
-
-Rule:
-
-> Use route parameters for resource identity. Use query parameters for optional filters.
-
-## Query String For Filtering
+Query parameters usually express filtering, search, pagination, or sorting:
 
 ```http
 GET /api/orders?status=Paid&page=1&pageSize=20
 ```
 
-Good for:
-
-- filters;
-- search;
-- pagination;
-- sorting.
-
-Action example:
+That distinction is not absolute, but it is one of the clearest habits for readable API design. When optional filters are forced into the route structure, endpoints often become harder to extend and less obvious to clients.
 
 ```csharp
 public sealed record OrderSearchRequest(
@@ -150,54 +77,67 @@ public async Task<ActionResult<PagedResult<OrderDto>>> Search(
 }
 ```
 
-Benefits:
+## Route Constraints And Early Shape Validation
 
-- clean endpoint;
-- typed query parameters;
-- easy to add filters without changing route structure.
+Route constraints help the routing system reject invalid shapes and choose the correct endpoint.
 
-## Route Design
-
-Good:
-
-```http
-GET /api/orders/123/items
-POST /api/orders/123/approve
+```csharp
+[HttpGet("{id:int}")]
 ```
 
-Avoid:
+Other common constraints include:
 
-```http
-GET /api/getOrderItems?id=123
-POST /api/doApproveOrder
+- `{id:guid}`
+- `{slug:alpha}`
+- `{date:datetime}`
+
+```csharp
+[HttpGet("{id:guid}")]
+public IActionResult GetByGuid(Guid id)
+{
+    return Ok();
+}
 ```
 
-Resource-oriented examples:
+Constraints improve routing precision, but they are not business validation. `{id:int}` proves that the segment is an integer, not that the referenced order exists or that the caller may access it. This distinction helps avoid confusing transport-level shape checks with application-level correctness.
+
+## Resource-Oriented Route Design
+
+A good route structure usually expresses resources and subresources rather than action names disguised as URLs.
+
+Readable resource-oriented examples:
 
 ```http
 GET    /api/orders
 GET    /api/orders/123
 GET    /api/orders/123/items
 POST   /api/orders
-POST   /api/orders/123/approve
 DELETE /api/orders/123
 ```
 
-Avoid putting verbs everywhere:
+Less expressive designs often rely on verb-heavy route names:
 
 ```http
-GET /api/orders/getAll
+GET /api/getOrderItems?id=123
 POST /api/orders/create
 POST /api/orders/delete
 ```
 
-Exception:
+The resource-oriented style is usually easier to learn, document, and version because it aligns route shape with domain structure rather than with arbitrary method naming.
 
-> Business actions such as `approve`, `cancel`, `submit`, or `refund` can be modeled as subresource/action endpoints with `POST`.
+There is, however, a useful exception. Business actions that are not simple CRUD replacement are often modeled as sub-actions:
 
-## Complete Route Layout Example
+```http
+POST /api/orders/123/approve
+POST /api/orders/123/cancel
+POST /api/orders/123/submit
+```
 
-For a small order API, a consistent route layout might look like this:
+These routes remain understandable because the resource is still explicit and the action reflects a domain transition rather than a transport verb.
+
+## A Consistent Route Layout
+
+A coherent route layout makes larger APIs easier to navigate and evolve.
 
 ```text
 GET    /api/orders
@@ -210,8 +150,6 @@ GET    /api/orders/{id:int}/items
 POST   /api/orders/{id:int}/items
 DELETE /api/orders/{id:int}/items/{itemId:int}
 ```
-
-Controller example:
 
 ```csharp
 [ApiController]
@@ -264,31 +202,11 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-Request models:
+This kind of layout is valuable because the route hierarchy communicates the mental model of the API directly.
 
-```csharp
-public sealed record OrderSearchRequest(
-    OrderStatus? Status,
-    int Page = 1,
-    int PageSize = 20,
-    string? Sort = null);
+## Ambiguity And Route Conflicts
 
-public sealed record CancelOrderRequest(string Reason);
-```
-
-Why this design is readable:
-
-- `/api/orders/{id}` identifies one order;
-- query string handles optional search and pagination;
-- business transitions use `POST` sub-actions;
-- route constraints prevent invalid `id` shapes;
-- request bodies carry command-specific data such as cancellation reason.
-
-## Route Conflicts
-
-Ambiguous routes are easy to create.
-
-Problem:
+Routing becomes fragile when two endpoints describe the same effective shape.
 
 ```csharp
 [HttpGet("{id}")]
@@ -298,9 +216,7 @@ public IActionResult GetById(string id) => Ok();
 public IActionResult GetBySlug(string slug) => Ok();
 ```
 
-Both match the same shape.
-
-Better:
+These templates are indistinguishable to the routing system. A better design makes the distinction structural:
 
 ```csharp
 [HttpGet("{id:int}")]
@@ -310,76 +226,12 @@ public IActionResult GetById(int id) => Ok();
 public IActionResult GetBySlug(string slug) => Ok();
 ```
 
-## Review Questions
+This is one reason route constraints and explicit prefixes matter. They are not just implementation tricks. They protect the clarity and predictability of the endpoint surface.
 
-### What is endpoint routing?
+## Routing As Metadata Attachment
 
-> Endpoint routing is ASP.NET Core's routing system that matches requests to endpoints such as controllers, Razor Pages, SignalR hubs, and Minimal APIs.
+In modern ASP.NET Core, routing does more than choose the endpoint delegate. It also attaches endpoint metadata that later pipeline stages consume.
 
-### Route parameter vs query parameter?
+That is why authorization attributes, filters, OpenAPI metadata, endpoint names, and similar behaviors are often described "on the endpoint" rather than in unrelated registration code. Once routing has selected an endpoint, later middleware and execution layers can inspect that endpoint's metadata to decide what should happen next.
 
-> Route parameters identify resources. Query parameters usually represent filtering, sorting, pagination, or optional modifiers.
-
-### How do you version routes?
-
-> Common options include URL versioning like `/api/v1/orders`, query string versioning, or header/media type versioning. Public APIs need stronger versioning discipline.
-
-### Why use route constraints?
-
-> They help routing choose the right endpoint and reject invalid route shapes early. They do not replace business validation.
-
-### Should filters go in route or query string?
-
-> Usually query string. Routes identify resources; query strings express optional filtering, sorting, pagination, and search.
-
-## Common Mistakes
-
-### Mistake: Putting filters into route path awkwardly.
-
-Why it is wrong:
-
-> Optional filters create many route shapes and make APIs harder to evolve.
-
-Better answer:
-
-> Use query parameters for filters and search.
-
-### Mistake: No route constraints.
-
-Why it is wrong:
-
-> Routes become ambiguous and invalid values reach action logic.
-
-Better answer:
-
-> Use constraints such as `{id:int}` or `{id:guid}` for resource identifiers.
-
-### Mistake: Inconsistent pluralization.
-
-Why it is wrong:
-
-> APIs feel unpredictable and are harder for clients to use.
-
-Better answer:
-
-> Pick a convention, usually plural nouns like `/api/orders`, and apply it consistently.
-
-### Mistake: Action names in every URL.
-
-Why it is wrong:
-
-> It makes the API RPC-style even when resources would be clearer.
-
-Better answer:
-
-> Use resource-oriented URLs and reserve action names for real business actions.
-
-### Mistake: Breaking clients without versioning.
-
-Why it is wrong:
-
-> Public clients may depend on old contracts.
-
-Better answer:
-
-> Use a versioning strategy and maintain backward compatibility where possible.
+This deeper role explains why routing appears so early in the request pipeline and why endpoint design affects more than URL matching alone.

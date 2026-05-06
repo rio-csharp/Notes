@@ -2,15 +2,35 @@
 
 ## Core Idea
 
-ASP.NET Core supports both controller-based APIs and Minimal APIs.
+ASP.NET Core exposes two major endpoint programming models for HTTP APIs: controllers and Minimal APIs. Both ultimately participate in the same hosting environment, routing system, authorization pipeline, dependency injection model, and response-writing infrastructure. The question is therefore not which one is "real" ASP.NET Core. The question is which model best expresses the endpoint surface a particular application needs.
 
-Chinese notes:
+This chapter focuses on that design choice. It also clarifies what endpoint code should own, what it should delegate, and how request and response models should be shaped so that the HTTP layer remains explicit without absorbing the entire application.
 
-- `controller`: 控制器.
-- `action`: 控制器方法.
-- `Minimal API`: 轻量 API 写法.
+## Endpoints As The HTTP Application Boundary
 
-## Controller Example
+Whether an endpoint is written as a controller action or as a Minimal API delegate, it occupies the same architectural position: it is the code that turns HTTP concepts into application calls and application results back into HTTP.
+
+That means endpoint code usually owns concerns such as:
+
+- route and query inputs;
+- request body models;
+- response status codes and headers;
+- authorization metadata;
+- API-oriented validation behavior;
+- delegation to application services.
+
+It usually should not own:
+
+- persistence orchestration;
+- business workflow decisions;
+- direct infrastructure integration details;
+- ad hoc transaction coordination across multiple dependencies.
+
+This boundary is one of the most important quality checks in web code. Once endpoint methods become the place where business rules, database access, and integration side effects all accumulate, the framework surface has grown too large.
+
+## Controller-Based Endpoints
+
+Controllers provide a structured programming model built around classes, actions, and attributes.
 
 ```csharp
 [ApiController]
@@ -33,7 +53,19 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-## Minimal API Example
+This model is often valuable when an API is large enough to benefit from:
+
+- conventional organization by controller;
+- attribute-based metadata;
+- filters;
+- stronger discoverability for teams familiar with MVC-style structure;
+- a more explicit separation between endpoint classes and startup code.
+
+Controllers introduce more ceremony, but that ceremony often buys clarity in larger systems.
+
+## Minimal APIs
+
+Minimal APIs provide a lighter-weight endpoint model centered on route mapping delegates.
 
 ```csharp
 app.MapGet("/api/orders/{id:int}", async (
@@ -46,21 +78,35 @@ app.MapGet("/api/orders/{id:int}", async (
 });
 ```
 
-## ActionResult<T>
+This style is often appealing for focused services, small APIs, and teams that prefer endpoint-first composition over controller classes. It can also make the route surface easy to see at a glance, especially when grouped deliberately.
+
+Minimal APIs are not inherently less structured than controllers. They only become structurally weak when everything stays inline in `Program.cs` and no effort is made to group routes, extract handlers, or define explicit request and response models.
+
+## Choosing Between The Two Models
+
+The trade-off is mostly about how much structure the HTTP surface benefits from.
+
+Controllers often fit better when:
+
+- the API is broad and long-lived;
+- filters and attribute metadata are central;
+- the team prefers class-based organization;
+- the codebase already uses established MVC conventions.
+
+Minimal APIs often fit better when:
+
+- the service surface is narrow or deliberately lightweight;
+- route groups provide enough organization;
+- the team wants lower ceremony without sacrificing typed dependencies;
+- endpoint code can remain explicit and disciplined without controller scaffolding.
+
+The two models can coexist in the same application. The real architectural mistake is not mixing them. It is allowing either one to grow without clear conventions.
+
+## `ActionResult<T>` And Typed HTTP Outcomes
+
+Controller actions often benefit from `ActionResult<T>` because it expresses both a typed success body and alternative HTTP outcomes.
 
 ```csharp
-public async Task<ActionResult<OrderDto>> GetById(int id)
-```
-
-Allows:
-
-- typed success response;
-- status code results like `NotFound`.
-
-Example:
-
-```csharp
-[HttpGet("{id:int}")]
 public async Task<ActionResult<OrderDto>> GetById(int id, CancellationToken ct)
 {
     var order = await _orders.GetByIdAsync(id, ct);
@@ -74,19 +120,35 @@ public async Task<ActionResult<OrderDto>> GetById(int id, CancellationToken ct)
 }
 ```
 
-Why `ActionResult<T>` is useful:
+This is more informative than returning `IActionResult` everywhere, because the successful shape remains visible in the method signature while still allowing results such as `404 Not Found` or `400 Bad Request`.
 
-> The success body is typed as `OrderDto`, but the action can still return HTTP results such as `404`.
+Minimal APIs express a similar idea through typed result unions:
 
-## ApiController Attribute
+```csharp
+private static async Task<Results<Ok<OrderDto>, NotFound>> GetById(
+    int id,
+    IOrderService orders,
+    CancellationToken ct)
+{
+    var order = await orders.GetByIdAsync(id, ct);
 
-`[ApiController]` provides:
+    return order is null
+        ? TypedResults.NotFound()
+        : TypedResults.Ok(order);
+}
+```
 
-- automatic model validation response;
-- binding source inference;
-- better API conventions.
+In both models, the goal is the same: the endpoint signature should communicate something meaningful about the HTTP contract instead of reducing every outcome to an untyped abstraction.
 
-Example request model:
+## `[ApiController]` And API-Oriented Behavior
+
+The `[ApiController]` attribute adds behavior that is particularly useful for HTTP APIs.
+
+It commonly provides:
+
+- automatic model validation responses;
+- binding-source inference;
+- more consistent API conventions.
 
 ```csharp
 public sealed class CreateOrderRequest
@@ -98,8 +160,6 @@ public sealed class CreateOrderRequest
     public List<CreateOrderItemRequest> Items { get; init; } = [];
 }
 ```
-
-Controller:
 
 ```csharp
 [ApiController]
@@ -114,26 +174,13 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-With `[ApiController]`, invalid model state usually returns `400` automatically before the action executes.
+With `[ApiController]`, invalid model state typically produces a `400 Bad Request` response before the action runs. That reduces boilerplate, but it does not remove the need for architectural judgment. Automatic validation is a convenience at the HTTP boundary, not a replacement for deeper application or domain invariants.
 
-## Thin Controllers
+## Thin Controllers And Thin Endpoint Handlers
 
-Controllers should coordinate HTTP concerns, not contain complex business logic.
+The principle of thin controllers applies just as much to Minimal API handlers.
 
-Good controller responsibilities:
-
-- read route/query/body;
-- call application/service layer;
-- return HTTP result.
-
-Avoid:
-
-- large business workflows;
-- direct SQL;
-- complex authorization logic inline;
-- huge mapping code.
-
-Bad:
+This is a poor controller:
 
 ```csharp
 [HttpPost]
@@ -148,15 +195,9 @@ public async Task<IActionResult> Create(CreateOrderRequest request)
 }
 ```
 
-Problems:
+Its problem is not merely size. It mixes endpoint concerns, persistence, domain creation, and external notification in one HTTP method.
 
-- controller owns persistence;
-- controller owns business workflow;
-- controller sends email directly;
-- returns entity directly;
-- hard to test.
-
-Better:
+A healthier shape delegates workflow to an application service:
 
 ```csharp
 [HttpPost]
@@ -170,13 +211,11 @@ public async Task<ActionResult<OrderDto>> Create(
 }
 ```
 
-The application service owns the workflow.
+The same rule applies to Minimal APIs. Concise syntax should not become an excuse to hide orchestration, persistence, and integration logic inside route delegates.
 
-## Complete Controller Example
+## A Structured Controller Example
 
-This example shows a controller with route parameters, body binding, cancellation, status codes, and DTOs.
-
-Request models:
+Controllers become especially effective when the surrounding HTTP contract is explicit.
 
 ```csharp
 public sealed class CreateOrderRequest
@@ -199,19 +238,13 @@ public sealed class CreateOrderItemRequest
     [Range(0.01, 100000)]
     public decimal UnitPrice { get; init; }
 }
-```
 
-Response model:
-
-```csharp
 public sealed record OrderDto(
     int Id,
     int CustomerId,
     decimal Total,
     string Status);
 ```
-
-Controller:
 
 ```csharp
 [ApiController]
@@ -254,27 +287,11 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-Service contract:
+The value here is not just that the code compiles. The route shape, validation behavior, result typing, and documentation hints all contribute to a clearer and more stable API surface.
 
-```csharp
-public interface IOrderService
-{
-    Task<OrderDto?> GetByIdAsync(int id, CancellationToken ct);
-    Task<OrderDto> CreateAsync(CreateOrderRequest request, CancellationToken ct);
-}
-```
+## Organizing Minimal APIs Deliberately
 
-Why this design is useful:
-
-- validation attributes describe input requirements;
-- `[ApiController]` turns invalid model state into a `400` response;
-- `ActionResult<OrderDto>` keeps the success response typed;
-- status-code attributes improve OpenAPI documentation;
-- the controller stays thin and delegates workflow logic.
-
-## Minimal API Endpoint Groups
-
-Minimal APIs can still be organized.
+Minimal APIs remain maintainable when they are grouped and extracted instead of left as a long startup script.
 
 ```csharp
 var orders = app.MapGroup("/api/orders")
@@ -291,11 +308,7 @@ orders.MapGet("/{id:int}", async (
 });
 ```
 
-This keeps Minimal APIs from becoming a long unstructured `Program.cs`.
-
-## Complete Minimal API Example
-
-Minimal APIs can use endpoint groups and typed results to stay explicit.
+A more deliberate extraction keeps the endpoint surface discoverable without overloading `Program.cs`:
 
 ```csharp
 public static class OrderEndpoints
@@ -350,29 +363,11 @@ public static class OrderEndpoints
 }
 ```
 
-Program registration:
+The discipline is the same as with controllers: route handlers should stay focused on HTTP behavior and delegate business work appropriately.
 
-```csharp
-var builder = WebApplication.CreateBuilder(args);
+## Endpoint Filters In Minimal APIs
 
-builder.Services.AddScoped<IOrderService, OrderService>();
-
-var app = builder.Build();
-
-app.MapOrderEndpoints();
-
-app.Run();
-```
-
-Key point:
-
-> Minimal API does not mean all code must stay in `Program.cs`. Endpoint extension methods keep routes discoverable and testable.
-
-## Endpoint Filters
-
-Endpoint filters can run before and after Minimal API handlers.
-
-Example: require a client version header.
+Minimal APIs have their own filter mechanism for endpoint-specific cross-cutting behavior.
 
 ```csharp
 public sealed class ClientVersionFilter : IEndpointFilter
@@ -396,8 +391,6 @@ public sealed class ClientVersionFilter : IEndpointFilter
 }
 ```
 
-Usage:
-
 ```csharp
 app.MapGroup("/api/orders")
     .AddEndpointFilter<ClientVersionFilter>()
@@ -408,17 +401,17 @@ app.MapGroup("/api/orders")
     });
 ```
 
-Use endpoint filters for endpoint-specific cross-cutting behavior. Use middleware for application-wide HTTP pipeline behavior.
+This is one of the places where Minimal APIs develop their own local structure rather than simply imitating controllers. Middleware remains the right choice for broad HTTP concerns. Endpoint filters are useful when the concern is specific to a particular Minimal API surface.
 
-## Returning DTOs
+## Returning DTOs Instead Of Persistence Models
 
-Avoid returning EF entities directly:
+Endpoints should usually return DTOs or explicitly shaped response models rather than persistence entities.
 
 ```csharp
-return Ok(orderEntity); // risky
+return Ok(orderEntity);
 ```
 
-Use DTOs:
+That kind of direct entity return is risky because persistence models are often not stable API contracts. They may expose internal fields, navigation properties, serialization loops, or versioning liabilities that the public API should not inherit automatically.
 
 ```csharp
 return Ok(new OrderDto(
@@ -427,84 +420,4 @@ return Ok(new OrderDto(
     order.Total));
 ```
 
-Why:
-
-- stable API contract;
-- avoid exposing internal fields;
-- avoid circular references;
-- easier versioning;
-- smaller payloads.
-
-## Review Questions
-
-### Controller vs Minimal API?
-
-> Controllers provide structure, conventions, and MVC features. Minimal APIs are concise and good for small services or simple endpoints. Both can be used in the same application.
-
-### What does `[ApiController]` do?
-
-> It enables API-specific behaviors like automatic model validation responses and binding source inference.
-
-### What should be in controllers?
-
-> HTTP orchestration: input binding, calling services, and returning responses. Business rules should live in application/domain services.
-
-### Why avoid returning EF entities?
-
-> EF entities are persistence models, not API contracts. Returning them can expose internal fields, create circular JSON issues, and couple clients to database design.
-
-### How do you keep Minimal APIs maintainable?
-
-> Use endpoint groups, extension methods, typed request/response models, services, validation, and consistent result handling.
-
-## Common Mistakes
-
-### Mistake: Fat controllers.
-
-Why it is wrong:
-
-> Controllers become hard to test and mix HTTP, business, persistence, and integration concerns.
-
-Better answer:
-
-> Keep controllers thin and delegate workflows to services.
-
-### Mistake: Returning EF entities directly.
-
-Why it is wrong:
-
-> It leaks database shape and can expose unintended data.
-
-Better answer:
-
-> Return DTOs designed for the API contract.
-
-### Mistake: Inconsistent response codes.
-
-Why it is wrong:
-
-> Clients cannot reliably handle results.
-
-Better answer:
-
-> Define response conventions for success, validation, not found, conflict, auth failure, and unexpected errors.
-
-### Mistake: No cancellation token.
-
-Why it is wrong:
-
-> Work may continue after client disconnect or request timeout.
-
-Better answer:
-
-> Accept `CancellationToken` and pass it to async services, EF Core, and external calls.
-
-### Mistake: Business logic mixed with HTTP logic.
-
-Why it is wrong:
-
-> Business rules become tied to controllers and cannot be reused or tested cleanly.
-
-Better answer:
-
-> Put business rules in application/domain services.
+Using DTOs keeps the API contract intentional. It also gives the application freedom to evolve internal persistence design without accidentally changing the public HTTP surface.

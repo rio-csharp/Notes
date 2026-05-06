@@ -4,14 +4,6 @@
 
 Multi-tenancy means one software system serves multiple tenants, such as companies, organizations, departments, or customers.
 
-Chinese notes:
-
-- `tenant`: 租户.
-- `tenant isolation`: 租户隔离.
-- `data leak`: 数据泄露.
-- `shared database`: 共享数据库.
-- `noisy neighbor`: 噪声邻居, one tenant consumes too many shared resources.
-
 The most important rule:
 
 > Never allow one tenant to access another tenant's data.
@@ -450,8 +442,6 @@ Metrics should allow tenant-level debugging without creating too much cardinalit
 
 Chinese note:
 
-- `cardinality`: 基数. Too many unique metric labels can make monitoring expensive and slow.
-
 Do not label every metric with tenant ID in high-traffic systems unless the monitoring platform can handle it.
 
 ## Testing Tenant Isolation
@@ -502,35 +492,6 @@ Blob path example:
 ```csharp
 var blobName = $"tenants/{tenantId:N}/orders/{orderId}/files/{fileId:N}.pdf";
 ```
-
-## Knowledge Checks
-
-### Which multi-tenant model should be used?
-
-It depends on isolation, compliance, tenant size, operational maturity, and reporting needs. Shared database with `TenantId` is operationally simple. Database per tenant gives stronger isolation but increases operational complexity.
-
-### How can cross-tenant data leaks be prevented?
-
-Validate tenant membership, enforce tenant filters at the data access layer, include tenant ID in cache keys and file paths, audit admin access, use authorization checks, and write cross-tenant integration tests.
-
-### How should background jobs work in a multi-tenant system?
-
-Job messages should include explicit tenant context. Workers should not rely on `HttpContext`; they should set tenant context from the message before reading or writing tenant-owned data.
-
-### Why should indexes often start with `TenantId`?
-
-Most queries read data for one tenant. Leading with `TenantId` helps the database seek into the current tenant's rows instead of scanning unrelated tenant data.
-
-## Common Mistakes
-
-- Forgetting `TenantId` in one query.
-- Cache keys without tenant ID.
-- Background jobs without tenant context.
-- Admin endpoints without audit logs.
-- Trusting tenant ID from request path without membership check.
-- File paths that do not include tenant ID.
-- Search index queries without tenant filter.
-- No tests for cross-tenant access.
 
 ## Practice Task
 

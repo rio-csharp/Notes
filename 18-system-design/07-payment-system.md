@@ -4,13 +4,6 @@
 
 Design a payment system that supports payment creation, provider integration, callbacks, refunds, idempotency, and reconciliation.
 
-Chinese notes:
-
-- `payment intent`: 支付意图.
-- `capture`: 扣款确认.
-- `refund`: 退款.
-- `reconciliation`: 对账.
-
 ## Requirements
 
 Functional:
@@ -258,30 +251,6 @@ Do not:
 - store raw card data unless compliant;
 - trust frontend payment status;
 - expose provider secrets to unauthorized clients.
-
-## Knowledge Checks
-
-### How do you make payment creation idempotent?
-
-Require an idempotency key, store request hash and response, enforce unique key, and return the same result for retries. If same key has different payload, return conflict.
-
-### How do you handle webhook duplicate events?
-
-Store provider event ID with unique constraint and process events idempotently.
-
-### Why do you need reconciliation?
-
-Payment callbacks are not perfectly reliable. Reconciliation ensures local payment state matches provider truth.
-
-## Common Mistakes
-
-- No idempotency.
-- Trusting frontend success page as payment proof.
-- No callback signature verification.
-- No audit trail.
-- No reconciliation.
-- Duplicate refunds.
-- Logging sensitive provider payloads.
 
 ## Practice Task
 

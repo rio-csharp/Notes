@@ -4,13 +4,7 @@
 
 Reflection lets code inspect types, methods, properties, and attributes at runtime.
 
-Attributes attach metadata to code elements.
-
-Chinese notes:
-
-- `reflection`: 反射.
-- `attribute`: 特性.
-- `metadata`: 元数据.
+Attributes attach metadata to code elements. Reflection and attributes are related because attributes only become useful when some code, framework, or tool reads that metadata and acts on it.
 
 ## Reflection Example
 
@@ -67,6 +61,8 @@ var instance = Activator.CreateInstance(type);
 
 This is useful for frameworks and plugin systems, but application code should not default to it. Constructor injection and explicit factories are usually easier to read, test, and optimize.
 
+A common framework-style example is a serializer, mapper, or extensibility point discovering types by convention. A common application mistake is copying that same dynamic style into ordinary business code where the dependencies were actually known all along. Reflection is powerful, but explicit code is often better when no real runtime variability exists.
+
 ## Attribute Example
 
 ```csharp
@@ -89,11 +85,9 @@ var isAuditable = typeof(Order)
     .Any();
 ```
 
-Important:
+Attributes are metadata. They do not run by themselves. They are declarative markers that become meaningful only when a framework, library, or application explicitly interprets them.
 
-> Attributes are metadata. They do not run by themselves.
-
-Example:
+For example:
 
 ```csharp
 [Auditable]
@@ -115,7 +109,7 @@ public static bool ShouldAudit(Type type)
 
 `AttributeUsage` controls where an attribute can be applied.
 
-Example:
+For example:
 
 ```csharp
 [AttributeUsage(
@@ -139,7 +133,7 @@ Meaning:
 - `AllowMultiple = false`: cannot apply the same attribute multiple times to the same target;
 - `Inherited = true`: derived classes or overridden members can inherit the attribute depending on reflection usage.
 
-Attributes are useful when metadata is stable and declarative. If the behavior needs complex runtime decisions, normal code is often clearer.
+Attributes are useful when metadata is stable and declarative. They work well for permissions, serialization hints, routing hints, validation rules, and mapping conventions that should stay close to the code element they describe. If the behavior needs complex runtime decisions, evolving state, or significant branching logic, normal code is often clearer than encoding too much intent into attributes.
 
 ## Common Framework Uses
 
@@ -166,9 +160,28 @@ Serialization:
 - `[JsonPropertyName]`;
 - `[JsonIgnore]`.
 
+These examples show a broader pattern: attributes are often used as a compact metadata contract between application code and framework code. They describe intent, but a separate runtime component still has to consume that intent.
+
+ASP.NET Core routing is a simple illustration:
+
+```csharp
+[ApiController]
+[Route("api/orders")]
+public sealed class OrdersController : ControllerBase
+{
+    [HttpGet("{id:int}")]
+    public ActionResult<OrderDto> GetById(int id)
+    {
+        return Ok();
+    }
+}
+```
+
+The attributes do not execute the routing behavior by themselves. Framework code reads that metadata and builds endpoint behavior around it.
+
 ## Reflection Performance
 
-Reflection can be slower than direct calls.
+Reflection can be slower than direct calls because the runtime must inspect metadata, resolve members, and often box values or use more general invocation paths than ordinary compiled code.
 
 If used in hot paths:
 
@@ -202,6 +215,8 @@ public static object? GetValueCached(object target, string propertyName)
 
 For very hot paths, cached delegates or source-generated code can be faster than `PropertyInfo.GetValue`.
 
+That trade-off appears often in serializers, object mappers, validation frameworks, and plugin systems. Reflection gives flexibility at startup or configuration time. Cached delegates or generated code become more attractive when the same operation is repeated on hot request paths.
+
 ## Source Generators
 
 Source generators create code at compile time.
@@ -225,7 +240,7 @@ Source generation:
   use normal compiled code at runtime
 ```
 
-This can improve startup, reduce reflection overhead, and work better with trimming and Native AOT.
+This can improve startup, reduce reflection overhead, and work better with trimming and Native AOT. In practice, source generation is one of the clearest examples of the platform shifting work from runtime discovery to build-time knowledge.
 
 Example idea:
 
@@ -238,70 +253,4 @@ public partial class AppJsonContext : JsonSerializerContext
 
 The JSON serializer can use generated metadata instead of discovering everything dynamically at runtime.
 
-## Review Questions
-
-### What is reflection?
-
-> Reflection is the ability to inspect and interact with type metadata at runtime, such as properties, methods, constructors, and attributes.
-
-### Why can reflection be expensive?
-
-> It resolves metadata dynamically and may involve access checks, boxing, dynamic invocation, and less compile-time optimization.
-
-### What are attributes?
-
-> Attributes are metadata attached to code elements. Frameworks can read them through reflection or source generation.
-
-### Do attributes execute automatically?
-
-> No. Attributes only store metadata. Some framework or custom code must read the attribute and perform behavior based on it.
-
-### Reflection vs source generation?
-
-> Reflection discovers metadata at runtime. Source generation creates code at build time. Source generation can improve startup and AOT compatibility, but reflection is more flexible for dynamic scenarios.
-
-### When is reflection acceptable?
-
-> Reflection is fine for startup, configuration, framework glue, diagnostics, tests, and low-frequency operations. Be careful in hot paths and cache metadata when repeated.
-
-## Common Mistakes
-
-### Mistake: Using reflection repeatedly without caching.
-
-Why it is wrong:
-
-> Repeated metadata lookup and dynamic invocation can be expensive in hot paths.
-
-Better answer:
-
-> Cache reflected metadata, compiled delegates, or use source generation when performance matters.
-
-### Mistake: Putting business logic only in attributes.
-
-Why it is wrong:
-
-> Attributes are metadata. If core business behavior is hidden in attributes and reflection, the flow can become hard to test and understand.
-
-Better answer:
-
-> Use attributes for declarative metadata, but keep important business logic explicit and testable.
-
-### Mistake: Assuming attributes execute by themselves.
-
-Why it is wrong:
-
-> An attribute does nothing unless some framework or code reads it and acts on it.
-
-Better answer:
-
-> Attributes describe intent; runtime behavior comes from code that inspects those attributes.
-
-### Mistake: Forgetting Native AOT limitations with reflection.
-
-Why it is wrong:
-
-> Native AOT/trimming may remove metadata that reflection expects unless the app preserves it.
-
-Better answer:
-
-> For AOT-friendly code, prefer source generators or explicitly configure required metadata.
+Reflection therefore remains most appropriate for startup work, configuration, framework glue, diagnostics, tests, and other lower-frequency operations. In hot paths, repeated reflection should usually be cached, converted to delegates, or replaced with generated code. The important architectural distinction is that reflection provides flexibility, while generated or explicit code provides predictability. The right choice depends on whether the system values dynamism more than startup, throughput, trimming safety, and operational transparency.

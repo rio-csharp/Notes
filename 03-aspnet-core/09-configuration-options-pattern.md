@@ -2,95 +2,60 @@
 
 ## Core Idea
 
-ASP.NET Core configuration combines settings from multiple sources and exposes them through `IConfiguration`. The Options pattern binds configuration sections to strongly typed classes and injects them through `IOptions<T>`, `IOptionsSnapshot<T>`, or `IOptionsMonitor<T>`.
+ASP.NET Core configuration is the mechanism by which an application receives operational settings from its environment. The Options pattern turns those settings into typed dependencies that can be validated, documented, and injected consistently.
 
-Chinese notes:
+This chapter matters because configuration is not only a startup concern. It is part of the contract between code and deployment. Weak configuration design leads to stringly typed settings, late runtime failures, hidden environment differences, and secrets leaking into the wrong places. Strong configuration design makes operational intent explicit.
 
-- `configuration`: 配置.
-- `options pattern`: 选项模式.
-- `environment variables`: 环境变量.
-- `user secrets`: 用户机密.
-- `binding`: 绑定.
-- `validation`: 校验.
-- `reload`: 重新加载.
+## Configuration As A Composed Source Of Truth
 
-Key takeaway:
+ASP.NET Core configuration is built from multiple providers rather than from one monolithic file.
 
-> I use configuration providers to load settings, typed options to avoid magic strings, validation to fail fast, and secret stores for sensitive values.
+Common sources include:
 
-## Configuration Sources
+- `appsettings.json`
+- `appsettings.{Environment}.json`
+- local user secrets
+- environment variables
+- command-line arguments
+- secret stores such as Azure Key Vault
+- custom configuration providers
 
-Common sources:
-
-- `appsettings.json`;
-- `appsettings.{Environment}.json`, such as `appsettings.Development.json`;
-- user secrets in local development;
-- environment variables;
-- command-line arguments;
-- Azure Key Vault or another secret manager;
-- custom configuration providers.
-
-Later sources can override earlier sources.
-
-Typical priority:
+Later sources can override earlier ones. A common layering looks like this:
 
 ```text
 appsettings.json
-  overridden by appsettings.Development.json
+  overridden by environment-specific JSON
   overridden by user secrets
   overridden by environment variables
   overridden by command-line arguments
 ```
 
-Example:
+This design allows the same application code to run in different environments without rebuilding for each one. It also explains why operational behavior should not be inferred from a single file alone.
 
-```json
-{
-  "Payment": {
-    "BaseUrl": "https://sandbox.payment.example",
-    "TimeoutSeconds": 10,
-    "ApiKey": "do-not-store-real-secret-here"
-  }
-}
-```
+## Direct Configuration Access And Its Limits
 
-Environment variable override:
-
-```text
-Payment__BaseUrl=https://api.payment.example
-Payment__TimeoutSeconds=3
-```
-
-Why double underscore?
-
-> Environment variables usually cannot use `:` reliably across platforms. ASP.NET Core maps `__` to nested configuration keys.
-
-## Reading Configuration Directly
-
-You can read values directly:
+The framework allows direct access through `IConfiguration`:
 
 ```csharp
 var baseUrl = builder.Configuration["Payment:BaseUrl"];
 var timeoutSeconds = builder.Configuration.GetValue<int>("Payment:TimeoutSeconds");
 ```
 
-This is acceptable for simple startup configuration.
+This is acceptable when a small amount of startup logic needs to inspect settings directly. It becomes weaker when used as the main configuration model throughout the application.
 
-But injecting `IConfiguration` everywhere is usually not ideal:
+The problem is not that `IConfiguration` is wrong. The problem is that widespread direct access tends to produce:
 
 - repeated string keys;
-- no compile-time structure;
 - weak discoverability;
-- no centralized validation;
-- harder unit testing.
+- fragmented validation;
+- unclear dependency shape;
+- harder testing of consumers.
 
-Better for application services:
-
-> Bind configuration to typed options.
+Once configuration becomes a real dependency of application services, typed options are usually the better model.
 
 ## Strongly Typed Options
 
-Options class:
+The Options pattern binds a configuration section to a .NET type:
 
 ```csharp
 using System.ComponentModel.DataAnnotations;
@@ -111,8 +76,6 @@ public sealed class PaymentOptions
 }
 ```
 
-Registration:
-
 ```csharp
 builder.Services
     .AddOptions<PaymentOptions>()
@@ -123,7 +86,13 @@ builder.Services
     .ValidateOnStart();
 ```
 
-Usage:
+This makes the dependency explicit and typed. It also creates one obvious place where the expected configuration shape is documented in code.
+
+## Why Typed Options Improve Design
+
+Typed options are not simply a convenience wrapper around configuration keys. They improve design in several ways.
+
+They make configuration structure visible in the consuming type:
 
 ```csharp
 public sealed class PaymentClient
@@ -134,37 +103,18 @@ public sealed class PaymentClient
     {
         _options = options.Value;
     }
-
-    public async Task CreatePaymentAsync(decimal amount, CancellationToken cancellationToken)
-    {
-        using var httpClient = new HttpClient
-        {
-            BaseAddress = new Uri(_options.BaseUrl),
-            Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds)
-        };
-
-        // Example only. In production prefer IHttpClientFactory.
-        await Task.CompletedTask;
-    }
 }
 ```
 
-Note:
+They centralize validation rather than scattering it across call sites. They also make configuration a real dependency that can be reasoned about in tests and refactors, instead of a hidden set of string lookups embedded throughout the codebase.
 
-> Options are not just a convenience. They make configuration explicit, validated, testable, and easier to reason about.
+This matters especially in production systems where a malformed URL, missing key, or wrong timeout should be treated as an operational misconfiguration rather than as an obscure runtime surprise.
 
-## IOptions vs IOptionsSnapshot vs IOptionsMonitor
+## `IOptions<T>`, `IOptionsSnapshot<T>`, And `IOptionsMonitor<T>`
 
-### IOptions<T>
+ASP.NET Core offers several access patterns for options because different consumers have different lifetime needs.
 
-`IOptions<T>` is simple and stable.
-
-- registered as singleton;
-- value is created once;
-- good for stable configuration;
-- safe to inject into singleton services.
-
-Example:
+`IOptions<T>` is the simplest form. It is stable and works well for configuration that does not need to change per request or during application lifetime.
 
 ```csharp
 public sealed class StablePaymentClient
@@ -178,16 +128,7 @@ public sealed class StablePaymentClient
 }
 ```
 
-### IOptionsSnapshot<T>
-
-`IOptionsSnapshot<T>` is scoped.
-
-- recomputed once per scope;
-- in web apps, usually once per request;
-- useful when configuration may reload between requests;
-- not suitable for singleton services.
-
-Example:
+`IOptionsSnapshot<T>` is scoped and recomputed per request scope in web applications. It is useful when configuration may reload between requests, but it is not suitable for singleton consumers.
 
 ```csharp
 public sealed class CheckoutService
@@ -201,13 +142,7 @@ public sealed class CheckoutService
 }
 ```
 
-Why not in singleton?
-
-> A singleton lives longer than a request scope. Injecting a scoped service into a singleton breaks lifetime rules.
-
-### IOptionsMonitor<T>
-
-`IOptionsMonitor<T>` supports change notifications and works with singleton services.
+`IOptionsMonitor<T>` supports change observation and can still be used by singleton services.
 
 ```csharp
 public sealed class PaymentSettingsWatcher : IDisposable
@@ -224,7 +159,8 @@ public sealed class PaymentSettingsWatcher : IDisposable
         _subscription = monitor.OnChange(options =>
         {
             _current = options;
-            logger.LogInformation("Payment options changed. TimeoutSeconds={TimeoutSeconds}",
+            logger.LogInformation(
+                "Payment options changed. TimeoutSeconds={TimeoutSeconds}",
                 options.TimeoutSeconds);
         });
     }
@@ -236,93 +172,19 @@ public sealed class PaymentSettingsWatcher : IDisposable
 }
 ```
 
-Important:
+The right choice depends on both lifetime and reload expectations. Configuration design is therefore tied directly to dependency injection lifetime design.
 
-> `IOptionsMonitor<T>` can observe configuration reloads only if the provider supports reload. Not every configuration source reloads automatically.
+## Validation And Fail-Fast Behavior
 
-## Named Options
+Configuration should usually fail early when required settings are missing or malformed.
 
-Named options allow multiple configurations for the same options type.
+Without fail-fast validation, an application may start successfully and then break only when a specific feature is first exercised. That delay makes operational diagnosis harder and can shift misconfiguration discovery into customer-facing behavior.
 
-Example:
-
-```json
-{
-  "Payments": {
-    "Stripe": {
-      "BaseUrl": "https://api.stripe.example",
-      "TimeoutSeconds": 5,
-      "ApiKey": "secret"
-    },
-    "PayPal": {
-      "BaseUrl": "https://api.paypal.example",
-      "TimeoutSeconds": 8,
-      "ApiKey": "secret"
-    }
-  }
-}
-```
-
-Registration:
-
-```csharp
-builder.Services.Configure<PaymentOptions>(
-    "Stripe",
-    builder.Configuration.GetSection("Payments:Stripe"));
-
-builder.Services.Configure<PaymentOptions>(
-    "PayPal",
-    builder.Configuration.GetSection("Payments:PayPal"));
-```
-
-Usage:
-
-```csharp
-public sealed class PaymentRouter
-{
-    private readonly IOptionsMonitor<PaymentOptions> _optionsMonitor;
-
-    public PaymentRouter(IOptionsMonitor<PaymentOptions> optionsMonitor)
-    {
-        _optionsMonitor = optionsMonitor;
-    }
-
-    public PaymentOptions GetProviderOptions(string provider)
-    {
-        return _optionsMonitor.Get(provider);
-    }
-}
-```
-
-Use named options when:
-
-- multiple providers share the same shape;
-- multiple tenants need different settings;
-- multiple external clients use similar configuration.
-
-## Options Validation
-
-Failing fast is important.
-
-Bad:
-
-```text
-The API starts successfully, but payment fails only when the first customer checks out.
-```
-
-Good:
-
-```text
-The API fails during startup because Payment:ApiKey is missing.
-```
-
-Validation options:
+ASP.NET Core supports validation through:
 
 - data annotations;
-- custom `.Validate(...)`;
-- custom `IValidateOptions<T>`.
-
-Custom validator:
+- custom `.Validate(...)` predicates;
+- custom `IValidateOptions<T>` implementations.
 
 ```csharp
 public sealed class PaymentOptionsValidator : IValidateOptions<PaymentOptions>
@@ -344,8 +206,6 @@ public sealed class PaymentOptionsValidator : IValidateOptions<PaymentOptions>
 }
 ```
 
-Registration:
-
 ```csharp
 builder.Services.AddSingleton<IValidateOptions<PaymentOptions>, PaymentOptionsValidator>();
 
@@ -355,42 +215,90 @@ builder.Services
     .ValidateOnStart();
 ```
 
-## Secrets
+`ValidateOnStart()` is especially valuable for infrastructure settings such as service URLs, credentials, timeouts, and feature toggles that should never fail lazily in the middle of real traffic.
 
-Never commit real secrets.
+## Named Options And Repeated Configuration Shapes
 
-Do not store these in source control:
+Named options are useful when the same configuration shape appears several times with different identities.
+
+```json
+{
+  "Payments": {
+    "Stripe": {
+      "BaseUrl": "https://api.stripe.example",
+      "TimeoutSeconds": 5,
+      "ApiKey": "secret"
+    },
+    "PayPal": {
+      "BaseUrl": "https://api.paypal.example",
+      "TimeoutSeconds": 8,
+      "ApiKey": "secret"
+    }
+  }
+}
+```
+
+```csharp
+builder.Services.Configure<PaymentOptions>(
+    "Stripe",
+    builder.Configuration.GetSection("Payments:Stripe"));
+
+builder.Services.Configure<PaymentOptions>(
+    "PayPal",
+    builder.Configuration.GetSection("Payments:PayPal"));
+```
+
+```csharp
+public sealed class PaymentRouter
+{
+    private readonly IOptionsMonitor<PaymentOptions> _optionsMonitor;
+
+    public PaymentRouter(IOptionsMonitor<PaymentOptions> optionsMonitor)
+    {
+        _optionsMonitor = optionsMonitor;
+    }
+
+    public PaymentOptions GetProviderOptions(string provider)
+    {
+        return _optionsMonitor.Get(provider);
+    }
+}
+```
+
+Named options are useful when several providers, tenants, or external clients share the same settings structure but not the same values. They preserve type safety without forcing artificial option classes for every variant.
+
+## Secrets And Operational Boundaries
+
+Configuration includes secrets, but secrets should not be treated like ordinary static settings.
+
+The following should not be committed into source control as live values:
 
 - database passwords;
 - API keys;
-- JWT signing keys;
+- signing keys;
 - connection strings with credentials;
 - private certificates;
 - third-party access tokens.
 
-Local development:
+Local development commonly uses user secrets:
 
 ```bash
 dotnet user-secrets init
 dotnet user-secrets set "Payment:ApiKey" "dev-secret"
 ```
 
-Production:
+Production systems commonly use:
 
 - environment variables;
-- Azure Key Vault;
-- AWS Secrets Manager;
-- HashiCorp Vault;
-- Kubernetes secrets;
-- managed identity where possible.
+- managed secret stores;
+- managed identity where possible;
+- platform-specific secret injection.
 
-Strong Practical explanation:
-
-> In production I prefer managed identity plus a secret store. The application should not require long-lived credentials checked into config files.
+The deeper principle is that configuration design should respect the operational sensitivity of data. Not every setting belongs in the same storage or delivery path.
 
 ## Environment-Specific Configuration
 
-Environment name:
+ASP.NET Core applications often change behavior based on environment.
 
 ```csharp
 if (builder.Environment.IsDevelopment())
@@ -398,18 +306,6 @@ if (builder.Environment.IsDevelopment())
     builder.Services.AddSwaggerGen();
 }
 ```
-
-Common environment names:
-
-- `Development`;
-- `Staging`;
-- `Production`.
-
-Important:
-
-> Do not use `Development` behavior in production. Developer exception pages and overly permissive CORS policies can leak information.
-
-Example:
 
 ```csharp
 if (app.Environment.IsDevelopment())
@@ -423,11 +319,11 @@ else
 }
 ```
 
-## Typed HttpClient With Options
+Environment-aware configuration is useful, but it should not become a dumping ground for arbitrary divergent behavior. The purpose is to express meaningful operational differences such as diagnostics, safety settings, or external endpoints, not to maintain several unrelated application personalities under one codebase.
 
-Options often work with `IHttpClientFactory`.
+## Options And Outgoing HTTP Clients
 
-Registration:
+Configuration and typed options often intersect naturally with `IHttpClientFactory`.
 
 ```csharp
 builder.Services
@@ -448,8 +344,6 @@ builder.Services.AddHttpClient<PaymentClient>((serviceProvider, client) =>
 });
 ```
 
-Client:
-
 ```csharp
 public sealed class PaymentClient
 {
@@ -467,102 +361,4 @@ public sealed class PaymentClient
 }
 ```
 
-## Review Questions
-
-### What is the Options pattern?
-
-The Options pattern binds configuration sections to strongly typed classes and injects them using `IOptions<T>`, `IOptionsSnapshot<T>`, or `IOptionsMonitor<T>`.
-
-### Why not inject `IConfiguration` everywhere?
-
-Because it spreads string keys across the codebase, weakens validation, and makes dependencies less explicit. Typed options are easier to validate, test, and maintain.
-
-### What is the difference between `IOptions`, `IOptionsSnapshot`, and `IOptionsMonitor`?
-
-`IOptions<T>` is stable and singleton-friendly. `IOptionsSnapshot<T>` is scoped and refreshes per request. `IOptionsMonitor<T>` is singleton-friendly and supports change notifications when the provider supports reload.
-
-### What does `ValidateOnStart()` do?
-
-It validates options during application startup instead of waiting until the first time the options are used. This helps fail fast when configuration is invalid.
-
-### How do you override nested configuration with environment variables?
-
-Use double underscores:
-
-```text
-Payment__TimeoutSeconds=5
-```
-
-ASP.NET Core maps it to:
-
-```text
-Payment:TimeoutSeconds
-```
-
-### How do you manage secrets?
-
-Use user secrets locally and a production secret manager such as Azure Key Vault, AWS Secrets Manager, HashiCorp Vault, Kubernetes secrets, or environment variables. Do not commit real secrets.
-
-## Common Mistakes
-
-### Mistake: Injecting `IConfiguration` everywhere
-
-Why it is wrong:
-
-> It creates repeated magic strings and makes configuration validation inconsistent.
-
-Better answer:
-
-> Use typed options for application settings and keep direct `IConfiguration` usage mostly in startup/composition code.
-
-### Mistake: No validation on startup
-
-Why it is wrong:
-
-> The app may start successfully and fail later during real user traffic.
-
-Better answer:
-
-> Validate options with data annotations, custom validation, and `ValidateOnStart()`.
-
-### Mistake: Real secrets in `appsettings.json`
-
-Why it is wrong:
-
-> Config files are commonly committed, copied, logged, or included in deployment artifacts.
-
-Better answer:
-
-> Use local user secrets for development and a secret manager or environment variables in production.
-
-### Mistake: Assuming config changes always reload automatically
-
-Why it is wrong:
-
-> Reload depends on the configuration provider and how options are consumed.
-
-Better answer:
-
-> Use `IOptionsMonitor<T>` for change notifications and confirm that the configuration provider supports reload.
-
-### Mistake: Injecting `IOptionsSnapshot<T>` into singleton services
-
-Why it is wrong:
-
-> `IOptionsSnapshot<T>` is scoped. A singleton cannot safely depend on scoped services.
-
-Better answer:
-
-> Use `IOptions<T>` or `IOptionsMonitor<T>` in singleton services.
-
-## Practice Task
-
-Create:
-
-1. `PaymentOptions` with validation attributes;
-2. `ValidateOnStart()`;
-3. environment variable override using `Payment__BaseUrl`;
-4. local user secret for `Payment:ApiKey`;
-5. typed `HttpClient` that reads options;
-6. short notes explaining when to use `IOptions`, `IOptionsSnapshot`, and `IOptionsMonitor`.
-
+This is a good example of configuration becoming a typed operational dependency rather than a loose set of string values retrieved ad hoc.

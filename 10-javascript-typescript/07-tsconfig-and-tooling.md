@@ -4,12 +4,6 @@
 
 `tsconfig.json` controls how TypeScript checks and compiles your project.
 
-Chinese notes:
-
-- `tsconfig`: TypeScript 配置文件.
-- `strict mode`: 严格模式.
-- `module resolution`: 模块解析.
-
 ## Basic tsconfig
 
 ```json
@@ -229,8 +223,6 @@ npm run typecheck
 
 Use it in CI so type errors do not reach production builds.
 
-## Review Questions
-
 ### What does strict mode do?
 
 > Strict mode enables stronger type checks and helps catch null, implicit any, and unsafe typing issues earlier.
@@ -242,14 +234,6 @@ Use it in CI so type errors do not reach production builds.
 ### Why use path aliases?
 
 > They make imports cleaner and reduce brittle deep relative paths.
-
-## Common Mistakes
-
-- `strict: false` in large app.
-- Too many `as` assertions.
-- Ignoring runtime validation.
-- Broken path alias between TypeScript and bundler config.
-- No linting/formatting.
 
 ## Practice Task
 

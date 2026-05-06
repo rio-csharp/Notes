@@ -4,12 +4,6 @@
 
 Design a rate limiter that restricts how many requests a user or client can make in a time window.
 
-Chinese notes:
-
-- `rate limiter`: 限流器.
-- `token bucket`: 令牌桶.
-- `sliding window`: 滑动窗口.
-
 ## Requirements
 
 Functional:
@@ -375,26 +369,3 @@ public sealed class RateLimitMiddleware
     }
 }
 ```
-
-## Knowledge Checks
-
-### Which algorithm would you choose?
-
-> For many APIs, token bucket is a good balance because it supports steady refill and controlled burst. Fixed window is simpler but less accurate around boundaries.
-
-### How do you scale it?
-
-> Use a centralized fast store like Redis, or enforce at gateway level. Keys should be designed by client identity and route. Monitor Redis latency and hot keys.
-
-### How do you handle distributed API servers?
-
-> Use shared state such as Redis, or move rate limiting to API gateway/CDN where requests pass through a centralized layer.
-
-## Common Mistakes
-
-- Per-instance in-memory limiter in multi-instance deployment.
-- No `429` response.
-- No client identity strategy.
-- No different limits for different endpoints.
-- No Redis failure plan.
-- No monitoring.

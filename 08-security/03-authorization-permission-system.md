@@ -1,420 +1,101 @@
-# Authorization And Permission System Design
+# Authorization Models, Permissions, And Resource Access
 
 ## Core Idea
 
-Authorization decides whether an authenticated user can perform an action.
+Authentication identifies the caller. Authorization decides what that caller may do. Systems often fail not because authentication is absent, but because authorization is too coarse, too static, or too disconnected from the actual resource being accessed.
 
-Chinese notes:
+This chapter focuses on authorization as a data model and decision model rather than as a single `[Authorize]` attribute.
 
-- `authorization`: 授权.
-- `permission`: 权限.
-- `role`: 角色.
-- `resource-level authorization`: 资源级授权.
-- `RBAC`: Role-Based Access Control, 基于角色的访问控制.
-- `ABAC`: Attribute-Based Access Control, 基于属性的访问控制.
+## Authentication Versus Authorization
 
-## Authentication vs Authorization
+The distinction is simple but operationally essential.
 
-Authentication:
+Authentication asks:
 
 ```text
 Who are you?
 ```
 
-Authorization:
+Authorization asks:
 
 ```text
-What are you allowed to do?
+What are you allowed to do here?
 ```
 
-Example:
-
-- user is authenticated as Alice;
-- Alice can view her own orders;
-- Alice cannot approve refunds unless she has permission.
-
-## RBAC
-
-Role-Based Access Control assigns permissions through roles.
-
-Tables:
+Many insecure systems answer only the first question and accidentally assume the second.
 
-```sql
-CREATE TABLE Roles
-(
-    Id INT PRIMARY KEY,
-    Name NVARCHAR(100) NOT NULL
-);
+## Role-Based Access Control
 
-CREATE TABLE Permissions
-(
-    Id INT PRIMARY KEY,
-    Name NVARCHAR(100) NOT NULL
-);
+Role-based access control, or RBAC, groups permissions through roles. It works well when permission sets are fairly stable and the organization already thinks in role categories such as administrator, manager, support agent, or auditor.
 
-CREATE TABLE RolePermissions
-(
-    RoleId INT NOT NULL,
-    PermissionId INT NOT NULL,
-    PRIMARY KEY (RoleId, PermissionId)
-);
+RBAC is attractive because it simplifies assignment and explanation. Its weakness is that real authorization often becomes more contextual than roles alone can express.
 
-CREATE TABLE UserRoles
-(
-    UserId INT NOT NULL,
-    RoleId INT NOT NULL,
-    PRIMARY KEY (UserId, RoleId)
-);
-```
-
-Good for:
-
-- admin systems;
-- enterprise apps;
-- stable permission sets.
-
-## ABAC
-
-Attribute-Based Access Control uses attributes.
-
-Example:
-
-```text
-User.Department == Order.Department
-Order.Status == "Pending"
-User.Level >= 3
-```
-
-Good for:
-
-- complex enterprise rules;
-- resource ownership;
-- multi-tenant systems;
-- approval workflows.
-
-## Resource-level Authorization
-
-Example rule:
-
-```text
-Users can view only orders from their tenant.
-Managers can approve only orders under their department.
-```
-
-This cannot be solved safely by route-level role checks only.
-
-Bad:
-
-```csharp
-[Authorize(Roles = "Manager")]
-public async Task<IActionResult> Approve(int orderId)
-{
-    await _orderService.ApproveAsync(orderId);
-    return Ok();
-}
-```
-
-Better:
-
-```csharp
-[Authorize]
-public async Task<IActionResult> Approve(int orderId, CancellationToken ct)
-{
-    var result = await _authorizationService.AuthorizeAsync(
-        User,
-        orderId,
-        "CanApproveOrder");
-
-    if (!result.Succeeded)
-    {
-        return Forbid();
-    }
-
-    await _orderService.ApproveAsync(orderId, ct);
-    return Ok();
-}
-```
-
-## ASP.NET Core Authorization Handler
-
-Requirement:
-
-```csharp
-public sealed class CanApproveOrderRequirement : IAuthorizationRequirement
-{
-}
-```
-
-Handler:
-
-```csharp
-public sealed class CanApproveOrderHandler
-    : AuthorizationHandler<CanApproveOrderRequirement, int>
-{
-    private readonly AppDbContext _dbContext;
-
-    public CanApproveOrderHandler(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
-
-    protected override async Task HandleRequirementAsync(
-        AuthorizationHandlerContext context,
-        CanApproveOrderRequirement requirement,
-        int orderId)
-    {
-        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (userId is null)
-        {
-            return;
-        }
-
-        var canApprove = await _dbContext.Orders
-            .AnyAsync(o =>
-                o.Id == orderId &&
-                o.Status == OrderStatus.Pending &&
-                o.Department.Managers.Any(m => m.UserId == int.Parse(userId)));
-
-        if (canApprove)
-        {
-            context.Succeed(requirement);
-        }
-    }
-}
-```
-
-Registration:
-
-```csharp
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("CanApproveOrder", policy =>
-        policy.Requirements.Add(new CanApproveOrderRequirement()));
-});
-
-builder.Services.AddScoped<IAuthorizationHandler, CanApproveOrderHandler>();
-```
-
-## Frontend Permission Usage
-
-Frontend permission checks improve UX but do not secure data.
-
-```tsx
-function OrderActions({ order }: { order: Order }) {
-  const permissions = useCurrentUserPermissions();
-
-  return (
-    <>
-      {permissions.includes("orders.approve") && order.status === "Pending" && (
-        <button>Approve</button>
-      )}
-    </>
-  );
-}
-```
-
-The API must still check permission.
-
-## Permission Caching
-
-Permissions may be cached for performance.
-
-Options:
-
-- include permissions in access token;
-- query permissions from database per request;
-- cache permissions in Redis;
-- use token version to invalidate.
-
-Trade-off:
-
-- token permissions are fast but can be stale;
-- database lookup is fresh but slower;
-- Redis is balanced but adds operational dependency.
-
-## Loading Permissions From Database
-
-Permission query:
-
-```csharp
-public sealed class PermissionService
-{
-    private readonly AppDbContext _dbContext;
-
-    public PermissionService(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
-
-    public async Task<IReadOnlySet<string>> GetPermissionsAsync(
-        int userId,
-        CancellationToken ct)
-    {
-        var permissions = await _dbContext.UserRoles
-            .Where(userRole => userRole.UserId == userId)
-            .SelectMany(userRole => userRole.Role.RolePermissions)
-            .Select(rolePermission => rolePermission.Permission.Name)
-            .Distinct()
-            .ToListAsync(ct);
-
-        return permissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
-    }
-}
-```
-
-Policy requirement for a permission:
-
-```csharp
-public sealed class PermissionRequirement : IAuthorizationRequirement
-{
-    public PermissionRequirement(string permission)
-    {
-        Permission = permission;
-    }
-
-    public string Permission { get; }
-}
-```
-
-Handler:
-
-```csharp
-public sealed class PermissionHandler : AuthorizationHandler<PermissionRequirement>
-{
-    private readonly PermissionService _permissions;
-
-    public PermissionHandler(PermissionService permissions)
-    {
-        _permissions = permissions;
-    }
-
-    protected override async Task HandleRequirementAsync(
-        AuthorizationHandlerContext context,
-        PermissionRequirement requirement)
-    {
-        var userIdValue = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        if (!int.TryParse(userIdValue, out var userId))
-        {
-            return;
-        }
-
-        var permissions = await _permissions.GetPermissionsAsync(
-            userId,
-            CancellationToken.None);
-
-        if (permissions.Contains(requirement.Permission))
-        {
-            context.Succeed(requirement);
-        }
-    }
-}
-```
-
-Registration:
-
-```csharp
-builder.Services.AddScoped<PermissionService>();
-builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("orders.approve", policy =>
-        policy.Requirements.Add(new PermissionRequirement("orders.approve")));
-});
-```
-
-Usage:
-
-```csharp
-[Authorize(Policy = "orders.approve")]
-[HttpPost("{id:int}/approve")]
-public async Task<IActionResult> Approve(int id, CancellationToken ct)
-{
-    await _orders.ApproveAsync(id, ct);
-    return NoContent();
-}
-```
-
-## Permission Change Audit
-
-Permission changes are sensitive and should be auditable.
-
-```csharp
-public sealed class PermissionAuditLog
-{
-    public long Id { get; set; }
-    public int ActorUserId { get; set; }
-    public int TargetUserId { get; set; }
-    public string Action { get; set; } = "";
-    public string PermissionOrRole { get; set; } = "";
-    public DateTimeOffset CreatedAt { get; set; }
-}
-```
-
-Example:
-
-```csharp
-public async Task AssignRoleAsync(
-    int actorUserId,
-    int targetUserId,
-    int roleId,
-    CancellationToken ct)
-{
-    _dbContext.UserRoles.Add(new UserRole
-    {
-        UserId = targetUserId,
-        RoleId = roleId
-    });
-
-    _dbContext.PermissionAuditLogs.Add(new PermissionAuditLog
-    {
-        ActorUserId = actorUserId,
-        TargetUserId = targetUserId,
-        Action = "RoleAssigned",
-        PermissionOrRole = roleId.ToString(),
-        CreatedAt = DateTimeOffset.UtcNow
-    });
-
-    await _dbContext.SaveChangesAsync(ct);
-}
-```
-
-Key point:
-
-> Authorization design is not only about allowing or denying requests. It also includes permission data modeling, cache invalidation, auditability, and tenant/resource boundaries.
-
-## Review Questions
-
-### RBAC vs ABAC?
-
-> RBAC grants permissions through roles. ABAC evaluates attributes of user, resource, action, and context. RBAC is simpler; ABAC is more flexible for complex rules.
-
-### Why is frontend permission check not enough?
-
-> Frontend code can be modified or bypassed. Authorization must be enforced on the backend where protected resources are accessed.
-
-### How do you handle permission changes if permissions are inside JWT?
-
-> Use short-lived access tokens, refresh token flow, token version, permission version, or server-side permission checks for sensitive operations.
-
-## Common Mistakes
-
-- Only hiding buttons in frontend.
-- Only checking user role, not resource ownership.
-- Putting too many dynamic permissions in long-lived JWTs.
-- No audit log for sensitive actions.
-- No tenant isolation in permission queries.
-- Using `404` and `403` inconsistently without a security strategy.
-
-## Practice Task
-
-Design:
-
-1. roles table;
-2. permissions table;
-3. user-role mapping;
-4. role-permission mapping;
-5. resource-level approval policy;
-6. frontend permission-based action rendering;
-7. audit log for permission changes.
+## Attribute- And Resource-Based Authorization
+
+Attribute-based approaches use properties of:
+
+- the user;
+- the resource;
+- the action;
+- the surrounding context.
+
+This becomes necessary when authorization depends on tenant ownership, department alignment, workflow state, approval stage, or other conditions beyond coarse role membership.
+
+Resource-based authorization is especially important because many real decisions are not about whether someone is an admin in the abstract. They are about whether this user may perform this action on this exact object.
+
+## Coarse Access Versus Resource Ownership
+
+A route-level role check can be necessary, but it is rarely sufficient for sensitive operations.
+
+Allowing "Managers" to approve orders may still be too broad if approvals should be limited by:
+
+- tenant;
+- department;
+- order status;
+- ownership or escalation rules.
+
+This is why resource-level handlers or domain-aware authorization services are often necessary. The decision surface lives where business facts live, not only where HTTP routes live.
+
+## Permissions As Stable Capability Names
+
+Fine-grained permission strings such as `orders.approve` or `payments.refund` can provide a stable capability vocabulary across backend policies, audit logs, and frontend UX hints.
+
+This is useful because it gives the system a more explicit authorization language than role names alone. Roles can then become one way of assigning permissions rather than the only abstraction the system understands.
+
+## Frontend Checks And Their Limits
+
+Frontend permission checks are useful for user experience. They can hide buttons, simplify flows, and reduce failed requests. They are not security boundaries.
+
+This is one of the most important practical lessons in web security. Any authorization decision that matters must be enforceable on the backend where the protected resource or state transition actually exists.
+
+## Permission Freshness And Caching
+
+Authorization data is often cached because looking up full permission state on every request may be expensive. That introduces freshness trade-offs.
+
+Permissions may be:
+
+- embedded in short-lived tokens;
+- loaded from a database;
+- cached in a distributed store;
+- combined with token or permission-version invalidation.
+
+The right choice depends on how frequently permissions change, how sensitive the action is, and how much latency budget the system has. Highly sensitive actions often justify fresher server-side checks even when ordinary reads use cached claim data.
+
+## Auditing Authorization Changes
+
+Permission and role changes are themselves security-relevant events. A mature authorization system therefore treats assignment and revocation as auditable state changes, not just as configuration toggles.
+
+This matters because incident investigation often depends not only on knowing who performed an action, but also on knowing when a user gained the permission that made the action possible.
+
+## Design Consequences
+
+Strong authorization design usually layers several ideas together:
+
+- coarse authentication and entry control;
+- stable permission vocabulary;
+- role or policy grouping where useful;
+- resource-level checks where business context matters;
+- audit trails for sensitive permission changes;
+- freshness strategy for claims and permissions.
+
+Authorization becomes brittle when treated as a single framework attribute. It becomes reliable when treated as a decision system whose data model, cache model, and resource model all align.

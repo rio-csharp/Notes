@@ -4,13 +4,6 @@
 
 Domain-Driven Design (DDD) is an approach to building software around the business domain.
 
-Chinese notes:
-
-- `domain`: 业务领域.
-- `bounded context`: 限界上下文.
-- `aggregate`: 聚合.
-- `ubiquitous language`: 统一语言.
-
 DDD is most useful when business rules are complex.
 
 It is not mainly about folder structure. It is about modeling the business accurately.
@@ -397,33 +390,6 @@ public sealed class BillingCustomerTranslator
 ```
 
 The Billing context does not blindly reuse the Sales customer model.
-
-## Knowledge Checks
-
-### What is DDD?
-
-DDD is an approach to software design that focuses on modeling complex business domains using shared language, bounded contexts, entities, value objects, aggregates, repositories, and domain events.
-
-### What is an aggregate?
-
-An aggregate is a consistency boundary. It groups related entities and value objects, and the aggregate root controls changes to protect business invariants.
-
-### Entity vs Value Object?
-
-Entity has identity and lifecycle. Value object is defined by its values and is usually immutable.
-
-### When should you not use DDD?
-
-If the application is mostly simple CRUD with little business complexity, full DDD may add unnecessary ceremony.
-
-## Common Mistakes
-
-- Treating DDD as folder naming only.
-- Anemic domain model with all rules in services.
-- Huge aggregates that load too much data.
-- Ignoring bounded contexts.
-- Using generic repository everywhere.
-- Over-engineering simple CRUD.
 
 ## Practice Task
 

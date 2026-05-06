@@ -1,23 +1,14 @@
-# EF Core Value Converters And Owned Entities
+# Value Converters, Owned Types, And Value Objects
 
 ## Core Idea
 
-Value converters and owned entities help map rich domain models to relational tables.
+One of EF Core's most useful strengths is that it can map richer domain models than plain primitive property bags. Value converters and owned types are two of the main tools for doing that. They allow the application to preserve domain concepts such as email addresses, money, strongly typed identifiers, and addresses without flattening everything into loosely meaningful strings and numbers.
 
-Chinese notes:
+The goal is not richness for its own sake. The goal is to keep domain invariants and relational persistence aligned without making either side opaque.
 
-- `value converter`: 值转换器.
-- `owned entity`: 拥有实体.
-- `value object`: 值对象.
-- `primitive obsession`: 基本类型偏执, overusing raw strings/ints instead of meaningful types.
+## Primitive Obsession And Persistence Pressure
 
-Key takeaway:
-
-> Value converters map a single property to a database value. Owned entities map value objects with multiple properties and no independent identity.
-
-## Why This Matters
-
-Without value objects, domain code often becomes primitive-heavy:
+Without value objects, domain models often collapse into primitive-heavy classes:
 
 ```csharp
 public sealed class User
@@ -26,14 +17,9 @@ public sealed class User
 }
 ```
 
-The problem:
+This shape is easy to persist but weak in domain meaning. Any string can be assigned, validation tends to scatter, and APIs become more error-prone because conceptually different values all look the same to the compiler.
 
-- any string can be assigned;
-- validation is scattered;
-- method signatures are less meaningful;
-- invalid state is easier to represent.
-
-Better domain model:
+A richer model might introduce:
 
 ```csharp
 public sealed record Email
@@ -54,25 +40,13 @@ public sealed record Email
 }
 ```
 
-Now EF needs to know how to persist `Email`.
+Once the model becomes richer, EF Core needs explicit mapping guidance.
 
-## Value Converter
+## Value Converters
 
-Value converters convert between CLR types and database types.
+A value converter maps one CLR property type to one persisted database representation.
 
-Example enum:
-
-```csharp
-public enum OrderStatus
-{
-    Draft,
-    Submitted,
-    Approved,
-    Cancelled
-}
-```
-
-Store enum as string:
+One common example is storing an enum as a string:
 
 ```csharp
 modelBuilder.Entity<Order>()
@@ -81,27 +55,13 @@ modelBuilder.Entity<Order>()
     .HasMaxLength(30);
 ```
 
-Pros:
+This often improves readability in the database and reduces coupling to enum numeric ordering. The trade-off is larger storage, potentially larger indexes, and the operational risk that renaming enum members requires a corresponding data migration.
 
-- database value is readable;
-- easier debugging;
-- safer than relying on enum numeric order.
+Value converters are therefore not just mapping helpers. They are persistence design decisions.
 
-Cons:
+## Single-Value Domain Types
 
-- strings use more storage;
-- renaming enum values can break existing data;
-- indexes can be larger than int indexes.
-
-## Custom Value Converter
-
-Value object:
-
-```csharp
-public sealed record Email(string Value);
-```
-
-Configuration:
+Converters are a natural fit for single-value domain types:
 
 ```csharp
 modelBuilder.Entity<User>()
@@ -112,39 +72,13 @@ modelBuilder.Entity<User>()
     .HasMaxLength(320);
 ```
 
-Entity:
+This works well because the domain type is richer than a string, but the persisted shape is still one column.
 
-```csharp
-public sealed class User
-{
-    public int Id { get; set; }
-    public Email Email { get; set; } = new("unknown@example.com");
-}
-```
-
-Database column:
-
-```text
-Users.Email nvarchar(320)
-```
-
-## Strongly Typed ID Example
+The same pattern is useful for strongly typed identifiers:
 
 ```csharp
 public readonly record struct OrderId(int Value);
 ```
-
-Entity:
-
-```csharp
-public sealed class Order
-{
-    public OrderId Id { get; set; }
-    public decimal Total { get; set; }
-}
-```
-
-Converter:
 
 ```csharp
 modelBuilder.Entity<Order>()
@@ -154,37 +88,25 @@ modelBuilder.Entity<Order>()
         value => new OrderId(value));
 ```
 
-Why use strongly typed IDs:
+Strongly typed IDs can prevent accidental cross-assignment between `OrderId`, `CustomerId`, and `ProductId` while still mapping cleanly to relational key columns.
 
-- prevents mixing `OrderId`, `CustomerId`, and `ProductId`;
-- makes APIs more expressive;
-- reduces accidental assignment bugs.
+## `ValueComparer` And Change Tracking Semantics
 
-## ValueComparer
+Some converted types need a custom `ValueComparer` so EF Core can compare, hash, and snapshot values correctly.
 
-For some converted types, EF Core may need a `ValueComparer` to compare values correctly, especially for mutable or collection-like types.
+This is especially relevant for:
 
-Example concept:
+- mutable value objects;
+- collection-like converted values;
+- serialized representations that do not compare correctly by reference.
 
-```csharp
-var converter = new ValueConverter<IReadOnlyList<string>, string>(
-    values => JsonSerializer.Serialize(values, (JsonSerializerOptions?)null),
-    json => JsonSerializer.Deserialize<IReadOnlyList<string>>(json, (JsonSerializerOptions?)null)
-        ?? Array.Empty<string>());
+If EF Core cannot compare the value accurately, change tracking may miss real changes or report changes where none semantically occurred. That is not only a persistence problem. It can also distort concurrency behavior and update generation.
 
-var comparer = new ValueComparer<IReadOnlyList<string>>(
-    (a, b) => a!.SequenceEqual(b!),
-    values => values.Aggregate(0, (hash, value) => HashCode.Combine(hash, value.GetHashCode())),
-    values => values.ToArray());
-```
+The broader lesson is that conversion and change tracking are linked. A converter answers how to persist the value. A comparer answers how to reason about sameness.
 
-Note:
+## Owned Types
 
-> If EF cannot compare converted values correctly, change tracking may miss changes or detect too many changes.
-
-## Owned Entity
-
-Owned entity is used when a value object has multiple fields.
+When a value object spans multiple columns, an owned type is often the better fit.
 
 ```csharp
 public sealed class Order
@@ -200,8 +122,6 @@ public sealed record Address(
     string Country);
 ```
 
-Mapping:
-
 ```csharp
 modelBuilder.Entity<Order>()
     .OwnsOne(o => o.ShippingAddress, address =>
@@ -213,18 +133,11 @@ modelBuilder.Entity<Order>()
     });
 ```
 
-By default, owned fields may be stored in the same table:
+Owned types are useful when the conceptual object has multiple fields but no independent identity outside the owner.
 
-```text
-Orders
-  Id
-  ShippingAddress_Line1
-  ShippingAddress_City
-  ShippingAddress_PostalCode
-  ShippingAddress_Country
-```
+## Owned Types And Domain Meaning
 
-## Money Example
+Money is a good example:
 
 ```csharp
 public sealed record Money(decimal Amount, string Currency);
@@ -244,13 +157,11 @@ modelBuilder.Entity<Order>()
     });
 ```
 
-Why owned entity:
-
-> `Money` has two values that belong together. It has no independent identity outside the owning `Order`.
+Treating `Amount` and `Currency` as one concept often produces a better domain model than scattering them as unrelated columns in business code. The database still stores primitive values, but the application works with a value that preserves semantic coupling.
 
 ## Owned Collections
 
-Owned collections are possible:
+EF Core also supports owned collections:
 
 ```csharp
 public sealed class Order
@@ -262,161 +173,45 @@ public sealed class Order
 public sealed record OrderNote(string Text, DateTimeOffset CreatedAt);
 ```
 
-Mapping:
+These can be useful, but they should not be treated as a free extension of object modeling. Owned collections often introduce separate tables, more complex update behavior, and migration consequences that are easy to underestimate from the CLR model alone.
 
-```csharp
-modelBuilder.Entity<Order>()
-    .OwnsMany(o => o.Notes, notes =>
-    {
-        notes.WithOwner().HasForeignKey("OrderId");
-        notes.Property<int>("Id");
-        notes.HasKey("Id");
-        notes.Property(n => n.Text).HasMaxLength(500);
-    });
-```
+They are best used when the conceptual ownership is strong and the relational cost is justified.
 
-Be careful:
+## Choosing Between Converter And Owned Type
 
-> Owned collections can create additional tables and update behavior that is more complex than simple owned single objects. Review generated migrations.
+The choice usually follows data shape.
 
-## When To Use
+A value converter is a strong fit when:
 
-Use value converter for:
+- one conceptual value maps to one column;
+- the type is a single-field value object;
+- querying inside the representation is not a major need.
 
-- enum as string;
-- strongly typed IDs;
-- single-field value objects;
-- simple encrypted/serialized values when query needs are limited.
+An owned type is a stronger fit when:
 
-Use owned entity for:
+- the value spans multiple columns;
+- the fields belong together conceptually;
+- the type has no separate identity but should remain structurally visible.
 
-- address;
-- money;
-- date range;
-- multi-field value objects.
+That distinction keeps the model honest. A converter should not be used to hide structured data that the application needs to query relationally in rich ways. In those cases, flattening everything into one serialized column may simplify mapping but weaken queryability and indexing.
 
-Avoid value converter when:
+## Queryability And Operational Trade-Offs
 
-- you need to query inside the converted value frequently;
-- the converted value is large JSON but needs relational querying;
-- the type needs independent identity;
-- database indexing/querying becomes awkward.
+Rich domain modeling does not remove the need to think about database behavior.
 
-## Querying Converted Columns
+For converted columns, translation depends on the converter and the provider. For owned types, indexing and query shape still have to match real access patterns. This means a model can be conceptually elegant and still operationally awkward if the persistence design ignores how the data is actually queried.
 
-Converted columns are still database columns, but translation depends on the converter and provider.
+That trade-off is especially visible with:
 
-Good:
+- enums stored as strings;
+- serialized JSON-like conversions;
+- custom value objects that appear inside filters and order clauses;
+- owned types that are heavily used in search predicates.
 
-```csharp
-var users = await _dbContext.Users
-    .Where(u => u.Email == new Email("alice@example.com"))
-    .ToListAsync(ct);
-```
+The right question is therefore not only "can EF Core map this?" but also "will the resulting schema and queries behave well in production?"
 
-If mapped correctly, EF can compare the converted database value.
+## Design Consequences
 
-Potential problem:
+Value converters and owned types are most useful when they protect meaningful domain concepts without obscuring persistence behavior. They should strengthen the model, not romanticize it. If a richer type preserves invariants and still maps cleanly to the actual relational access pattern, it is often worth the extra configuration. If it makes querying, indexing, or migration behavior opaque, the design should be reconsidered.
 
-```csharp
-var users = await _dbContext.Users
-    .Where(u => u.Email.Value.EndsWith("@example.com"))
-    .ToListAsync(ct);
-```
-
-Depending on mapping and provider, this may not translate as expected.
-
-Engineering perspective:
-
-> Rich value objects are good for domain correctness, but I still review query translation and indexing needs.
-
-## Review Questions
-
-### What is a value converter?
-
-A value converter maps between a CLR property type and a database column type, such as converting an enum to string or a value object to its primitive value.
-
-### What is an owned entity?
-
-An owned entity is an EF Core type that belongs to another entity and does not have independent identity. It is useful for value objects with multiple fields.
-
-### Why use value objects with EF Core?
-
-Value objects can protect domain invariants and make invalid states harder to represent. EF Core mapping allows them to be persisted without exposing primitive obsession everywhere.
-
-### Value converter vs owned entity?
-
-Use a value converter for a single-value mapping. Use an owned entity when the value object has multiple columns or structure.
-
-### What risk exists when storing enum as string?
-
-Renaming enum members can break existing data unless you migrate the stored values.
-
-### What is `ValueComparer` used for?
-
-It tells EF Core how to compare, hash, and snapshot custom converted values for change tracking.
-
-## Common Mistakes
-
-### Mistake: Making every small type an owned entity unnecessarily
-
-Why it is wrong:
-
-> It can make mapping and migrations more complex without adding meaningful domain value.
-
-Better answer:
-
-> Use value objects where they protect invariants or clarify the model.
-
-### Mistake: Renaming enum strings without data migration
-
-Why it is wrong:
-
-> Existing database rows still contain the old string value.
-
-Better answer:
-
-> Add a data migration or keep stable stored values.
-
-### Mistake: Complex owned collections without understanding generated schema
-
-Why it is wrong:
-
-> Owned collections can generate extra tables, shadow keys, and update behavior that may surprise you.
-
-Better answer:
-
-> Review migrations and test update/delete behavior.
-
-### Mistake: Ignoring indexing needs for converted columns
-
-Why it is wrong:
-
-> Converted values still need appropriate column type, length, and indexes for query performance.
-
-Better answer:
-
-> Configure column length/type/indexes explicitly and inspect generated SQL.
-
-### Mistake: Putting query-heavy JSON into a converter
-
-Why it is wrong:
-
-> Relational databases cannot efficiently query arbitrary serialized data without provider-specific JSON support and indexes.
-
-Better answer:
-
-> Use normal relational columns for frequently queried fields, or use provider-specific JSON features deliberately.
-
-## Practice Task
-
-Model:
-
-1. `Email` value object with converter;
-2. `OrderId` strongly typed ID with converter;
-3. `Money` owned entity;
-4. `Address` owned entity;
-5. enum stored as string;
-6. migration output review;
-7. one query against a converted column and inspect generated SQL.
-
+The best EF Core models are the ones where domain clarity and persistence clarity reinforce each other rather than compete.

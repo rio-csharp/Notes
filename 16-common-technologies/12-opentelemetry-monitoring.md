@@ -4,15 +4,6 @@
 
 OpenTelemetry is an observability standard for collecting traces, metrics, and logs.
 
-Chinese notes:
-
-- `observability`: 可观测性.
-- `trace`: 链路追踪.
-- `metric`: 指标.
-- `span`: 跨度.
-- `cardinality`: 基数.
-- `tail latency`: 尾延迟.
-
 ## Observability vs Monitoring
 
 Monitoring tells you whether the system is healthy.
@@ -323,31 +314,6 @@ For business workflows, include business metrics:
 - payment success rate;
 - failed checkout count;
 - email delivery failures.
-
-## Common Mistakes
-
-- No correlation ID or trace propagation.
-- Only average latency.
-- Too many high-cardinality metrics.
-- Logging sensitive data.
-- No alerts on business-critical failures.
-- Tracing not propagated across services.
-- Dashboards with no owner.
-- Metrics that cannot be acted on.
-
-## Knowledge Checks
-
-### Logs vs metrics vs traces?
-
-Logs tell what happened, metrics show trends and health, and traces show where time is spent across components.
-
-### Why use distributed tracing?
-
-In distributed systems, one request may touch multiple services and dependencies. Tracing shows the full path and helps identify bottlenecks and failures.
-
-### What is p95 latency?
-
-95% of requests are faster than this value. It shows tail latency better than average.
 
 ## Practice Task
 

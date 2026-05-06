@@ -14,13 +14,6 @@ It is not only about naming technologies. A good design explains:
 - security;
 - operational awareness.
 
-Chinese notes:
-
-- `functional requirements`: 功能性需求.
-- `non-functional requirements`: 非功能性需求.
-- `trade-off`: 权衡.
-- `bottleneck`: 瓶颈.
-
 ## System Design Framework
 
 Use this structure:
@@ -41,9 +34,7 @@ Ask questions before designing.
 
 Example for notification system:
 
-- What types of notifications: email, SMS, push, in-app?
 - Real-time or delayed?
-- How many users?
 - Delivery guarantee?
 - User preferences?
 - Retry requirement?
@@ -233,8 +224,6 @@ Sequence flows are useful because they reveal transaction boundaries and failure
 
 ## Step 8: Deep Dive Topics
 
-### Idempotency（幂等性）
-
 If client retries the same request, system should not create duplicate notifications.
 
 Use:
@@ -326,14 +315,7 @@ Logs should include:
 
 Ask:
 
-- What data is sensitive?
 - Who can access it?
-- How is it encrypted?
-- What should not be logged?
-- What retention policy applies?
-- How are admin actions audited?
-
-For notifications, message content may contain PII（个人敏感信息）. Avoid logging full message bodies.
 
 ## ADR Example
 

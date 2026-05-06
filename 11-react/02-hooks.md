@@ -4,12 +4,6 @@
 
 Hooks let function components use state, effects, refs, context, reducers, and reusable behavior.
 
-Chinese notes:
-
-- `hook`: 钩子.
-- `dependency array`: 依赖数组.
-- `custom hook`: 自定义 Hook.
-
 ## Rules Of Hooks
 
 1. Call hooks only at the top level.
@@ -343,8 +337,6 @@ Usage:
 const debouncedSearch = useDebouncedValue(search, 300);
 ```
 
-## Review Questions
-
 ### Why do hooks have rules?
 
 > React tracks hook state by call order. Conditional or nested hook calls can change the order between renders and break state association.
@@ -356,15 +348,6 @@ const debouncedSearch = useDebouncedValue(search, 300);
 ### useEffect vs useLayoutEffect?
 
 > `useEffect` runs after paint. `useLayoutEffect` runs synchronously after DOM mutations but before paint, useful for layout measurement. Overusing `useLayoutEffect` can hurt performance.
-
-## Common Mistakes
-
-- Missing dependencies.
-- Using effects for simple derived values.
-- Infinite effect loops.
-- Stale closures in intervals.
-- Overusing `useMemo` and `useCallback`.
-- Mutating state directly.
 
 ## Practice Task
 

@@ -4,13 +4,6 @@
 
 TypeScript adds static types to JavaScript.
 
-Chinese notes:
-
-- `type inference`: 类型推断.
-- `interface`: 接口.
-- `union type`: 联合类型.
-- `generic`: 泛型.
-
 TypeScript helps catch errors before runtime and improves editor support.
 
 ## Type Annotation
@@ -221,8 +214,6 @@ async function createOrder(request: CreateOrderRequest): Promise<CreateOrderResp
 
 The type describes what the code expects. Runtime validation is still needed when the data is untrusted or critical.
 
-## Review Questions
-
 ### Why use TypeScript?
 
 > TypeScript catches many errors at compile time, improves refactoring, documents API shapes, and gives better editor support for large JavaScript applications.
@@ -234,14 +225,6 @@ The type describes what the code expects. Runtime validation is still needed whe
 ### What is type narrowing?
 
 > Type narrowing is when TypeScript reduces a broad type to a more specific type based on runtime checks.
-
-## Common Mistakes
-
-- Using `any` everywhere.
-- Type assertions instead of proper validation.
-- Not enabling strict mode.
-- Duplicating backend contracts manually without discipline.
-- Confusing compile-time types with runtime validation.
 
 ## Practice Task
 

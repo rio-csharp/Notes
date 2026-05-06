@@ -2,52 +2,21 @@
 
 ## Core Idea
 
-Observability helps you understand what a system is doing in production by looking at its external signals.
+Observability is the ability to understand a running system from its outward signals. In ASP.NET Core applications, that usually means logs, metrics, and traces working together rather than as isolated tools.
 
-Chinese notes:
+This chapter treats observability as part of system design, not as an optional operational accessory. Production debugging, capacity planning, incident response, and reliability improvement all depend on whether the application emits useful signals and whether those signals preserve enough context to explain what the system was doing.
 
-- `logging`: 日志.
-- `metrics`: 指标.
-- `tracing`: 链路追踪.
-- `correlation ID`: 关联 ID.
-- `observability`: 可观测性.
-- `cardinality`: 基数, meaning how many distinct values a metric label can have.
+## Logs, Metrics, And Traces As Different Kinds Of Evidence
 
-The three pillars:
+Logs, metrics, and traces answer different questions.
 
-- logs;
-- metrics;
-- traces.
-
-Key takeaway:
-
-> Logs explain what happened, metrics show whether the system is healthy, and traces show where time is spent across services.
-
-## Logs, Metrics, Traces
-
-### Logs
-
-Logs are event records.
-
-Example:
+Logs describe discrete events and their context.
 
 ```text
 OrderCreated OrderId=1001 CustomerId=42 Amount=128.50
 ```
 
-Use logs for:
-
-- errors;
-- business events;
-- diagnostic details;
-- security-relevant events;
-- one-off investigation.
-
-### Metrics
-
-Metrics are numeric time-series data.
-
-Examples:
+Metrics describe numeric behavior over time.
 
 ```text
 http.server.request.duration
@@ -56,18 +25,7 @@ payment.failure.count
 database.query.duration
 ```
 
-Use metrics for:
-
-- dashboards;
-- alerting;
-- trend analysis;
-- SLO/SLA monitoring.
-
-### Traces
-
-Traces show a request or workflow across components.
-
-Example:
+Traces describe the path of a request or workflow through multiple components.
 
 ```text
 HTTP POST /orders
@@ -77,22 +35,15 @@ HTTP POST /orders
   -> Kafka publish OrderCreated
 ```
 
-Use traces for:
-
-- distributed systems;
-- latency breakdown;
-- dependency investigation;
-- finding bottlenecks.
+These signals complement one another. Metrics help detect that something is wrong, traces help locate where time or failure is concentrated, and logs help explain exactly what happened.
 
 ## Structured Logging
 
-Bad:
+One of the most important practical disciplines in .NET logging is to log structured data rather than concatenated prose.
 
 ```csharp
 _logger.LogInformation("Created order " + order.Id);
 ```
-
-Good:
 
 ```csharp
 _logger.LogInformation(
@@ -101,15 +52,7 @@ _logger.LogInformation(
     order.CustomerId);
 ```
 
-Why structured logging matters:
-
-- log fields are searchable;
-- dashboards can group by field;
-- support can find all logs for one order or tenant;
-- logs are safer than string concatenation;
-- log templates stay consistent.
-
-Example service:
+Structured logging matters because fields such as `OrderId`, `CustomerId`, or `TenantId` can then be indexed, queried, grouped, and correlated in operational tooling. The application is no longer emitting text only for human reading. It is emitting event data that machines can search and aggregate meaningfully.
 
 ```csharp
 public sealed class OrderService
@@ -144,28 +87,26 @@ public sealed class OrderService
 }
 ```
 
-## Log Levels
+## Log Levels And Signal Discipline
 
-Common levels:
+Log levels are meaningful only if they are used consistently.
 
-| Level | Meaning | Example |
-| --- | --- | --- |
-| Trace | Very detailed diagnostic information | SQL parameter detail in local debugging |
-| Debug | Developer diagnostic information | Branch decisions during development |
-| Information | Normal meaningful events | Order created |
-| Warning | Unexpected but recoverable | Payment provider timeout, retrying |
-| Error | Operation failed | Order creation failed |
-| Critical | System-level failure | App cannot connect to required database |
+| Level | Typical meaning |
+| --- | --- |
+| `Trace` | highly detailed diagnostic information |
+| `Debug` | development-oriented investigation detail |
+| `Information` | normal meaningful application events |
+| `Warning` | unexpected but recoverable conditions |
+| `Error` | failed operations |
+| `Critical` | system-level failure that threatens application availability |
 
-Guideline:
+Applications become harder to operate when every event is logged at the same severity or when highly repetitive normal behavior floods the logs with low-value entries. Good observability is selective. It records enough to reconstruct important events without turning the log stream into noise.
 
-> Do not log every line of execution. Log meaningful events with enough context to investigate.
+## Correlation And Request Context
 
-## Correlation ID
+Operational value increases sharply when the application can connect related events together.
 
-A correlation ID links logs from the same request or workflow.
-
-Middleware:
+A correlation identifier is one common mechanism:
 
 ```csharp
 public sealed class CorrelationIdMiddleware
@@ -197,21 +138,11 @@ public sealed class CorrelationIdMiddleware
 }
 ```
 
-Registration:
-
-```csharp
-app.UseMiddleware<CorrelationIdMiddleware>();
-```
-
-Then logs inside the request can include `CorrelationId`.
-
-Practical explanation:
-
-> When a user reports a failed request, I use the correlation ID to find all logs, traces, and dependency calls related to that request.
+Correlation becomes especially useful when a failed request must be reconstructed across logs, traces, and dependency calls. Without that shared context, the system may still emit data, but the operator is forced to guess which entries belong together.
 
 ## Logging Scopes
 
-A logging scope adds fields to all logs inside a block.
+Scopes provide a convenient way to attach repeated context to a sequence of log entries.
 
 ```csharp
 using (_logger.BeginScope(new Dictionary<string, object>
@@ -226,44 +157,32 @@ using (_logger.BeginScope(new Dictionary<string, object>
 }
 ```
 
-Why it helps:
+This is useful because context often belongs to a unit of work rather than to a single line. Scopes preserve that relationship without requiring every log call to repeat the same fields manually.
 
-> You avoid passing the same fields into every log call manually.
+## Sensitive Data And Logging Boundaries
 
-## Do Not Log Sensitive Data
+Observability has to be balanced against confidentiality.
 
-Do not log:
+The following should generally not appear in logs:
 
 - passwords;
-- access tokens;
+- bearer tokens;
 - refresh tokens;
 - API keys;
-- credit card numbers;
-- full personal identity numbers;
-- full request bodies that may contain sensitive data;
-- secrets or connection strings.
-
-Bad:
+- full payment card data;
+- full personal identifiers;
+- raw request bodies that may contain secrets or personal data;
+- connection strings with embedded credentials.
 
 ```csharp
 _logger.LogInformation("Login request {@Request}", request);
 ```
 
-Better:
+That kind of logging is often overly broad and difficult to control once data begins to flow into shared observability systems. Logs should contain enough diagnostic value to explain behavior, but they should not become a secondary ungoverned datastore for sensitive information.
 
-```csharp
-_logger.LogInformation("Login attempt for email domain {EmailDomain}", emailDomain);
-```
+## OpenTelemetry And Unified Telemetry
 
-Detailed explanation:
-
-> Logs are often copied into many tools. I treat logs as less protected than the database and avoid writing secrets or sensitive personal data.
-
-## OpenTelemetry
-
-OpenTelemetry is a vendor-neutral standard for traces, metrics, and logs.
-
-Example setup:
+Modern .NET applications increasingly use OpenTelemetry to standardize traces, metrics, and related telemetry emission.
 
 ```csharp
 builder.Services.AddOpenTelemetry()
@@ -285,7 +204,7 @@ builder.Services.AddOpenTelemetry()
     });
 ```
 
-Custom activity:
+Application code can also emit custom spans and metrics explicitly:
 
 ```csharp
 public static class Telemetry
@@ -300,8 +219,6 @@ activity?.SetTag("customer.id", command.CustomerId);
 activity?.SetTag("order.item_count", command.Items.Count);
 ```
 
-Custom metric:
-
 ```csharp
 public sealed class OrderMetrics
 {
@@ -313,75 +230,58 @@ public sealed class OrderMetrics
         _ordersCreated = meter.CreateCounter<long>("orders.created");
     }
 
-    public void OrderCreated(string tenantId)
+    public void OrderCreated(string tenantTier)
     {
-        _ordersCreated.Add(1, new KeyValuePair<string, object?>("tenant.id", tenantId));
+        _ordersCreated.Add(1, new KeyValuePair<string, object?>("tenant.tier", tenantTier));
     }
 }
 ```
 
-Cardinality warning:
+This is where observability stops being "logging plus extras" and becomes a more coherent instrumentation model.
 
-> Do not use high-cardinality values like `user.id`, `order.id`, or raw URL as metric labels. They can explode the number of time series and make the monitoring system expensive or unstable.
+## Cardinality And Cost
 
-Better:
+Not every useful-looking telemetry dimension is a good production dimension.
 
-- use `endpoint`, not full URL with IDs;
-- use `status_code`, not error message;
-- use `tenant_tier`, not every tenant ID when there are many tenants.
+Metrics systems are especially sensitive to high cardinality. Labels such as raw `user.id`, `order.id`, or full URLs can explode the number of time series and make the monitoring system itself expensive or unstable.
 
-## Metrics To Track
+Low-cardinality dimensions are often better:
 
-API metrics:
+- endpoint template instead of full URL;
+- status code instead of full error text;
+- tenant tier instead of individual tenant ID when many tenants exist.
+
+This is an important design constraint because observability is not only about emitting more data. It is about emitting data that remains queryable, affordable, and actionable at scale.
+
+## What To Measure
+
+Good observability includes both technical and business signals.
+
+Technical signals often include:
 
 - request count;
-- latency p50/p95/p99;
+- request latency percentiles;
 - error rate;
-- status code count;
-- request body size;
-- response body size.
+- dependency latency;
+- database query duration;
+- thread-pool pressure;
+- memory and GC behavior;
+- queue backlog;
+- retry and timeout counts.
 
-Database metrics:
-
-- query duration;
-- connection pool usage;
-- command timeout count;
-- deadlock count;
-- slow query count.
-
-External dependency metrics:
-
-- HTTP call duration;
-- retry count;
-- timeout count;
-- circuit breaker open count;
-- failure rate by dependency.
-
-Runtime metrics:
-
-- CPU usage;
-- memory usage;
-- GC pause time;
-- thread pool queue length;
-- exception count.
-
-Business metrics:
+Business signals often include:
 
 - orders created;
 - payment failures;
 - login failures;
 - notification delivery failures;
-- checkout conversion rate.
+- checkout completion rate.
 
-Engineering perspective:
+This distinction matters because a technically healthy system can still be operationally unhealthy for the business, and vice versa. Strong observability does not stop at infrastructure metrics alone.
 
-> Technical metrics tell whether the system is healthy. Business metrics tell whether the product workflow is healthy.
+## Error Handling And Client-Facing Diagnostics
 
-## Error Handling And ProblemDetails
-
-Good error handling connects API responses with logs.
-
-Example:
+One useful connection between observability and API design is the use of trace or correlation identifiers in error responses.
 
 ```csharp
 app.UseExceptionHandler(errorApp =>
@@ -417,125 +317,18 @@ app.UseExceptionHandler(errorApp =>
 });
 ```
 
-Why include `traceId`?
+This design gives clients a safe diagnostic handle that operators can use to find the corresponding server-side evidence without exposing internal exception detail directly.
 
-> The client can report the trace ID, and support can find the exact server-side logs.
+## Investigation As A Workflow
 
-## Production Investigation Example
+Observability is most valuable when it supports an actual investigation process.
 
-Problem:
+Suppose users report that checkout is slow. A disciplined workflow might be:
 
-```text
-Users report checkout is slow.
-```
+1. inspect metrics to confirm elevated latency and identify affected endpoints;
+2. inspect traces to see where time is being spent across dependencies;
+3. inspect logs for the relevant correlation or trace identifiers;
+4. verify whether the bottleneck is internal work, a database dependency, or an external service;
+5. choose mitigation based on evidence rather than intuition.
 
-Good investigation flow:
-
-1. Check metrics: p95 latency increased for `POST /checkout`.
-2. Check traces: most time is in payment provider HTTP calls.
-3. Check logs: many payment timeouts and retries.
-4. Check dependency dashboard: payment provider has elevated latency.
-5. Mitigation: tune timeout, add backoff, show retry-safe client response, contact provider.
-
-Practical investigation habit:
-
-> I do not guess first. I use metrics to find the symptom, traces to locate the slow dependency, and logs to understand the detailed failure.
-
-## Review Questions
-
-### Logs vs metrics vs traces?
-
-Logs describe events, metrics show numeric trends, and traces show request flow across components and dependencies.
-
-### Why structured logging?
-
-It makes logs queryable by fields such as `OrderId`, `UserId`, `TenantId`, and `CorrelationId`, which is essential for production troubleshooting.
-
-### What is a correlation ID?
-
-A correlation ID links logs and operations belonging to the same request or workflow across services.
-
-### What is distributed tracing?
-
-Distributed tracing records a workflow across multiple services and dependencies. It helps identify where time was spent and where failures occurred.
-
-### What should you alert on?
-
-Alert on user-impacting symptoms, such as high error rate, high latency, job failures, payment failures, or queue backlog. Avoid alerting only on noisy internal details unless they predict user impact.
-
-### What is high-cardinality metric data?
-
-High-cardinality data has many distinct label values, such as user IDs or order IDs. It can create too many time series and overload metrics storage.
-
-## Common Mistakes
-
-### Mistake: Logging only strings, not structured fields
-
-Why it is wrong:
-
-> Plain strings are hard to search, group, and aggregate.
-
-Better answer:
-
-> Use structured logging templates with named fields.
-
-### Mistake: Logging sensitive data
-
-Why it is wrong:
-
-> Logs are often widely accessible and retained for a long time.
-
-Better answer:
-
-> Redact secrets and avoid logging full sensitive request bodies.
-
-### Mistake: No correlation ID
-
-Why it is wrong:
-
-> Troubleshooting distributed workflows becomes slow because logs cannot be connected reliably.
-
-Better answer:
-
-> Use correlation IDs, trace IDs, and logging scopes.
-
-### Mistake: Too many noisy logs
-
-Why it is wrong:
-
-> Noise hides real problems and increases storage cost.
-
-Better answer:
-
-> Log meaningful events at appropriate levels and rely on metrics for high-volume trends.
-
-### Mistake: No metrics for business-critical flows
-
-Why it is wrong:
-
-> The system may look technically healthy while checkout, payment, login, or notifications are failing.
-
-Better answer:
-
-> Track both technical and business metrics.
-
-### Mistake: No tracing for distributed systems
-
-Why it is wrong:
-
-> Without traces, it is hard to see which service or dependency caused latency.
-
-Better answer:
-
-> Use OpenTelemetry or a similar tracing solution across services and dependencies.
-
-## Practice Task
-
-Add:
-
-1. structured request logging;
-2. correlation ID middleware;
-3. error logging with `traceId`;
-4. business metric for order creation;
-5. trace through API -> database -> external HTTP call;
-6. one note explaining what alert you would create for checkout failures.
+This sequence illustrates why observability should be designed as a system, not as a pile of unrelated outputs. Each signal type narrows the problem in a different way.

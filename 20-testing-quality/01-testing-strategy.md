@@ -4,14 +4,6 @@
 
 Testing strategy decides what to test, at what level, and why.
 
-Chinese notes:
-
-- `unit test`: 单元测试.
-- `integration test`: 集成测试.
-- `E2E test`: 端到端测试.
-- `test pyramid`: 测试金字塔.
-- `test coverage`: 测试覆盖率, but coverage alone is not quality.
-
 The goal is not maximum test count. The goal is confidence with reasonable cost.
 
 ## The Test Pyramid
@@ -278,34 +270,6 @@ Good names describe:
 - the system behavior;
 - the condition;
 - the expected result.
-
-## Knowledge Checks
-
-### What should be unit tested?
-
-Unit test business rules, pure functions, calculations, edge cases, and small pieces of state transition logic that can be exercised without infrastructure.
-
-### When do you need integration tests?
-
-When the behavior depends on the real interaction between components, such as API, DI, EF Core, SQL, auth, serialization, or middleware.
-
-### Why not use only E2E tests?
-
-Because E2E tests are slower, more fragile, and harder to debug. They are best reserved for a smaller set of critical journeys.
-
-### Why is coverage not enough?
-
-Because coverage can be high even when assertions are weak or the tested behavior is unimportant. Confidence matters more than raw line count.
-
-## Common Mistakes
-
-- Testing only happy paths.
-- Writing many low-value tests instead of a few important ones.
-- Mocking everything.
-- Using fixed sleeps.
-- Depending on test execution order.
-- Testing private implementation details.
-- Chasing coverage without behavior.
 
 ## Practice Task
 

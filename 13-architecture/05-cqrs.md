@@ -4,12 +4,6 @@
 
 CQRS means Command Query Responsibility Segregation.
 
-Chinese notes:
-
-- `command`: 命令，改变系统状态.
-- `query`: 查询，不改变状态.
-- `segregation`: 分离.
-
 CQRS separates write operations from read operations.
 
 ## Basic Idea
@@ -142,7 +136,6 @@ Benefits:
 
 Costs:
 
-- eventual consistency（最终一致性）;
 - more moving parts;
 - projection rebuild complexity;
 - operational overhead.
@@ -410,30 +403,6 @@ public sealed class OrderSubmittedProjection
     }
 }
 ```
-
-This creates eventual consistency（最终一致性）. The write succeeds first; the read model catches up shortly after.
-
-## Knowledge Checks
-
-### What is CQRS?
-
-CQRS separates commands that change state from queries that read data. It can be implemented simply with separate handlers or more deeply with separate read and write models.
-
-### Does CQRS require event sourcing?
-
-No. CQRS and event sourcing are separate patterns. They are often used together, but CQRS can be implemented without event sourcing.
-
-### When would you use CQRS?
-
-Use CQRS when read and write models have different complexity, when commands need clear business workflows, or when queries need optimized projections. Avoid it for simple CRUD if it adds unnecessary complexity.
-
-## Common Mistakes
-
-- Using CQRS for every tiny CRUD feature.
-- Confusing CQRS with event sourcing.
-- Creating too many empty handlers with no value.
-- Ignoring transaction boundaries.
-- Ignoring eventual consistency in separate read models.
 
 ## Practice Task
 

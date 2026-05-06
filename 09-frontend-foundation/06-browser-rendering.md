@@ -4,14 +4,6 @@
 
 Browser rendering is the process of turning HTML, CSS, and JavaScript into pixels on the screen.
 
-Chinese notes:
-
-- `DOM`: Document Object Model, 文档对象模型.
-- `CSSOM`: CSS Object Model, CSS 对象模型.
-- `layout`: 布局计算.
-- `paint`: 绘制.
-- `composite`: 合成.
-
 ## Rendering Pipeline
 
 ```text
@@ -357,8 +349,6 @@ tableBody.replaceChildren(fragment);
 
 This batches DOM updates and avoids injecting HTML strings.
 
-## Review Questions
-
 ### What happens when the browser loads a page?
 
 > The browser parses HTML into DOM, parses CSS into CSSOM, combines them into a render tree, calculates layout, paints pixels, and composites layers. JavaScript can modify DOM and CSSOM, causing re-rendering work.
@@ -378,11 +368,3 @@ This batches DOM updates and avoids injecting HTML strings.
 ### Why can layout shift happen?
 
 > Layout shift happens when visible content moves after initial rendering, often because images lack dimensions, dynamic content is inserted above existing content, or fonts load late.
-
-## Common Mistakes
-
-- Loading huge JavaScript before first render.
-- Animating layout properties unnecessarily.
-- Not setting image dimensions.
-- Ignoring layout shift.
-- Measuring performance only on powerful development machines.

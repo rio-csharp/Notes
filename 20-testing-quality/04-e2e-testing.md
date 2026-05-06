@@ -4,14 +4,6 @@
 
 End-to-end tests verify complete user workflows in a real or realistic browser environment.
 
-Chinese notes:
-
-- `E2E`: end-to-end, 端到端.
-- `flaky test`: 不稳定测试.
-- `test data`: 测试数据.
-- `selector`: 选择器.
-- `trace`: 测试执行轨迹.
-
 E2E tests are expensive, so they should protect the most important workflows.
 
 ## What E2E Tests Are Good For
@@ -375,36 +367,6 @@ Better practices:
 - stable accessible selectors;
 - trace on retry;
 - small number of high-value flows.
-
-## Knowledge Checks
-
-### What belongs in E2E tests?
-
-Critical user journeys that need confidence across browser, frontend, backend, API contracts, authentication, and persistence.
-
-### Why not test everything with E2E?
-
-E2E tests are slower, more expensive, and more fragile than lower-level tests. Most business rules are better tested with unit or integration tests.
-
-### Why are fixed sleeps harmful?
-
-They make tests slower and still do not guarantee readiness. Waiting for a real UI condition or network response is more reliable.
-
-### Why is test data strategy important?
-
-Without isolated data, tests can become order-dependent, flaky, or unsafe. Controlled data makes failures easier to understand.
-
-## Common Mistakes
-
-- Too many E2E tests.
-- Fixed sleep waits.
-- Shared mutable test data.
-- No cleanup or reset plan.
-- Testing third-party systems directly.
-- Flaky selectors.
-- Running all tests through UI login.
-- Test-only endpoints accidentally enabled in production.
-- No screenshots, traces, or videos for failed CI tests.
 
 ## Practice Task
 

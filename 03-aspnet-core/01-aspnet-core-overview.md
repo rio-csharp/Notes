@@ -2,31 +2,13 @@
 
 ## Core Idea
 
-ASP.NET Core is a high-performance, cross-platform framework for building web APIs, web apps, real-time apps, and background services.
+ASP.NET Core is the modern .NET framework for building HTTP-facing applications: web APIs, server-rendered web applications, real-time endpoints, and background-hosted processes that live alongside them. Its significance is not just that it can serve requests. It provides a coherent hosting model in which HTTP transport, endpoint dispatch, dependency injection, configuration, logging, security, and application startup all work together as one platform.
 
-Chinese notes:
+This chapter begins with that platform view. Later files in the chapter examine the request pipeline, middleware, routing, endpoint styles, security, configuration, observability, and background processing in more detail. The purpose of this overview is to establish how those parts fit together before each one is treated on its own.
 
-- `web framework`: Web 框架.
-- `endpoint`: 端点.
-- `hosting model`: 托管模型.
+## ASP.NET Core As The Web Boundary
 
-## What ASP.NET Core Provides
-
-- HTTP server integration;
-- middleware pipeline;
-- routing;
-- controllers and Minimal APIs;
-- dependency injection;
-- configuration;
-- logging;
-- authentication and authorization;
-- model binding and validation;
-- filters;
-- static files;
-- background services;
-- health checks.
-
-Mental model:
+An ASP.NET Core application is usually the boundary between external callers and internal application logic. It accepts HTTP requests, authenticates and authorizes them, binds input into .NET types, invokes application services, and converts outcomes back into HTTP responses.
 
 ```text
 Client
@@ -35,18 +17,34 @@ Client
   -> middleware pipeline
   -> routing
   -> authentication / authorization
-  -> model binding / validation
-  -> controller or Minimal API endpoint
-  -> service layer
-  -> database / cache / external systems
+  -> endpoint execution
+  -> application services
+  -> data stores / caches / external systems
   -> response
 ```
 
-ASP.NET Core itself should not contain all business logic. It is the web boundary: it accepts HTTP requests, validates and authorizes them, calls application code, and returns HTTP responses.
+This boundary model matters because it clarifies where code should live. ASP.NET Core code should remain responsible for HTTP-facing concerns such as transport, routing, security metadata, request and response handling, and startup composition. Core business rules, workflow decisions, and persistence policies should usually live below that boundary in application, domain, or infrastructure layers.
 
-## Minimal Hosting Model
+## What The Framework Provides
 
-Modern ASP.NET Core often uses `Program.cs`:
+ASP.NET Core combines a number of capabilities that earlier frameworks or custom stacks often treated separately:
+
+- hosting and server integration;
+- middleware composition;
+- routing and endpoint dispatch;
+- controller and Minimal API models;
+- dependency injection;
+- configuration;
+- logging and diagnostics;
+- authentication and authorization;
+- model binding and validation;
+- health checks and background hosting.
+
+The value of this integration is architectural consistency. A request does not move through unrelated subsystems stitched together by convention. It flows through one coordinated hosting and execution model.
+
+## The Modern Hosting Model
+
+Current ASP.NET Core applications usually use the minimal hosting model centered on `Program.cs`.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -60,7 +58,15 @@ app.MapControllers();
 app.Run();
 ```
 
-More realistic API setup:
+That small example already shows the core lifecycle:
+
+- create the builder;
+- register services and framework features;
+- build the application;
+- configure the request pipeline and endpoints;
+- start the host.
+
+A more realistic setup looks like this:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -69,7 +75,6 @@ builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
 builder.Services.AddScoped<IOrderService, OrderService>();
 
 var app = builder.Build();
@@ -85,71 +90,35 @@ app.MapHealthChecks("/health");
 app.Run();
 ```
 
-What happens here:
+The hosting model is "minimal" in ceremony, not in capability. Older applications may still use `Startup.cs`, but the underlying ideas remain the same: configuration is built, services are registered, middleware is ordered, endpoints are mapped, and the host is started.
 
-- `builder.Services` configures DI and framework services;
-- `builder.Build()` creates the application pipeline builder;
-- `app.Use...` registers middleware;
-- `app.Map...` maps endpoints;
-- `app.Run()` starts the server.
+## Kestrel And Deployment Topology
 
-Older projects may use `Startup.cs` with `ConfigureServices` and `Configure`.
+Kestrel is the built-in cross-platform web server used by ASP.NET Core.
 
-Clear wording:
-
-> Minimal hosting moved setup into `Program.cs`, but the concepts are the same: register services, build the app, configure middleware, map endpoints, then run.
-
-## Kestrel
-
-Kestrel is ASP.NET Core's cross-platform web server.
-
-In production, it is often placed behind:
+In many production systems, Kestrel is not the outermost network boundary. It often sits behind:
 
 - IIS;
 - Nginx;
 - Apache;
-- YARP;
-- cloud load balancer;
-- Kubernetes ingress.
-
-Typical production deployment:
+- a cloud load balancer;
+- an ingress controller in Kubernetes;
+- an application gateway or reverse proxy such as YARP.
 
 ```text
 Browser / API client
-  -> HTTPS load balancer
-  -> Nginx / IIS / ingress
+  -> HTTPS load balancer or reverse proxy
   -> Kestrel
-  -> ASP.NET Core app
+  -> ASP.NET Core application
 ```
 
-Why put Kestrel behind a reverse proxy?
+This arrangement is common because edge infrastructure often handles TLS termination, public traffic policy, request size limits, centralized routing, and load balancing. Kestrel can serve traffic directly, but understanding the distinction between edge concerns and in-process ASP.NET Core concerns is important for deployment and troubleshooting.
 
-- TLS termination;
-- load balancing;
-- compression/caching/static file handling in some setups;
-- request size limits;
-- centralized routing;
-- security headers and edge policies.
+## Endpoint Styles: Controllers And Minimal APIs
 
-Kestrel can also serve traffic directly, but many production systems still use a fronting proxy or platform ingress.
+ASP.NET Core supports more than one endpoint programming model. The two most common styles are controllers and Minimal APIs.
 
-## Controllers vs Minimal APIs
-
-Controllers:
-
-- structured;
-- good for larger APIs;
-- filters and conventions;
-- familiar MVC pattern.
-
-Minimal APIs:
-
-- lightweight;
-- good for small services;
-- simple endpoint definitions;
-- less ceremony.
-
-Controller example:
+Controller-based endpoints are more structured:
 
 ```csharp
 [ApiController]
@@ -164,7 +133,7 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-Minimal API example:
+Minimal APIs are more direct:
 
 ```csharp
 app.MapGet("/api/orders/{id:int}", (int id) =>
@@ -173,20 +142,42 @@ app.MapGet("/api/orders/{id:int}", (int id) =>
 });
 ```
 
-Decision guide:
+Both styles ultimately participate in the same routing, authorization, dependency injection, and response pipeline. The difference is one of structure and programming model rather than platform capability.
 
-| Use Controllers When | Use Minimal APIs When |
-| --- | --- |
-| API is large | service is small |
-| you want controller conventions | endpoint logic is simple |
-| filters and attributes are heavily used | lightweight endpoint definitions are preferred |
-| team is familiar with MVC structure | startup speed and low ceremony matter |
+Controllers are often a good fit for larger APIs that benefit from conventions, filters, and stronger structural organization. Minimal APIs are often a good fit for smaller services, focused endpoint groups, and lower-ceremony HTTP surfaces. Later sections of the chapter examine that distinction in depth.
 
-They can coexist in the same application.
+## Application Composition And Layering
 
-## Complete Minimal API Example
+Because ASP.NET Core is the web boundary rather than the whole application, code organization matters.
 
-The following example shows a small but realistic ASP.NET Core API in one file.
+```text
+MyApp.Api
+  Controllers
+  Middleware
+  Program.cs
+
+MyApp.Application
+  Services
+  Commands
+  Queries
+  DTOs
+
+MyApp.Domain
+  Entities
+  ValueObjects
+  DomainRules
+
+MyApp.Infrastructure
+  EF Core
+  ExternalClients
+  Repositories
+```
+
+This is only one possible layout, but it illustrates an important principle: endpoint code should not absorb the entire system. When controllers or Minimal API handlers begin to own SQL queries, payment workflow, business rules, and integration logic directly, the framework boundary has grown too large and the codebase becomes harder to test and evolve.
+
+## A Small End-To-End Example
+
+The following Minimal API example is intentionally compact, but it shows the platform shape clearly.
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -232,8 +223,6 @@ orders.MapPost("/", async (
 app.Run();
 ```
 
-Request and response models:
-
 ```csharp
 public sealed record CreateOrderRequest(
     int CustomerId,
@@ -251,184 +240,12 @@ public sealed record OrderDto(
     string Status);
 ```
 
-Simple store implementation:
-
 ```csharp
 public interface IOrderStore
 {
     Task<OrderDto?> GetByIdAsync(int id, CancellationToken ct);
     Task<OrderDto> CreateAsync(CreateOrderRequest request, CancellationToken ct);
 }
-
-public sealed class InMemoryOrderStore : IOrderStore
-{
-    private readonly object _gate = new();
-    private readonly Dictionary<int, OrderDto> _orders = new();
-    private int _nextId = 1;
-
-    public Task<OrderDto?> GetByIdAsync(int id, CancellationToken ct)
-    {
-        lock (_gate)
-        {
-            _orders.TryGetValue(id, out var order);
-            return Task.FromResult(order);
-        }
-    }
-
-    public Task<OrderDto> CreateAsync(CreateOrderRequest request, CancellationToken ct)
-    {
-        var total = request.Items.Sum(item => item.Quantity * item.UnitPrice);
-
-        lock (_gate)
-        {
-            var id = _nextId++;
-            var order = new OrderDto(id, request.CustomerId, total, "Draft");
-            _orders[id] = order;
-
-            return Task.FromResult(order);
-        }
-    }
-}
 ```
 
-Run commands:
-
-```powershell
-dotnet new webapi -n Orders.Api
-cd Orders.Api
-dotnet run
-```
-
-If you want Swagger UI for this example, add the Swagger package and register `AddSwaggerGen`, `UseSwagger`, and `UseSwaggerUI`. The core API example above does not depend on Swagger.
-
-Test with HTTP:
-
-```http
-POST https://localhost:5001/api/orders
-Content-Type: application/json
-
-{
-  "customerId": 123,
-  "items": [
-    { "productId": 10, "quantity": 2, "unitPrice": 25.00 }
-  ]
-}
-```
-
-Learning points:
-
-- `builder.Services` registers dependencies and framework services;
-- `app.Use...` configures middleware;
-- `app.MapGroup` organizes related endpoints;
-- request DTOs describe input shape;
-- response DTOs describe output shape;
-- the endpoint validates HTTP input and delegates storage behavior to a service.
-
-## Where Code Should Live
-
-Common structure:
-
-```text
-MyApp.Api
-  Controllers
-  Middleware
-  Program.cs
-
-MyApp.Application
-  Services
-  Commands
-  Queries
-  DTOs
-
-MyApp.Domain
-  Entities
-  ValueObjects
-  DomainRules
-
-MyApp.Infrastructure
-  EF Core
-  ExternalClients
-  Repositories
-```
-
-Controller responsibility:
-
-```text
-HTTP in -> validate/auth/map -> call application service -> HTTP out
-```
-
-Avoid putting SQL queries, payment logic, or complex business workflows directly in controllers.
-
-## Review Questions
-
-### What is ASP.NET Core?
-
-> ASP.NET Core is a modern cross-platform framework for building web APIs and web applications. It provides routing, middleware, DI, configuration, logging, authentication, authorization, and hosting features.
-
-### What is Kestrel?
-
-> Kestrel is the built-in cross-platform web server for ASP.NET Core. It can serve requests directly or run behind a reverse proxy.
-
-### Minimal API vs Controller?
-
-> Minimal APIs are lightweight and concise. Controllers provide more structure and are often better for larger APIs with filters, conventions, and complex organization.
-
-### What should be in a controller?
-
-> A controller should handle HTTP concerns: route parameters, request models, validation result, authorization metadata, calling application services, and returning responses. Business logic should usually live in application/domain services.
-
-### Can Kestrel serve production traffic directly?
-
-> Yes, but many production deployments place it behind a reverse proxy, load balancer, or ingress for TLS, routing, load balancing, edge policies, and operational consistency.
-
-## Common Mistakes
-
-### Mistake: Putting business logic in controllers.
-
-Why it is wrong:
-
-> Controllers become hard to test and reuse, and business rules get mixed with HTTP details.
-
-Better answer:
-
-> Keep controllers thin and move business workflows into application/domain services.
-
-### Mistake: Not understanding middleware order.
-
-Why it is wrong:
-
-> Middleware runs in registration order. Authentication must happen before authorization, and exception handling must be early enough to catch downstream failures.
-
-Better answer:
-
-> Be able to explain the request pipeline from top to bottom.
-
-### Mistake: No global error handling.
-
-Why it is wrong:
-
-> Unhandled exceptions can leak details or produce inconsistent responses.
-
-Better answer:
-
-> Use centralized exception handling and consistent `ProblemDetails` responses.
-
-### Mistake: No health checks.
-
-Why it is wrong:
-
-> Deployment platforms and load balancers need a reliable way to know whether an instance should receive traffic.
-
-Better answer:
-
-> Add liveness/readiness style health checks appropriate for the hosting environment.
-
-### Mistake: Treating Minimal API and controllers as mutually exclusive.
-
-Why it is wrong:
-
-> ASP.NET Core supports both. The choice can be per app or even per endpoint group.
-
-Better answer:
-
-> Choose based on complexity, team conventions, and maintainability.
+Even in this small sample, the main platform ideas are visible: service registration, pipeline composition, grouped endpoints, request DTOs, response DTOs, validation at the HTTP edge, and delegation of data access behind an abstraction.

@@ -4,15 +4,6 @@
 
 Database performance is usually one of the biggest bottlenecks in business applications.
 
-Chinese notes:
-
-- `bottleneck`: 瓶颈.
-- `execution plan`: 执行计划.
-- `lock contention`: 锁竞争.
-- `connection pool`: 连接池.
-- `SARGable`: 可搜索参数化, 能有效使用索引的查询形式.
-- `wait stats`: 等待统计.
-
 ## Common Bottlenecks
 
 - missing indexes;
@@ -440,31 +431,6 @@ Are statistics stale?
 Did data volume change recently?
 ```
 
-## Common Mistakes
-
-- Adding cache before fixing bad queries.
-- No indexes for foreign keys and filters.
-- Deep pagination without keyset strategy.
-- Long transactions.
-- Testing only on small local data.
-- Ignoring blocking and wait stats.
-- Adding too many indexes without considering write cost.
-- Returning entity graphs instead of projections.
-
-## Knowledge Checks
-
-### How do you troubleshoot slow database performance?
-
-Identify the slow query, inspect actual execution plan, check indexes and row estimates, review blocking/deadlocks, measure query duration and reads, and verify with production-like data after changes.
-
-### What is lock contention?
-
-Lock contention happens when transactions block each other while waiting for locks. It can be caused by long transactions, missing indexes, large updates, or high isolation levels.
-
-### How do you scale reads?
-
-First optimize queries and indexes. Then consider caching, read replicas, denormalized read models, or separate reporting/search stores.
-
 ## Practice Task
 
 Analyze an order list query:
@@ -474,4 +440,3 @@ Analyze an order list query:
 3. compare logical reads;
 4. test offset vs keyset pagination;
 5. simulate blocking transaction.
-

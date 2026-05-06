@@ -4,12 +4,6 @@
 
 Forms collect user input and are central to business applications.
 
-Chinese notes:
-
-- `controlled component`: 受控组件.
-- `uncontrolled component`: 非受控组件.
-- `validation`: 校验.
-
 ## Controlled Input
 
 ```tsx
@@ -297,8 +291,6 @@ function OrderSearchBox({ onSearch }: { onSearch: (value: string) => void }) {
 
 Use controlled state when immediate UI behavior depends on every keystroke. Use form libraries when forms grow larger.
 
-## Review Questions
-
 ### Controlled vs uncontrolled forms?
 
 > Controlled forms keep values in React state. Uncontrolled forms keep values in DOM and access them through refs or form libraries. Controlled forms are explicit but can re-render more; uncontrolled approaches can perform better for large forms.
@@ -310,15 +302,6 @@ Use controlled state when immediate UI behavior depends on every keystroke. Use 
 ### Why use React Hook Form?
 
 > It reduces unnecessary re-renders, works well with uncontrolled inputs, and provides convenient validation and form state management.
-
-## Common Mistakes
-
-- Only client-side validation.
-- No server error mapping.
-- Losing user input after failed submit.
-- No disabled/loading state during submit.
-- Inputs without labels.
-- Large controlled forms causing performance issues.
 
 ## Practice Task
 

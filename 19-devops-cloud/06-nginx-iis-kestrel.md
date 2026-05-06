@@ -4,13 +4,6 @@
 
 ASP.NET Core applications run on Kestrel. In production, Kestrel is often placed behind a reverse proxy such as Nginx, IIS, a cloud load balancer, or an ingress controller.
 
-Chinese notes:
-
-- `Kestrel`: ASP.NET Core built-in web server, ASP.NET Core 内置 Web 服务器.
-- `reverse proxy`: 反向代理.
-- `TLS termination`: TLS 终止, proxy handles HTTPS and forwards to the app.
-- `forwarded headers`: 转发头, headers that preserve original client/protocol information.
-
 Typical request flow:
 
 ```text
@@ -465,41 +458,6 @@ Health endpoints should not expose secrets, stack traces, or internal dependency
 | WebSocket disconnects | missing upgrade headers or idle timeout |
 | SPA route refresh returns 404 | no `try_files` fallback to `index.html` |
 | Auth callback fails | wrong host/scheme behind proxy |
-
-## Knowledge Checks
-
-### What is Kestrel?
-
-Kestrel is ASP.NET Core's built-in cross-platform web server. It receives HTTP requests and passes them into the ASP.NET Core middleware pipeline.
-
-### Why put Nginx or IIS in front of Kestrel?
-
-A reverse proxy can handle TLS, routing, load balancing, request limits, static files, security headers, process integration, and operational logging.
-
-### Why are forwarded headers important?
-
-They tell the application the original client IP, protocol, and host. Without them, HTTPS redirects, URL generation, authentication callbacks, and client IP logging can be wrong.
-
-### Why can a React SPA return 404 after browser refresh?
-
-The browser requests a deep route such as `/orders/123`. If the proxy looks for a physical file at that path and no fallback exists, it returns 404. SPA hosting should usually fall back to `index.html`.
-
-### Why can upload limits be confusing?
-
-Because the request body may be limited by the load balancer, proxy, Kestrel, framework, and application code. The smallest limit wins.
-
-## Common Mistakes
-
-- Not configuring forwarded headers.
-- Trusting forwarded headers from untrusted clients.
-- HTTPS redirect loop behind proxy.
-- Missing SPA fallback.
-- Setting upload limit only in one layer.
-- Missing WebSocket upgrade headers.
-- Exposing detailed health check output publicly.
-- Adding conflicting security headers in both proxy and app.
-- Using short proxy timeouts for long-running requests.
-- Not checking proxy logs when the app logs look clean.
 
 ## Practice Task
 

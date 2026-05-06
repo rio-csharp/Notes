@@ -4,14 +4,6 @@
 
 A project case note turns practical work into reusable engineering knowledge.
 
-Chinese notes:
-
-- `case note`: 案例笔记.
-- `context`: 背景.
-- `trade-off`: 权衡.
-- `outcome`: 结果.
-- `reflection`: 复盘.
-
 The purpose is not to decorate a project. The purpose is to understand what happened, why decisions were made, what trade-offs existed, and what can be reused in future systems.
 
 ## Why Write Project Case Notes
@@ -91,13 +83,7 @@ Use this structure for a complete case note.
 
 ## Business Context
 
-Questions:
-
-- What business problem did the project solve?
 - Who used the system?
-- What workflows mattered most?
-- What constraints existed?
-- What would happen if the system failed?
 
 Example:
 
@@ -251,20 +237,6 @@ Monitoring: queue depth, oldest message age, provider error rate.
 - Trade-offs are explicit.
 - Tests and operations are included.
 - Future improvements are concrete.
-
-## Knowledge Checks
-
-### Why write project case notes?
-
-They preserve practical engineering context: what the system did, why decisions were made, what trade-offs existed, and what lessons can be reused.
-
-### What makes a project case note useful?
-
-It connects business context, architecture, implementation, trade-offs, failures, tests, and outcomes instead of only listing technologies.
-
-### Why include future improvements?
-
-Future improvements show that systems are never finished. They also help separate known limitations from accidental omissions.
 
 ## Practice Task
 

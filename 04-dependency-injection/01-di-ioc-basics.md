@@ -2,15 +2,13 @@
 
 ## Core Idea
 
-Dependency Injection is a technique where a class receives its dependencies from outside instead of creating them itself.
+Dependency injection is a design technique in which a class receives the collaborators it needs from outside instead of constructing them internally. In ASP.NET Core, this technique is supported by the built-in dependency injection container, but the underlying architectural value is broader than the framework feature itself. DI makes object relationships explicit, reduces coupling to concrete implementations, and moves object graph construction into a dedicated composition mechanism.
 
-Chinese notes:
+This chapter begins with that broader view. Later files examine lifetimes, lifetime mismatches, factories, and decorators in more detail. The purpose of this opening section is to establish what the container actually does, where its responsibilities begin and end, and why dependency injection is useful when treated as a structural design tool rather than as a registration ritual.
 
-- `DI`: Dependency Injection, 依赖注入.
-- `IoC`: Inversion of Control, 控制反转.
-- `container`: 容器.
+## From Direct Construction To Injected Dependencies
 
-## Without DI
+The simplest way to see the difference is to compare a class that creates its own collaborator with one that receives it.
 
 ```csharp
 public sealed class OrderService
@@ -19,13 +17,9 @@ public sealed class OrderService
 }
 ```
 
-Problems:
+This design hardcodes the dependency choice inside the class. That increases coupling because the class now decides both its own behavior and the construction of one of its collaborators.
 
-- hard to test;
-- tightly coupled;
-- hard to replace implementation.
-
-## With DI
+With dependency injection:
 
 ```csharp
 public sealed class OrderService
@@ -39,61 +33,56 @@ public sealed class OrderService
 }
 ```
 
-Registration:
-
 ```csharp
 builder.Services.AddScoped<IEmailSender, EmailSender>();
 builder.Services.AddScoped<OrderService>();
 ```
 
-## Constructor Injection
+The class now describes what it needs, while another part of the application decides which implementation should satisfy that need. This is the core separation that makes dependency injection valuable.
 
-Most common and recommended.
+## Constructor Injection As The Default
 
-Benefits:
+Constructor injection is the standard form of DI in ASP.NET Core because it keeps dependencies explicit and required.
 
-- dependencies are explicit;
-- object cannot be created without required dependencies;
-- easy to test.
+A constructor communicates several useful things at once:
 
-## Service Container
+- which collaborators the type depends on;
+- which dependencies are mandatory for the type to function;
+- what object graph the container must be able to construct.
 
-The DI container:
+This is one reason constructor injection is usually preferable to hiding service resolution behind properties or broad `IServiceProvider` access. The type advertises its requirements directly rather than forcing readers to discover them by reading method bodies.
 
-- stores registrations;
-- creates objects;
-- resolves dependency graphs;
-- manages lifetimes;
-- disposes services.
+## Inversion Of Control And Composition
 
-## Under The Hood: How ASP.NET Core DI Works
+Dependency injection is one practical form of a broader idea: inversion of control.
 
-ASP.NET Core's built-in DI container is intentionally simple and fast. It is not magic. It mainly does four things:
+Without IoC, application code often creates and wires objects manually in many different places. With IoC, object creation and wiring are delegated to the application's composition mechanism. In ASP.NET Core, that mechanism is the DI container configured through `IServiceCollection` and exposed through `IServiceProvider`.
 
-1. Collect service registrations.
-2. Build a resolver.
-3. Create object graphs.
-4. Cache and dispose objects according to lifetime.
+This changes where object-graph decisions live. Business types focus on behavior. Application composition decides how concrete implementations are assembled.
 
-Chinese notes:
+## Container Responsibilities
 
-- `service descriptor`: 服务描述.
-- `object graph`: 对象依赖图.
-- `resolution`: 解析服务.
-- `call site`: 可以理解为容器内部的创建计划.
+ASP.NET Core's built-in container is intentionally simple. It does not attempt to be an all-powerful runtime framework. At a high level, it does four things:
 
-## IServiceCollection Is A List Of Registrations
+1. collect service registrations;
+2. build a resolver;
+3. construct object graphs;
+4. cache and dispose services according to lifetime rules.
 
-When you write:
+Those responsibilities are enough for most applications, and understanding them is more useful than treating the container as magic.
+
+## `IServiceCollection` As Registration Data
+
+When code registers services:
 
 ```csharp
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddSingleton<IClock, SystemClock>();
 ```
 
-you are adding service descriptors to `IServiceCollection`.
+it is adding service descriptors to `IServiceCollection`.
 
-Conceptually:
+Conceptually, the registration data looks like this:
 
 ```text
 IServiceCollection
@@ -106,13 +95,11 @@ IServiceCollection
   Lifetime: Singleton
 ```
 
-A service registration can be based on:
+Registrations can point to:
 
-- implementation type;
-- factory delegate;
-- existing instance.
-
-Examples:
+- an implementation type;
+- a factory delegate;
+- an already-created instance.
 
 ```csharp
 builder.Services.AddScoped<IOrderService, OrderService>();
@@ -126,20 +113,19 @@ builder.Services.AddScoped<IEmailSender>(sp =>
 });
 ```
 
-## BuildServiceProvider Creates The Runtime Resolver
+This registration phase defines what the container is allowed to build later. It does not usually create the full graph immediately.
 
-At startup, ASP.NET Core builds an `IServiceProvider`.
+## Building The Service Provider
 
-Conceptually:
+At startup, ASP.NET Core builds an `IServiceProvider` from the collected registrations.
 
 ```text
 IServiceCollection
   -> BuildServiceProvider
   -> IServiceProvider
-  -> GetRequiredService<T>
 ```
 
-The container analyzes registrations and creates an internal plan for constructing services.
+The provider is the runtime object responsible for resolution. When a service is requested, the provider consults the registrations, determines how to construct the graph, applies lifetime rules, and either creates or reuses instances as required.
 
 For example:
 
@@ -155,25 +141,11 @@ public sealed class OrderService
 }
 ```
 
-The container must know:
+The provider must be able to satisfy all three constructor dependencies before it can create `OrderService`. In effect, the service's constructor defines a piece of the application graph, and the container recursively walks that graph during resolution.
 
-```text
-To create OrderService:
-  create/resolve IOrderRepository
-  create/resolve IEmailSender
-  create/resolve ILogger<OrderService>
-  call OrderService constructor
-```
+## Constructor Selection And Graph Resolution
 
-That dependency tree is the object graph（对象依赖图）.
-
-## Constructor Selection
-
-The container uses public constructors.
-
-If there are multiple constructors, it chooses the constructor it can satisfy, typically the one with the most parameters that can be resolved.
-
-Example:
+The built-in container resolves services through public constructors. If multiple public constructors exist, it attempts to use one it can satisfy, generally preferring the most parameter-rich constructor that is resolvable.
 
 ```csharp
 public sealed class ReportService
@@ -190,133 +162,49 @@ public sealed class ReportService
 }
 ```
 
-If both dependencies are registered, the second constructor is preferred.
+If both dependencies are available, the second constructor is preferred. If multiple constructors are equally viable in a way that creates ambiguity, resolution may fail.
 
-Common mistake:
+For that reason, ordinary application services are usually better with one public constructor. The goal is not merely to satisfy the container. It is to make the dependency model of the type obvious.
 
-```csharp
-public sealed class ReportService
-{
-    public ReportService(IReportRepository repository) {}
-    public ReportService(IEmailSender emailSender) {}
-}
-```
+## Lifetimes As Reuse Rules
 
-If both constructors are valid and neither is clearly better, the container may fail because the choice is ambiguous.
+The container does not simply create objects blindly. It also applies reuse rules based on lifetime. Singleton, scoped, and transient are therefore not mere labels. They define how long resolved objects remain valid and how widely they are shared.
 
-Practical advice:
+Lifetime is treated in depth in the next file, but it helps to preview the central idea here:
 
-> Prefer one public constructor for application services. It makes dependencies explicit and avoids ambiguous resolution.
+- singleton services are reused for the application lifetime;
+- scoped services are reused within a scope;
+- transient services are created on demand.
 
-## Lifetime Caches
+This is why DI design is inseparable from runtime behavior. A registration is also a statement about ownership and reuse.
 
-DI lifetime is mostly about caching.
+## Disposal And Ownership
 
-### Singleton
+The container also owns disposal for services it creates.
 
-Created once and cached in the root provider.
+If a service implements `IDisposable` or `IAsyncDisposable`, the container tracks and disposes it according to the owning scope or provider. This matters because service resolution is not just object creation. It is also lifetime ownership.
 
-```text
-Root IServiceProvider
-  Singleton cache:
-    IClock -> SystemClock instance
-```
+That ownership model is one reason manually constructing some dependencies while allowing the container to construct others can lead to confusion unless the design is deliberate about who owns disposal responsibility.
 
-Every request gets the same singleton instance.
+## Open Generics, Collections, And Composite Graphs
 
-### Scoped
+The built-in container supports more than one-to-one simple type resolution.
 
-Created once per scope.
-
-In ASP.NET Core, an HTTP request usually creates a scope.
-
-```text
-Request scope A
-  AppDbContext -> instance A
-
-Request scope B
-  AppDbContext -> instance B
-```
-
-This is why `DbContext` is usually scoped.
-
-### Transient
-
-Created every time it is requested.
-
-```text
-Resolve IFormatter -> new JsonFormatter
-Resolve IFormatter -> another new JsonFormatter
-```
-
-Transient services are not cached for reuse, but disposable transient services resolved from the container can still be tracked for disposal.
-
-## Disposal
-
-The container disposes services it creates if they implement `IDisposable` or `IAsyncDisposable`.
-
-Important:
-
-- scoped disposables are usually disposed at the end of the request scope;
-- singleton disposables are disposed when the application shuts down;
-- manually created objects are your responsibility unless passed as container-managed instances carefully.
-
-Example:
-
-```csharp
-public sealed class FileExportService : IDisposable
-{
-    public void Dispose()
-    {
-        // release unmanaged or external resources
-    }
-}
-```
-
-Common mistake:
-
-```csharp
-using var service = serviceProvider.GetRequiredService<MyScopedService>();
-```
-
-Avoid disposing container-resolved scoped services manually in normal request code. The scope owns them.
-
-## Open Generics
-
-ASP.NET Core DI can register open generic types.
+Open generic registration is a common example:
 
 ```csharp
 builder.Services.AddScoped(typeof(IRepository<>), typeof(EfRepository<>));
 ```
 
-Then this can be resolved:
+If a consumer depends on `IRepository<Order>`, the container can close the generic type to `EfRepository<Order>` at resolution time.
 
-```csharp
-public sealed class OrderService
-{
-    public OrderService(IRepository<Order> orders)
-    {
-    }
-}
-```
-
-The container closes the generic type:
-
-```text
-IRepository<Order> -> EfRepository<Order>
-```
-
-## IEnumerable<T> Resolution
-
-If multiple implementations are registered:
+The container can also resolve all registrations of the same service type through `IEnumerable<T>`:
 
 ```csharp
 builder.Services.AddScoped<INotificationSender, EmailSender>();
 builder.Services.AddScoped<INotificationSender, SmsSender>();
 builder.Services.AddScoped<INotificationSender, PushSender>();
 ```
-
-You can inject:
 
 ```csharp
 public sealed class NotificationService
@@ -330,19 +218,15 @@ public sealed class NotificationService
 }
 ```
 
-The container returns all registered implementations in registration order.
+This ability to build composite graphs is part of why the built-in container is powerful enough for many application architectures even without exotic features.
 
-If you inject a single `INotificationSender`, the last registration usually wins.
+## Circular Dependencies And Boundary Problems
 
-## Circular Dependencies
-
-A circular dependency happens when services depend on each other.
+The container cannot resolve cycles such as:
 
 ```text
 OrderService -> PaymentService -> OrderService
 ```
-
-Example:
 
 ```csharp
 public sealed class OrderService
@@ -356,217 +240,22 @@ public sealed class PaymentService
 }
 ```
 
-The container cannot build this graph.
+This kind of failure is usually more than a registration issue. It often indicates that the service boundaries themselves are wrong. The best fix is often to extract shared behavior, introduce messaging or domain events, or separate responsibilities more clearly rather than trying to hide the cycle behind `IServiceProvider`.
 
-Fixes:
+## The Service Locator Temptation
 
-- extract shared logic into a third service;
-- introduce a domain event or message;
-- rethink the boundary;
-- avoid using `IServiceProvider` to hide the cycle.
-
-Engineering perspective:
-
-> A circular dependency usually means the design boundary is wrong. I would not fix it by injecting `IServiceProvider` everywhere. I would split responsibilities or introduce an event/mediator depending on the domain.
-
-## ValidateScopes And ValidateOnBuild
-
-In development, validate DI configuration:
-
-```csharp
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Host.UseDefaultServiceProvider(options =>
-{
-    options.ValidateScopes = true;
-    options.ValidateOnBuild = true;
-});
-```
-
-`ValidateScopes` can catch scoped services resolved from the root provider or injected into singletons.
-
-`ValidateOnBuild` tries to validate service graphs when building the provider.
-
-These checks help catch configuration errors early.
-
-## Why Manually Calling BuildServiceProvider Is Risky
-
-Bad:
-
-```csharp
-var provider = builder.Services.BuildServiceProvider();
-var options = provider.GetRequiredService<IOptions<MyOptions>>();
-```
-
-Problems:
-
-- creates a second service provider;
-- singleton services may be created twice;
-- scoped lifetime validation can be bypassed;
-- disposal can become confusing.
-
-Better:
-
-```csharp
-builder.Services.AddOptions<MyOptions>()
-    .BindConfiguration("MyOptions")
-    .ValidateDataAnnotations();
-```
-
-Or use a factory registration if runtime service access is needed.
-
-## What The Built-in Container Does Not Try To Be
-
-The built-in container is enough for most ASP.NET Core applications, but it is not a full advanced IoC container.
-
-It has limited support for:
-
-- property injection;
-- convention-based assembly scanning without extensions;
-- complex decorators without helper libraries;
-- advanced interception;
-- named/keyed patterns in older .NET versions.
-
-For decorators and scanning, teams often use libraries such as Scrutor.
-
-Engineering perspective:
-
-> I prefer the built-in container unless I have a real requirement it cannot handle. A simpler container reduces magic and makes dependency graphs easier to reason about.
-
-## DI vs Service Locator
-
-Service locator:
+One of the fastest ways to weaken DI's benefits is to inject `IServiceProvider` broadly into application code and resolve arbitrary services at runtime.
 
 ```csharp
 var service = serviceProvider.GetRequiredService<IOrderService>();
 ```
 
-This hides dependencies.
+This style hides dependencies, delays missing-registration failures until runtime, and makes types harder to reason about because their real requirements are no longer visible in their constructors.
 
-Use direct constructor injection for normal application code.
+There are legitimate uses of `IServiceProvider` and `IServiceScopeFactory`, especially in infrastructure code, factories, or background-service scope creation. But in ordinary application services, constructor injection remains the clearer and more stable default.
 
-## Review Questions
+## The Built-In Container's Intentional Simplicity
 
-### What is dependency injection?
+ASP.NET Core's built-in container is designed to be fast, predictable, and sufficient for common scenarios. It is not intended to provide every advanced IoC feature ever invented.
 
-> DI is a technique where dependencies are provided to a class from outside, usually by a container, instead of the class constructing them itself.
-
-### What is IoC?
-
-> Inversion of Control means the framework/container controls object creation and dependency wiring instead of application code doing it manually.
-
-### Why use DI?
-
-> It reduces coupling, improves testability, makes dependencies explicit, and allows implementations to be replaced.
-
-### How does the DI container create an object?
-
-> It looks up the service registration, chooses a constructor it can satisfy, resolves all constructor dependencies recursively, creates the object, then caches or disposes it according to its lifetime.
-
-### What is the difference between registration and resolution?
-
-> Registration is adding service descriptors to `IServiceCollection`. Resolution is asking `IServiceProvider` for an instance, which causes the container to build or retrieve the object graph.
-
-### Why is injecting IServiceProvider everywhere a smell?
-
-> It hides real dependencies, makes the class harder to test, and often turns DI into a service locator. It is acceptable in infrastructure-level factories or scope creation scenarios, but not as a default application pattern.
-
-## Common Mistakes
-
-### Mistake: Injecting `IServiceProvider` everywhere
-
-Why it is wrong:
-
-> It hides the real dependencies of the class. The constructor no longer tells readers what the class needs.
-
-Better answer:
-
-> Use constructor injection for normal application services. Use `IServiceProvider` only in infrastructure code such as factories, background scope creation, or integration points where dynamic resolution is genuinely needed.
-
-### Mistake: Hidden dependencies
-
-Why it is wrong:
-
-> Hidden dependencies make tests harder and make runtime failures more likely because missing services are discovered only when a code path executes.
-
-Better answer:
-
-> Make required dependencies explicit through constructor parameters.
-
-### Mistake: Too many dependencies in one class
-
-Why it is wrong:
-
-> A large constructor often means the class has too many responsibilities.
-
-Better answer:
-
-> Split orchestration, domain logic, persistence, external integration, and formatting responsibilities where appropriate.
-
-### Mistake: Registering the wrong lifetime
-
-Why it is wrong:
-
-> Lifetime bugs can create stale state, cross-request data leaks, thread-safety problems, and disposed object errors.
-
-Better answer:
-
-> Choose lifetime based on state, thread safety, resource ownership, and dependency lifetimes.
-
-### Mistake: Using DI to hide poor design
-
-Why it is wrong:
-
-> DI can wire a complicated graph, but it does not make the design clean. A messy dependency graph is still messy.
-
-Better answer:
-
-> Use DI to make boundaries explicit, then improve the boundaries when the graph becomes hard to reason about.
-
-### Mistake: Creating a second provider with `BuildServiceProvider`
-
-Why it is wrong:
-
-> It can create duplicate singleton instances, bypass validation, and make disposal confusing.
-
-Better answer:
-
-> Let ASP.NET Core build the provider. Use options binding, factory registrations, or hosted services instead of manually building another provider.
-
-### Mistake: Hiding circular dependencies with service locator
-
-Why it is wrong:
-
-> The circular design still exists, but the container can no longer warn you clearly at construction time.
-
-Better answer:
-
-> Break the cycle by extracting a third service, publishing a domain event, or moving orchestration to a higher-level service.
-
-### Mistake: Forgetting disposal behavior
-
-Why it is wrong:
-
-> Services created by the container are normally disposed by the owning scope/provider. Manual disposal can break other consumers, while resolving disposable transients from the root provider can hold them too long.
-
-Better answer:
-
-> Let the DI scope manage services it creates. Be careful with disposable transients and root-provider resolution.
-
-## Practice Task
-
-Create a small dependency graph:
-
-1. `OrdersController`;
-2. `IOrderService`;
-3. `IOrderRepository`;
-4. `IEmailSender`;
-5. `IClock`.
-
-Then write down:
-
-- each service registration;
-- each lifetime choice;
-- which object is created once per request;
-- which object is safe as singleton;
-- what would go wrong if `OrderService` injected `IServiceProvider` and resolved dependencies manually.
+Its built-in support for property injection, interception, advanced decorator wiring, and convention-heavy assembly scanning is deliberately limited. When those needs are real, libraries such as Scrutor can extend the model in targeted ways. This is often preferable to replacing the whole container prematurely, because a simpler container tends to make dependency graphs easier to understand and debug.

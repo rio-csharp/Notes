@@ -4,15 +4,6 @@
 
 An Architecture Decision Record (ADR) documents an important technical decision, its context, the options considered, the trade-offs, and the consequences.
 
-Chinese notes:
-
-- `ADR`: Architecture Decision Record, 架构决策记录.
-- `context`: 背景.
-- `constraint`: 约束.
-- `consequence`: 后果.
-- `trade-off`: 权衡.
-- `revisit`: 重新评估.
-
 Architecture is not only about choosing tools. It is about making decisions that remain understandable when the team, product, traffic, and constraints change.
 
 ## Why ADRs Matter
@@ -20,13 +11,6 @@ Architecture is not only about choosing tools. It is about making decisions that
 Architecture decisions often outlive the people who made them.
 
 Without ADRs, teams forget:
-
-- why a technology was chosen;
-- what alternatives were rejected;
-- what constraints existed at the time;
-- what trade-offs were accepted;
-- what risks were known;
-- when the decision should be revisited.
 
 An ADR gives future engineers context. It prevents the same debate from restarting every few months with no memory.
 
@@ -151,8 +135,6 @@ Examples:
 - vendor lock-in.
 
 Chinese note:
-
-- `reversibility`: 可逆性, how easy it is to change the decision later.
 
 ## Example 1: Redis For Distributed Cache
 
@@ -604,39 +586,6 @@ Redis cache ADR implementation checks:
 ```
 
 This turns architecture into practical engineering behavior.
-
-## Knowledge Checks
-
-### What problem does an ADR solve?
-
-It preserves the context, options, trade-offs, and consequences behind an important decision so future engineers can understand and revisit it.
-
-### What should be included in an ADR?
-
-An ADR should include status, context, decision drivers, options considered, the decision, consequences, implementation notes, and revisit conditions.
-
-### How can architecture decisions avoid becoming outdated?
-
-Document assumptions, define revisit conditions, monitor whether constraints change, and supersede ADRs when a better decision is justified.
-
-### Why should alternatives be documented?
-
-Alternatives show that the decision was considered intentionally. They also prevent future readers from assuming rejected options were ignored.
-
-### Why are consequences important?
-
-Every architecture choice has costs. Consequences make those costs explicit so the team can operate the system with eyes open.
-
-## Common Mistakes
-
-- Writing ADRs after nobody remembers the real context.
-- Documenting only the chosen option.
-- Pretending a decision has no downside.
-- Writing long essays nobody reads.
-- Not linking ADRs to implementation rules.
-- Never revisiting old decisions.
-- Using ADRs to blame people for past choices.
-- Choosing technology because it is popular instead of because it fits the context.
 
 ## Practice Task
 

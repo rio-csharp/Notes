@@ -4,13 +4,6 @@
 
 Layered architecture organizes code into layers with different responsibilities.
 
-Chinese notes:
-
-- `layered architecture`: 分层架构.
-- `presentation layer`: 表现层.
-- `application layer`: 应用层.
-- `infrastructure layer`: 基础设施层.
-
 Typical layers:
 
 ```text
@@ -141,8 +134,6 @@ public sealed class Order
     }
 }
 ```
-
-The rule is not in the controller and not only in SQL. The entity owns the invariant（业务不变量）.
 
 ### Application Layer
 
@@ -374,28 +365,6 @@ Controller -> Application Service -> Domain -> Repository/UnitOfWork
 ```
 
 Good architecture is proportional to complexity.
-
-## Knowledge Checks
-
-### What is layered architecture?
-
-Layered architecture separates responsibilities into layers such as presentation, application, domain, and infrastructure. It helps maintainability by keeping HTTP, business logic, and persistence concerns separate.
-
-### What should controllers do?
-
-Controllers should handle HTTP concerns, call application services, and return appropriate responses. Business rules should live in application/domain layers.
-
-### What is a downside of layered architecture?
-
-If applied poorly, it can become anemic, with too many pass-through services, or tightly coupled to infrastructure if dependencies point in the wrong direction.
-
-## Common Mistakes
-
-- Business logic in controllers.
-- Application layer just passes through to repository.
-- Infrastructure leaking everywhere.
-- Too many layers for simple app.
-- No clear dependency rules.
 
 ## Practice Task
 

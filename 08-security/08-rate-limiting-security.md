@@ -1,260 +1,71 @@
-# Rate Limiting For Security
+# Rate Limiting, Abuse Resistance, And Availability Protection
 
 ## Core Idea
 
-Rate limiting protects systems from abuse, brute force attacks, scraping, and accidental overload.
+Rate limiting is often introduced as a performance or API-governance feature, but in security-sensitive systems it is also an abuse-resistance control. It slows brute-force attacks, reduces credential-stuffing throughput, limits automated scraping, and helps preserve availability under both malicious and accidental pressure.
 
-Chinese notes:
+This chapter treats rate limiting as part of application security rather than as a purely operational afterthought.
 
-- `rate limiting`: 限流.
-- `brute force`: 暴力破解.
-- `abuse`: 滥用.
+## Security-Sensitive Endpoints
 
-## Security Use Cases
+Some endpoints deserve stronger rate-limiting attention than others:
 
-- login attempts;
+- login;
 - password reset;
 - signup;
-- OTP verification;
-- public APIs;
-- expensive search;
+- MFA or OTP verification;
+- public search;
 - file upload;
-- payment attempts.
+- payment attempts;
+- webhook intake under abuse pressure.
 
-## Key Dimensions
+The point is not that every endpoint needs the same limit. The point is that the system should understand where retries are normal, where guesses are dangerous, and where request amplification is costly.
 
-Limit by:
+## Limit Keys And Identity Dimensions
+
+Rate limiting always depends on what identity the limit is attached to. Common dimensions include:
 
 - IP address;
-- user ID;
+- user identifier;
 - API key;
-- tenant ID;
+- tenant;
 - endpoint;
-- combination of dimensions.
+- combined dimensions such as email plus IP.
 
-Example:
+The right key depends on the abuse pattern. Login protection based only on IP is often too weak because NAT and shared networks blur identity. Protection based only on account identifier may ignore distributed attack sources. Combining dimensions is often stronger.
 
-```text
-5 login attempts per email per minute
-100 API calls per API key per minute
-10 password reset requests per user per hour
-```
+## Algorithms And Enforcement Shape
 
-## Algorithms
+Fixed windows, sliding windows, token buckets, and leaky-bucket models all exist because different workloads have different burst and fairness requirements. The important design question is not which algorithm sounds most advanced. It is whether the enforcement model matches the risk and traffic pattern of the endpoint.
 
-- fixed window;
-- sliding window;
-- token bucket;
-- leaky bucket.
+For example, login and password reset may care more about attack throttling than about fine-grained fairness, while public APIs may need tenant or client quotas that balance both.
 
-Built-in ASP.NET Core fixed window example:
+## Response Semantics
 
-```csharp
-builder.Services.AddRateLimiter(options =>
-{
-    options.AddFixedWindowLimiter("login", limiter =>
-    {
-        limiter.PermitLimit = 5;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
+A limit is part of the API contract once it is enforced. `429 Too Many Requests` and headers such as `Retry-After` help clients behave predictably under throttling.
 
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-});
+This is especially important for well-behaved clients. Rate limiting is not only about blocking attackers. It is also about teaching legitimate callers how the system expects them to back off.
 
-var app = builder.Build();
+## Avoiding User Enumeration
 
-app.UseRateLimiter();
-```
+Abuse resistance is closely tied to information disclosure. Endpoints such as login or password reset should avoid revealing whether an account exists more than necessary. Otherwise, rate limiting may still leave the system vulnerable to account discovery and targeted attacks.
 
-Endpoint usage:
+This is why generic responses and throttling often belong together in authentication workflows.
 
-```csharp
-app.MapPost("/api/auth/login", LoginAsync)
-    .RequireRateLimiting("login");
-```
+## Distributed Systems And Shared Enforcement
 
-This is useful, but security-sensitive login limits often need custom keys such as email + IP, not only endpoint-wide limits.
+In multi-instance deployments, in-memory limits may be insufficient for global protection. Shared stores such as Redis, gateway-level controls, or WAF-based enforcement may be needed for consistent cross-instance behavior.
 
-## Redis Example
+This turns rate limiting into an architectural decision. The system must decide which controls live in the application, which live at the edge, and what happens when the shared limiter becomes unavailable.
 
-```csharp
-public async Task<bool> AllowLoginAttemptAsync(string email)
-{
-    var key = $"login:{email}:{DateTimeOffset.UtcNow:yyyyMMddHHmm}";
-    var count = await _redis.StringIncrementAsync(key);
+## Fail-Open Versus Fail-Closed
 
-    if (count == 1)
-    {
-        await _redis.KeyExpireAsync(key, TimeSpan.FromMinutes(1));
-    }
+When a shared limiter fails, the system faces a trade-off. Failing closed may protect a public attack surface but harm availability. Failing open may preserve service but weaken abuse resistance. The right answer depends on the endpoint's risk and the organization's tolerance for either class of failure.
 
-    return count <= 5;
-}
-```
+This is one reason rate limiting belongs in security design. It is not only an algorithmic counter. It is a control with availability consequences.
 
-Improved key design:
+## Design Consequences
 
-```csharp
-public async Task<bool> AllowLoginAttemptAsync(
-    string email,
-    string ipAddress,
-    CancellationToken ct)
-{
-    var normalizedEmail = email.Trim().ToLowerInvariant();
-    var emailHash = Convert.ToHexString(
-        SHA256.HashData(Encoding.UTF8.GetBytes(normalizedEmail)));
+Strong rate limiting begins with endpoint risk classification, chooses keys that match real abuse patterns, returns predictable throttling responses, and accounts for distributed deployment. It is most effective when combined with other controls such as generic login responses, lockout strategy, monitoring, and audit visibility.
 
-    var minute = DateTimeOffset.UtcNow.ToString("yyyyMMddHHmm");
-    var emailKey = $"rl:login:email:{emailHash}:{minute}";
-    var ipKey = $"rl:login:ip:{ipAddress}:{minute}";
-
-    var batch = _redis.CreateBatch();
-    var emailCountTask = batch.StringIncrementAsync(emailKey);
-    var ipCountTask = batch.StringIncrementAsync(ipKey);
-    _ = batch.KeyExpireAsync(emailKey, TimeSpan.FromMinutes(2));
-    _ = batch.KeyExpireAsync(ipKey, TimeSpan.FromMinutes(2));
-    batch.Execute();
-
-    var emailCount = await emailCountTask;
-    var ipCount = await ipCountTask;
-
-    return emailCount <= 5 && ipCount <= 30;
-}
-```
-
-Notes:
-
-- hash email before using it in infrastructure keys;
-- combine account identifier and IP;
-- choose windows and thresholds based on risk and real traffic;
-- monitor rejected requests.
-
-## Login Endpoint Example
-
-```csharp
-[HttpPost("login")]
-public async Task<IActionResult> Login(LoginRequest request, CancellationToken ct)
-{
-    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-    if (!await _rateLimiter.AllowLoginAttemptAsync(request.Email, ipAddress, ct))
-    {
-        Response.Headers["Retry-After"] = "60";
-        return StatusCode(StatusCodes.Status429TooManyRequests, new
-        {
-            title = "Too many attempts. Please try again later."
-        });
-    }
-
-    var result = await _authService.LoginAsync(request, ct);
-
-    if (!result.Succeeded)
-    {
-        return Unauthorized(new
-        {
-            title = "Invalid email or password."
-        });
-    }
-
-    return Ok(result.TokenResponse);
-}
-```
-
-Notice the login error is generic. It does not reveal whether the email exists.
-
-## Response
-
-```http
-429 Too Many Requests
-Retry-After: 60
-```
-
-## Avoid User Enumeration
-
-For login/password reset:
-
-Bad:
-
-```text
-Email does not exist.
-```
-
-Better:
-
-```text
-If the account exists, instructions will be sent.
-```
-
-Password reset endpoint:
-
-```csharp
-[HttpPost("forgot-password")]
-public async Task<IActionResult> ForgotPassword(
-    ForgotPasswordRequest request,
-    CancellationToken ct)
-{
-    await _passwordResetService.RequestResetAsync(request.Email, ct);
-
-    return Ok(new
-    {
-        message = "If the account exists, password reset instructions will be sent."
-    });
-}
-```
-
-## Distributed Rate Limiting Concerns
-
-In multiple API instances, in-memory rate limiting is not enough for global limits.
-
-Options:
-
-- Redis-backed counters;
-- API gateway rate limiting;
-- cloud WAF/bot protection;
-- identity-provider lockout;
-- tenant/API-key quota service.
-
-Fail-open vs fail-closed:
-
-```text
-Redis down during public login attack:
-  fail closed or use stricter local fallback
-
-Redis down for low-risk internal dashboard:
-  fail open with alert may preserve availability
-```
-
-The right behavior depends on the endpoint's risk.
-
-## Review Questions
-
-### Why rate limit login?
-
-> To slow brute force and credential stuffing attacks and reduce load from abuse.
-
-### What key should rate limiting use?
-
-> It depends. For login, combine email/user identifier and IP. For APIs, use API key/user/tenant. Avoid relying only on IP because NAT and proxies can affect many users.
-
-### Fail open or fail closed if Redis is down?
-
-> It depends on risk. For public abuse protection, fail closed may be safer. For critical internal workflows, fail open with alert may preserve availability.
-
-## Common Mistakes
-
-- IP-only limits.
-- No rate limit on password reset.
-- Different error messages that reveal accounts.
-- No monitoring on rate-limit triggers.
-- No bypass strategy for trusted internal systems.
-
-## Practice Task
-
-Design rate limits for:
-
-1. login;
-2. password reset;
-3. file upload;
-4. public search API;
-5. tenant-level API usage.
+Once designed that way, rate limiting becomes a meaningful security boundary rather than a checkbox middleware feature.

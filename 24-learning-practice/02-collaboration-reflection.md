@@ -4,14 +4,6 @@
 
 Collaboration reflection helps engineers understand how work gets done with people, ambiguity, pressure, conflict, and responsibility.
 
-Chinese notes:
-
-- `collaboration`: 协作.
-- `ownership`: 主动负责.
-- `ambiguity`: 模糊性.
-- `alignment`: 对齐.
-- `reflection`: 反思.
-
 Software quality is shaped by both technical decisions and collaboration habits.
 
 ## What To Reflect On
@@ -93,26 +85,15 @@ Update this every few months.
 
 Useful questions:
 
-- What user problem are we solving?
-- What is in scope?
-- What is explicitly out of scope?
-- What edge cases matter?
-- What happens on failure?
-- What permissions are required?
-- What does success look like?
-
 Example note:
 
 ```text
 The requirement said "admins can export users."
 
 Clarifications:
-  - Which admin permission is required?
   - Is export tenant-scoped?
-  - How many rows can be exported?
   - Should large exports be async?
   - Should export actions be audited?
-  - What columns are allowed?
 ```
 
 ## Disagreement Or Conflict
@@ -219,17 +200,6 @@ Is this urgent or optional?
 
 ## Reflection Prompts
 
-- What project taught me the most recently?
-- What technical decision did I help clarify?
-- What production issue changed how I build systems?
-- What requirement was ambiguous, and how was it clarified?
-- What disagreement became productive?
-- What bug could have been prevented with a better test?
-- What documentation would have saved time?
-- What repetitive problem should become a pattern?
-- What did I learn from another engineer?
-- What do I want to become better at next?
-
 ## Useful Team Discussion Question
 
 Ask:
@@ -239,20 +209,6 @@ What are the biggest technical risks or learning areas for this project in the n
 ```
 
 This turns reflection into practical team improvement.
-
-## Knowledge Checks
-
-### Why reflect on collaboration?
-
-Because many engineering problems are not purely technical. Requirements, communication, ownership, review quality, and incident response all affect system quality.
-
-### What makes disagreement productive?
-
-A productive disagreement focuses on shared goals, evidence, constraints, and trade-offs instead of personal preference.
-
-### What is leadership without a title?
-
-It is making the work clearer, safer, and more effective for others through technical judgment, documentation, mentoring, coordination, and ownership.
 
 ## Practice Task
 

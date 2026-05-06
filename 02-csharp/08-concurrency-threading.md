@@ -2,85 +2,52 @@
 
 ## Core Idea
 
-Concurrency means multiple tasks make progress over overlapping time periods. Threading is one way to achieve concurrency.
+Concurrency is the discipline of making multiple operations progress over overlapping periods of time. Threading is one of the mechanisms the runtime uses to make that possible, but it is not the whole story. In production .NET systems, the harder problems usually appear when several operations contend for shared state, shared execution capacity, or limited downstream resources.
 
-Chinese notes:
+The previous chapter explained asynchronous control flow. This chapter begins where `async` and `await` stop being enough on their own. Once several operations interact, engineers must reason about thread safety, worker availability, synchronization, backpressure, and coordination under load.
 
-- `concurrency`: 并发.
-- `parallelism`: 并行.
-- `race condition`: 竞态条件.
-- `deadlock`: 死锁.
+## Concurrency Versus Parallelism
 
-## Thread vs Task
+Concurrency and parallelism are related but different.
 
-`Thread`:
+Concurrency means multiple operations are in progress over time. Parallelism means multiple operations are literally executing at the same instant on different cores.
 
-- OS thread;
-- lower-level;
-- expensive to create.
+Many server applications are highly concurrent even when the amount of useful parallel CPU work is modest. A web server may have thousands of requests in flight, most of them waiting on databases or network dependencies. This distinction matters because some problems are about coordination and resource ownership rather than about raw CPU execution.
 
-`Task`:
+## Tasks, Threads, And The ThreadPool
 
-- represents asynchronous operation;
-- may or may not use a dedicated thread;
-- works with async/await.
-
-Example:
+A `Task` is an abstraction representing work or future completion. A `Thread` is an execution resource managed by the operating system.
 
 ```csharp
 var task = Task.Run(() => Calculate());
 var result = await task;
 ```
 
-`Task.Run` queues work to the ThreadPool. But many async tasks, such as HTTP or database calls, do not need a dedicated thread while waiting.
+This queues CPU-bound work to the ThreadPool, but many tasks do not map one-to-one to threads. An asynchronous HTTP call or database query may spend most of its lifetime without any dedicated thread blocked on its behalf.
 
-Key point:
-
-> A `Thread` is an execution resource. A `Task` is an abstraction representing work or future completion.
-
-## Under The Hood: ThreadPool
-
-.NET uses the ThreadPool（线程池） to run many short-lived pieces of work without creating a new OS thread for each operation.
-
-Used by:
-
-- `Task.Run`;
-- continuations after `await`;
-- ASP.NET Core request processing;
-- timers;
-- background work.
-
-Why it exists:
-
-- creating OS threads is expensive;
-- too many threads cause context switching;
-- pooling lets .NET reuse worker threads.
-
-Conceptual model:
+The ThreadPool exists because creating OS threads is expensive and letting each short operation allocate its own thread would scale poorly. The runtime therefore reuses a pool of worker threads for request handling, continuations, timers, background work, and many framework operations.
 
 ```text
-Work item queued
-  -> ThreadPool worker picks it up
-  -> executes work
-  -> worker returns to pool
+work item queued
+worker thread picks it up
+work executes
+worker returns to the pool
 ```
 
-The ThreadPool can inject more threads when needed, but it does not create unlimited threads instantly.
+This pooled model is one reason thread misuse has system-wide consequences. When worker threads are blocked or monopolized, unrelated work may suffer too.
 
-## ThreadPool Starvation
+## ThreadPool Starvation As A System Failure
 
-ThreadPool starvation（线程池饥饿） happens when queued work cannot get worker threads quickly enough.
+ThreadPool starvation happens when work is queued but available workers are not arriving quickly enough to keep the system responsive.
 
-Common causes:
+Common causes include:
 
 - blocking async code with `.Result` or `.Wait()`;
-- sync database/HTTP calls in high-concurrency paths;
-- long CPU-bound work on ThreadPool threads;
-- too many fire-and-forget tasks;
-- locks held for too long;
-- external dependency slowness causing many blocked threads.
-
-Bad:
+- synchronous dependency calls in high-concurrency paths;
+- long CPU-bound work occupying worker threads;
+- excessive fire-and-forget fan-out;
+- locks held too long;
+- downstream slowness that keeps many operations blocked simultaneously.
 
 ```csharp
 public IActionResult Get()
@@ -90,104 +57,43 @@ public IActionResult Get()
 }
 ```
 
-Problem:
+This code looks small, but under load it can create a damaging system pattern:
 
 ```text
-Request thread blocks.
-More requests arrive.
-More ThreadPool threads block.
-Continuations wait for available ThreadPool threads.
-Latency spikes.
+request thread blocks
+more requests arrive
+more workers block
+continuations wait for workers
+latency rises across the application
 ```
 
-Better:
+The fix is usually not a local trick. It is architectural discipline: async end to end where the work is genuinely asynchronous, bounded CPU work, and careful control over background concurrency.
 
-```csharp
-public async Task<IActionResult> Get(CancellationToken ct)
-{
-    var result = await _client.GetStringAsync("https://example.com", ct);
-    return Ok(result);
-}
-```
+## Diagnosing Worker Exhaustion
 
-## Diagnosing ThreadPool Starvation
+Starvation often presents as a throughput or latency problem rather than a crash.
 
-Symptoms:
+Typical symptoms include:
 
-- sudden latency spike;
-- CPU may be low or moderate, not necessarily high;
-- request queue grows;
-- logs show long gaps before simple work starts;
-- many threads blocked in stack traces;
-- timeouts increase across unrelated endpoints.
+- sudden latency spikes;
+- timeouts across otherwise unrelated endpoints;
+- request queues growing while CPU is only moderate;
+- stack traces showing many blocked workers;
+- long delays before simple continuations run.
 
-Useful evidence:
+Useful evidence includes:
 
-- `dotnet-counters` ThreadPool queue length and thread count;
-- traces showing blocked threads;
-- dumps showing many threads waiting on `.Result`, locks, or sync I/O;
-- ASP.NET Core request duration metrics;
-- dependency latency.
+- `dotnet-counters` ThreadPool metrics;
+- traces showing blocked work;
+- dumps showing sync-over-async, locks, or synchronous I/O;
+- request duration metrics;
+- dependency timing.
 
-Practical explanation:
+This diagnostic pattern matters because many teams initially misread starvation as "the server needs more threads." More often the real question is why existing workers are being held in non-productive waits.
 
-> ThreadPool starvation is when work is queued but cannot get worker threads promptly, often because threads are blocked by sync-over-async or long-running work. I look for blocked stacks, ThreadPool queue length, request latency, and dependency calls, then remove blocking and bound concurrency.
+## Shared Mutable State And Race Conditions
 
-## CPU-bound Work In ASP.NET Core
-
-Async helps I/O-bound work. It does not make CPU-bound work disappear.
-
-Bad pattern:
-
-```csharp
-public async Task<IActionResult> Export()
-{
-    var bytes = GenerateHugeReport(); // CPU-heavy
-    return File(bytes, "application/pdf");
-}
-```
-
-Options:
-
-- move heavy work to background job;
-- queue the job and return `202 Accepted`;
-- stream output where possible;
-- use bounded concurrency;
-- scale workers separately;
-- avoid `Task.Run` as a default fix in request handlers.
-
-`Task.Run` may be acceptable for small isolated CPU work in some apps, but it is usually not the right architecture for heavy server workloads.
-
-## Locks And Async
-
-Do not `await` while holding a `lock`.
-
-This is illegal:
-
-```csharp
-lock (_gate)
-{
-    await DoWorkAsync(); // not allowed
-}
-```
-
-Use `SemaphoreSlim` for async coordination:
-
-```csharp
-await _semaphore.WaitAsync(ct);
-try
-{
-    await DoWorkAsync(ct);
-}
-finally
-{
-    _semaphore.Release();
-}
-```
-
-## Race Condition
-
-Bad:
+The central correctness problem in concurrent code is shared mutable state. Once several operations can observe and modify the same data at overlapping times, timing becomes part of program behavior.
 
 ```csharp
 private int _count;
@@ -198,20 +104,13 @@ public void Increment()
 }
 ```
 
-Multiple threads can update incorrectly.
+This looks trivial, but `_count++` is not an indivisible action. It reads the value, computes a new one, and writes the result back. Two threads can interleave those steps and lose updates.
 
-Why:
+Race conditions are difficult because the code may appear correct under light load or during local testing and fail only under particular scheduling patterns. The safest long-term strategy is often not smarter locking, but reduced sharing. When data can be owned by a single workflow, queued, or made immutable, entire classes of concurrency bugs disappear.
 
-```text
-_count++ roughly means:
-  read _count
-  add 1
-  write _count
-```
+## Atomic Operations And Locks
 
-Two threads can read the same old value and both write the same new value.
-
-Fix:
+For small shared counters or flags, atomic operations can be enough:
 
 ```csharp
 private int _count;
@@ -222,7 +121,7 @@ public void Increment()
 }
 ```
 
-## Lock
+When a larger invariant must be protected, `lock` is often the simplest correct tool:
 
 ```csharp
 private readonly object _gate = new();
@@ -237,57 +136,39 @@ public void Increment()
 }
 ```
 
-Use lock to protect shared mutable state.
+The strength of `lock` is that it protects a critical section rather than a single variable. That makes it useful when several related mutations must happen together. Its danger is that poorly scoped lock regions can become bottlenecks or deadlock hazards.
 
-Keep lock blocks small:
+In practice, two habits matter most:
 
-```csharp
-public void Add(Order order)
-{
-    lock (_gate)
-    {
-        _orders.Add(order);
-    }
-}
-```
-
-Avoid doing slow I/O inside locks:
+- keep lock duration short;
+- avoid slow or external work inside the lock.
 
 ```csharp
 lock (_gate)
 {
-    // Bad: external call while holding lock
     _paymentClient.Charge(order);
 }
 ```
 
-Why:
+This is risky because the lock now depends on network timing, downstream latency, and possibly remote failure behavior. A critical section should usually protect in-memory state transitions, not long-running I/O.
 
-> Other threads cannot enter the lock while the external call is slow or stuck.
+## Async Coordination And `SemaphoreSlim`
 
-## SemaphoreSlim
-
-Limit concurrency:
+Traditional `lock` is synchronous and cannot span `await`. When the protected workflow itself is asynchronous, `SemaphoreSlim` is often the right coordination primitive.
 
 ```csharp
-private readonly SemaphoreSlim _semaphore = new(5);
-
-public async Task ProcessAsync(Item item, CancellationToken ct)
+await _semaphore.WaitAsync(ct);
+try
 {
-    await _semaphore.WaitAsync(ct);
-
-    try
-    {
-        await DoWorkAsync(item, ct);
-    }
-    finally
-    {
-        _semaphore.Release();
-    }
+    await DoWorkAsync(ct);
+}
+finally
+{
+    _semaphore.Release();
 }
 ```
 
-`SemaphoreSlim` is also useful when an external dependency has a practical limit:
+This is useful both for mutual exclusion and for bounded concurrency:
 
 ```csharp
 private readonly SemaphoreSlim _apiLimit = new(10);
@@ -306,31 +187,13 @@ public async Task SyncCustomerAsync(Customer customer, CancellationToken ct)
 }
 ```
 
-This does not make the external API faster. It protects both systems from too much parallel work.
+The point here is not speed. It is load shaping. A semaphore can protect the application and the downstream system from excessive parallelism even when each individual operation is correct in isolation.
 
-## ConcurrentDictionary
+## Deadlocks And Ordering Problems
 
-```csharp
-private readonly ConcurrentDictionary<string, int> _counts = new();
+Deadlock occurs when operations wait on one another in a cycle that never resolves.
 
-public void Add(string key)
-{
-    _counts.AddOrUpdate(key, 1, (_, old) => old + 1);
-}
-```
-
-## Deadlock
-
-Deadlock happens when operations wait on each other forever.
-
-Classic causes:
-
-- inconsistent lock order;
-- blocking async code;
-- holding locks while calling external systems;
-- no timeout.
-
-Classic lock-order deadlock:
+One classic pattern is inconsistent lock ordering:
 
 ```csharp
 private readonly object _a = new();
@@ -357,24 +220,28 @@ public void Method2()
 }
 ```
 
-If one thread holds `_a` and another holds `_b`, each can wait for the other forever.
+If one thread acquires `_a` and another acquires `_b`, both can wait forever.
 
-Fix:
+The broader lesson is that concurrency bugs often arise from ordering assumptions that remain invisible until load or timing changes. Consistent lock ordering, short critical sections, and avoiding lock-plus-I/O combinations reduce the risk substantially.
 
-> Always acquire locks in a consistent order, keep lock duration short, avoid external calls inside locks, and use timeouts where appropriate.
+## Concurrent Collections
 
-## ReaderWriterLockSlim
+When the main need is safe concurrent access to a collection, specialized concurrent types can be more appropriate than manual locking.
 
-`ReaderWriterLockSlim` allows multiple readers or one writer.
+```csharp
+private readonly ConcurrentDictionary<string, int> _counts = new();
 
-It can help when:
+public void Add(string key)
+{
+    _counts.AddOrUpdate(key, 1, (_, old) => old + 1);
+}
+```
 
-- reads are very frequent;
-- writes are rare;
-- the protected data is in memory;
-- the critical section is short and synchronous.
+These types are useful because they encode safe collection-level operations directly. They are not, however, a substitute for higher-level invariant design. A `ConcurrentDictionary<TKey, TValue>` can protect dictionary operations while the objects stored inside remain mutable and unsafe for concurrent use. Thread safety at the container level does not automatically imply thread safety at the object graph level.
 
-Example:
+## Reader-Heavy And Snapshot-Oriented Designs
+
+Some workloads have many reads and comparatively few writes. `ReaderWriterLockSlim` exists for that scenario:
 
 ```csharp
 private readonly ReaderWriterLockSlim _lock = new();
@@ -392,31 +259,25 @@ public Product? Get(string sku)
         _lock.ExitReadLock();
     }
 }
-
-public void Upsert(Product product)
-{
-    _lock.EnterWriteLock();
-    try
-    {
-        _products[product.Sku] = product;
-    }
-    finally
-    {
-        _lock.ExitWriteLock();
-    }
-}
 ```
 
-Use it carefully:
+It has a real but narrow use case: short, synchronous, in-memory critical sections with many readers and relatively rare writes. It should not be stretched across asynchronous work or assumed to outperform a plain `lock` automatically.
 
-- do not hold it during slow I/O;
-- do not use it across `await`;
-- measure before assuming it is faster than a simple `lock`;
-- consider immutable snapshots or `ConcurrentDictionary` first.
+In many designs, immutable snapshots are cleaner:
 
-## Channels For Producer/Consumer Work
+```csharp
+public sealed record UserSnapshot(int Id, string Name, string Email);
+```
 
-For background producer/consumer workflows, `Channel<T>` is often better than unbounded fire-and-forget tasks.
+Immutable data avoids many coordination problems because shared readers no longer compete over mutation.
+
+## Backpressure And Bounded Work
+
+One of the most important concurrency concepts in production systems is backpressure: the idea that producers should not create work faster than consumers can process it sustainably.
+
+Without backpressure, queues grow without bound, memory usage climbs, worker threads saturate, and downstream services are overwhelmed. This is why "just start another task" often scales poorly.
+
+`Channel<T>` is a strong fit for producer-consumer workflows because it expresses both handoff and bounded capacity:
 
 ```csharp
 var channel = Channel.CreateBounded<OrderJob>(capacity: 100);
@@ -429,26 +290,36 @@ await foreach (var job in channel.Reader.ReadAllAsync(ct))
 }
 ```
 
-Why useful:
+This pattern is often safer than unbounded fire-and-forget task creation because it makes overload visible and manageable rather than silently converting it into memory growth and thread contention.
 
-- supports backpressure;
-- avoids unbounded task creation;
-- fits background worker design;
-- can respect cancellation.
+## CPU-Bound Work In Request-Driven Systems
 
-## Immutable Data For Thread Safety
-
-One way to avoid locks is to avoid mutation.
+Not all concurrency problems are about waiting. Some are about too much expensive computation happening in the wrong place.
 
 ```csharp
-public sealed record UserSnapshot(int Id, string Name, string Email);
+public async Task<IActionResult> Export()
+{
+    var bytes = GenerateHugeReport();
+    return File(bytes, "application/pdf");
+}
 ```
 
-Immutable data can be safely shared across threads because no thread can modify it after creation.
+If report generation is genuinely heavy, the issue is not whether the method is marked `async`. The issue is that CPU-intensive work is happening on request-processing capacity that may already be valuable to latency-sensitive traffic.
 
-## PeriodicTimer For Repeating Work
+Possible responses include:
 
-`PeriodicTimer` is a clean async-friendly way to run repeated work in a background service.
+- moving the work to a background job;
+- queueing the request and returning `202 Accepted`;
+- limiting concurrent exports;
+- scaling compute separately from the request tier.
+
+The common anti-pattern is using `Task.Run` as though it were an architecture. It can move CPU work to a worker thread, but it does not make the work cheaper and often does not solve the system-level contention problem.
+
+## Periodic And Background Coordination
+
+Some concurrent workflows are not request-driven at all. They are recurring background processes that must cooperate cleanly with shutdown and failure handling.
+
+`PeriodicTimer` provides a simple async-friendly pattern:
 
 ```csharp
 public sealed class CleanupWorker : BackgroundService
@@ -470,128 +341,4 @@ public sealed class CleanupWorker : BackgroundService
 }
 ```
 
-Important details:
-
-- pass the shutdown token;
-- handle exceptions inside the loop if one failed iteration should not stop the worker;
-- avoid overlapping executions unless the design explicitly allows overlap.
-
-## Review Questions
-
-### Concurrency vs parallelism?
-
-> Concurrency is about dealing with multiple tasks at once. Parallelism means actually executing multiple tasks at the same time, usually on multiple cores.
-
-### What is thread safety?
-
-> Code is thread-safe if it behaves correctly when accessed concurrently by multiple threads.
-
-### How do you avoid race conditions?
-
-> Avoid shared mutable state where possible, or protect it with locks, atomic operations, immutable data, or concurrent collections.
-
-### What is ThreadPool starvation?
-
-> ThreadPool starvation happens when queued work cannot get worker threads quickly because existing threads are blocked or occupied too long. Common causes include sync-over-async, blocking I/O, long CPU work, and unbounded background tasks.
-
-### How do you fix ThreadPool starvation?
-
-> Remove blocking calls, use async APIs end to end, move CPU-heavy work to background workers, bound concurrency, add timeouts, and inspect dumps/counters to find blocked threads.
-
-### When should you use `lock` vs `ConcurrentDictionary`?
-
-> Use `lock` when you need to protect a custom critical section or multiple operations that must be atomic together. Use `ConcurrentDictionary` for common thread-safe dictionary operations such as `GetOrAdd` or `AddOrUpdate`.
-
-### What is backpressure?
-
-> Backpressure means the system slows producers when consumers cannot keep up. Bounded channels, queues, and rate limits prevent unlimited memory growth and dependency overload.
-
-### When would you use `ReaderWriterLockSlim`?
-
-> Use it for short synchronous in-memory critical sections with many readers and few writers. Avoid it for async I/O and measure before using it instead of simpler approaches.
-
-### Why use `PeriodicTimer` in background workers?
-
-> It works naturally with `async` and cancellation, making repeated work easier to stop cleanly during shutdown.
-
-## Common Mistakes
-
-### Mistake: Locking on public objects or strings.
-
-Why it is wrong:
-
-> Other code can lock the same public object or interned string, creating unexpected deadlocks.
-
-Better answer:
-
-> Lock on a private readonly object owned by the class.
-
-### Mistake: Holding locks during async awaits.
-
-Why it is wrong:
-
-> `lock` is synchronous and should not protect code that awaits. Holding exclusive access while waiting for I/O can block other work and create deadlock-like behavior.
-
-Better answer:
-
-> Keep locks short and synchronous, or use async-compatible coordination such as `SemaphoreSlim`.
-
-### Mistake: Blocking async calls with `.Result`.
-
-Why it is wrong:
-
-> It blocks a thread while async work is pending, reducing scalability and contributing to thread pool starvation.
-
-Better answer:
-
-> Use `await`.
-
-### Mistake: Assuming `Dictionary` is thread-safe.
-
-Why it is wrong:
-
-> Concurrent writes can corrupt state or throw exceptions. Even read/write mixtures can be unsafe.
-
-Better answer:
-
-> Use locking, immutable replacement, or `ConcurrentDictionary` depending on the scenario.
-
-### Mistake: No cancellation in long-running work.
-
-Why it is wrong:
-
-> Work may continue after shutdown, timeout, or client disconnect, wasting resources and delaying graceful shutdown.
-
-Better answer:
-
-> Pass and check `CancellationToken`.
-
-### Mistake: Running heavy CPU work on request threads.
-
-Why it is wrong:
-
-> CPU-bound work can occupy thread pool threads and increase latency for unrelated requests.
-
-Better answer:
-
-> Move heavy work to background processing, separate workers, or dedicated compute services when needed.
-
-### Mistake: Creating unbounded fire-and-forget tasks.
-
-Why it is wrong:
-
-> They can grow without backpressure, lose exceptions, and overwhelm dependencies.
-
-Better answer:
-
-> Use bounded queues, background services, or job systems with retry and monitoring.
-
-### Mistake: Treating `Task.Run` as a universal server-side fix.
-
-Why it is wrong:
-
-> `Task.Run` only moves work to another thread pool thread. It does not make blocking I/O scalable and can worsen thread pool pressure.
-
-Better answer:
-
-> Fix the root cause: use async I/O, reduce CPU work, or move work out of the request path.
+The operational details matter here too. Repeated work should usually observe shutdown tokens, decide how failures affect later iterations, and avoid accidental overlap unless overlap is explicitly acceptable.

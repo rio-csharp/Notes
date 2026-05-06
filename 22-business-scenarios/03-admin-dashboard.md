@@ -4,14 +4,6 @@
 
 An admin dashboard is an internal operational interface for managing users, permissions, records, workflows, settings, audit logs, imports, exports, and support actions.
 
-Chinese notes:
-
-- `admin dashboard`: 管理后台.
-- `audit log`: 审计日志.
-- `data table`: 数据表格.
-- `bulk action`: 批量操作.
-- `operational UI`: 运营型界面.
-
 Admin dashboards should be efficient, safe, and traceable. They are often used by internal teams repeatedly throughout the day.
 
 ## Common Features
@@ -540,36 +532,6 @@ Large exports should use streaming and permission checks.
 - debounce search;
 - avoid unnecessary frontend re-renders;
 - use virtualization only when truly needed.
-
-## Knowledge Checks
-
-### How can a reusable table component be designed?
-
-Separate table rendering from data fetching. The table receives rows, columns, loading state, error state, pagination state, and callbacks. API-specific logic stays in page hooks or feature API modules.
-
-### How should admin actions be secured?
-
-Every admin API should use backend authorization policies. The UI can hide actions based on permissions for usability, but the API must recheck permissions. Sensitive actions should be audited.
-
-### How should large exports be handled?
-
-Use an export job. Generate the file in the background, store it in object storage, record audit information, and provide a secure download when ready.
-
-### Why keep filters in the URL?
-
-URL filters make pages shareable, restorable after refresh, and easier to debug.
-
-## Common Mistakes
-
-- Client-side pagination for huge data.
-- No audit logs.
-- Only frontend permission checks.
-- No debounce for search.
-- Exporting large reports in request thread.
-- No loading/error/empty states.
-- Reusable table component tied to one API.
-- Hard deleting important records with no recovery.
-- No index strategy for common filters.
 
 ## Practice Task
 

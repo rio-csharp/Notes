@@ -2,26 +2,13 @@
 
 ## Core Idea
 
-Filters run inside the MVC / controller execution pipeline. They allow you to run code before or after specific MVC stages, such as authorization, resource execution, action execution, exception handling, and result execution.
+Filters are part of MVC execution rather than part of the global HTTP pipeline. They run only when a request reaches controller-based endpoint execution, and they provide hooks around specific MVC stages such as authorization, resource execution, action execution, exception handling, and result execution.
 
-Chinese notes:
+This makes filters useful when the required behavior depends on MVC-specific context such as action arguments, model state, controller metadata, or action results. It also means filters are not a general substitute for middleware. Their scope is narrower and their purpose is more local to controller execution.
 
-- `filter`: 过滤器.
-- `action filter`: 动作过滤器.
-- `resource filter`: 资源过滤器.
-- `exception filter`: 异常过滤器.
-- `result filter`: 结果过滤器.
-- `short-circuit`: 短路, meaning stop the rest of the pipeline and return a response early.
+## Filters In The Request Flow
 
-The most important review distinction:
-
-> Middleware is part of the global HTTP pipeline. Filters are part of MVC action execution.
-
-So middleware can affect every request, including static files, health checks, Minimal APIs, and controllers. MVC filters only run when the request reaches MVC controller/action execution.
-
-## Where Filters Fit In The Request Flow
-
-A simplified request flow:
+A controller request typically moves through the application like this:
 
 ```text
 HTTP request
@@ -36,34 +23,42 @@ HTTP request
   <- HTTP response
 ```
 
-Inside MVC, the filter pipeline looks like this:
+Inside MVC, the filter pipeline is layered more finely:
 
 ```text
-Authorization filters
-  Resource filters
-    Model binding
-    Action filters
-      Controller action
-    Exception filters
-    Result filters
-      Result execution
+authorization filters
+resource filters
+  model binding
+  action filters
+    controller action
+  exception filters
+  result filters
+    result execution
 ```
 
-More precisely:
+This staged model is the main reason filters exist. They allow code to intervene at points in controller execution that middleware cannot observe directly.
 
-- authorization filters run early and decide whether MVC should continue;
-- resource filters wrap most MVC work and can short-circuit before model binding;
-- action filters run around controller action execution;
-- exception filters handle exceptions from model binding, action filters, and actions, but not every possible exception in the whole app;
-- result filters run around result execution, such as serializing an object to JSON.
+## Middleware And Filters Solve Different Problems
 
-## Filter Types
+The distinction between middleware and filters is foundational.
 
-### Authorization Filters
+Middleware is appropriate when behavior should apply broadly across the HTTP application, including controllers, Minimal APIs, health checks, and static files.
 
-Authorization filters run first in the MVC filter pipeline.
+Filters are appropriate when behavior depends on MVC-specific information such as:
 
-They are powerful but usually you should prefer ASP.NET Core authorization policies:
+- action arguments;
+- `ModelState`;
+- controller/action metadata;
+- MVC result execution;
+- the ability to short-circuit inside controller execution.
+
+Once this difference is clear, many design decisions become easier. Global exception handling, correlation IDs, and security headers usually belong in middleware. Model-state-dependent logic, controller action timing, and result transformation often belong in filters.
+
+## Authorization Filters
+
+Authorization filters run first inside the MVC filter pipeline.
+
+In modern ASP.NET Core applications, however, custom authorization filters are usually not the first tool to reach for. Policy-based authorization and authorization middleware generally provide a clearer and more consistent model:
 
 ```csharp
 [Authorize(Policy = "CanManageOrders")]
@@ -73,19 +68,13 @@ public async Task<IActionResult> UpdateOrder(int id, UpdateOrderRequest request)
 }
 ```
 
-Use custom authorization filters only when you have a very specific MVC-level reason. For most systems, policy-based authorization is clearer, testable, and consistent.
+Custom authorization filters still exist, but they are typically most appropriate when a very specific MVC-layer concern requires them. As a general architectural rule, policy-based authorization scales better because it keeps access logic centralized and aligned with the broader security system.
 
-### Resource Filters
+## Resource Filters
 
-Resource filters run before model binding and after result execution.
+Resource filters wrap most MVC work and run before model binding.
 
-They are useful when you need to:
-
-- short-circuit before model binding;
-- implement simple MVC-level caching;
-- apply logic around the whole MVC request.
-
-Example: reject very large requests before model binding tries to read them.
+That timing gives them a useful niche. They can short-circuit expensive MVC execution before model binding begins, or they can wrap the entire MVC handling of the request.
 
 ```csharp
 public sealed class MaxRequestBodySizeFilter : IAsyncResourceFilter
@@ -122,23 +111,11 @@ public sealed class MaxRequestBodySizeFilter : IAsyncResourceFilter
 }
 ```
 
-Key point:
+This is a good example of filter placement mattering. An action filter would run too late to avoid model binding. A resource filter can prevent that work altogether.
 
-> A resource filter can run before model binding, so it can avoid expensive binding work. An action filter runs after model binding.
+## Action Filters
 
-### Action Filters
-
-Action filters run before and after a controller action.
-
-They can access:
-
-- action arguments;
-- model state;
-- controller/action metadata;
-- action execution result;
-- exceptions thrown by the action.
-
-Example: action timing.
+Action filters run around controller action execution itself. They are useful when logic depends on action arguments, action metadata, or the outcome of the action.
 
 ```csharp
 public sealed class TimingFilter : IAsyncActionFilter
@@ -176,15 +153,11 @@ public sealed class TimingFilter : IAsyncActionFilter
 }
 ```
 
-Note:
+Action filters are often a good fit when behavior should wrap only controller actions rather than the whole application pipeline.
 
-> If you need `await`, use `IAsyncActionFilter`. Do not block on async work inside a synchronous filter.
+## Exception Filters
 
-### Exception Filters
-
-Exception filters can convert selected exceptions into action results.
-
-Example:
+Exception filters can convert selected controller-layer exceptions into MVC results.
 
 ```csharp
 public sealed class DomainExceptionFilter : IExceptionFilter
@@ -206,30 +179,11 @@ public sealed class DomainExceptionFilter : IExceptionFilter
 }
 ```
 
-However, for global API error handling, exception middleware or `IExceptionHandler` is usually preferred.
+This can be useful when exception translation is intentionally tied to MVC result semantics. Even so, application-wide exception handling is usually better placed in middleware or `IExceptionHandler`, because those mechanisms also cover failures outside MVC execution. Exception filters are therefore best viewed as specialized tools rather than the default global error strategy.
 
-Why?
+## Result Filters
 
-- middleware can catch exceptions outside MVC too;
-- middleware is easier to make consistent for controllers and Minimal APIs;
-- middleware can run near the beginning of the HTTP pipeline;
-- exception filters do not catch exceptions thrown by earlier middleware.
-
-Practical explanation:
-
-> I use global exception middleware for application-wide error handling. I use exception filters only for MVC-specific exception mapping when I need access to MVC context.
-
-### Result Filters
-
-Result filters run before and after action result execution.
-
-They are useful when you need to:
-
-- add response headers to MVC responses;
-- transform result metadata;
-- measure serialization/result execution time.
-
-Example:
+Result filters run around action result execution.
 
 ```csharp
 public sealed class NoStoreResultFilter : IResultFilter
@@ -245,15 +199,11 @@ public sealed class NoStoreResultFilter : IResultFilter
 }
 ```
 
-Be careful:
+They are useful when the concern is specifically about controller result behavior, such as adjusting response headers, timing result execution, or shaping certain result metadata. Their limitation is the same one found elsewhere in the response path: once the response has started, some changes are no longer safe.
 
-> After the response body has started, you may no longer be able to change headers or status code.
+## Synchronous And Asynchronous Filters
 
-## Sync vs Async Filters
-
-ASP.NET Core provides synchronous and asynchronous filter interfaces.
-
-Examples:
+ASP.NET Core offers both synchronous and asynchronous filter interfaces.
 
 ```csharp
 public sealed class LogActionFilter : IActionFilter
@@ -280,29 +230,7 @@ public sealed class LogAsyncActionFilter : IAsyncActionFilter
 }
 ```
 
-Rule of thumb:
-
-- use synchronous filters only for fast CPU-only logic;
-- use asynchronous filters when doing I/O, logging scopes, database calls, cache calls, or external calls;
-- never call `.Result` or `.Wait()` on async work in a filter.
-
-Common mistake:
-
-```csharp
-public void OnActionExecuting(ActionExecutingContext context)
-{
-    var user = _userService.GetCurrentUserAsync().Result; // bad
-}
-```
-
-Why it is wrong:
-
-- it blocks a thread pool thread;
-- it can cause thread starvation under load;
-- it hides latency inside the MVC pipeline;
-- in some synchronization contexts it can deadlock, though ASP.NET Core itself does not have the classic ASP.NET synchronization context.
-
-Better:
+The choice should follow the work being done. Synchronous filters are appropriate for fast CPU-only behavior. Asynchronous filters are appropriate when the filter needs I/O, service calls, or any awaitable workflow. Blocking on asynchronous work inside a synchronous filter is especially harmful because it hides latency inside the MVC pipeline and can contribute to thread-pool pressure.
 
 ```csharp
 public sealed class CurrentUserFilter : IAsyncActionFilter
@@ -326,9 +254,9 @@ public sealed class CurrentUserFilter : IAsyncActionFilter
 }
 ```
 
-## Filter Scope And Order
+## Scope And Ordering Of Filters
 
-Filters can be applied globally, at controller level, or at action level.
+Filters can be applied globally, at controller scope, or at action scope.
 
 Global registration:
 
@@ -339,7 +267,7 @@ builder.Services.AddControllers(options =>
 });
 ```
 
-Controller level:
+Controller scope:
 
 ```csharp
 [ServiceFilter(typeof(TimingFilter))]
@@ -348,7 +276,7 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-Action level:
+Action scope:
 
 ```csharp
 [TypeFilter(typeof(AuditActionFilter), Arguments = new object[] { "OrderUpdated" })]
@@ -358,9 +286,7 @@ public async Task<IActionResult> UpdateOrder(int id, UpdateOrderRequest request)
 }
 ```
 
-`ServiceFilter` gets the filter from DI. `TypeFilter` can create a filter with DI plus extra arguments.
-
-If filter order matters, implement `IOrderedFilter` or use attributes with `Order`.
+Ordering can also be controlled explicitly:
 
 ```csharp
 public sealed class AuditActionFilter : IAsyncActionFilter, IOrderedFilter
@@ -376,17 +302,11 @@ public sealed class AuditActionFilter : IAsyncActionFilter, IOrderedFilter
 }
 ```
 
-Important warning:
+If a design depends on many filters in a fragile order, that is often a sign that too much behavior has been hidden in the filter system. Filters are useful, but they should not become a maze of implicit application control flow.
 
-> If your design depends on many filters running in a delicate order, the solution may be too hidden and hard to maintain.
+## Validation And The Modern Default
 
-## Validation Filter Example
-
-With `[ApiController]`, ASP.NET Core automatically returns `400 Bad Request` when model validation fails.
-
-Still, learners often ask how a validation filter works.
-
-Example:
+With `[ApiController]`, invalid model state is commonly handled automatically before the action executes. That makes custom validation filters less central than they once were.
 
 ```csharp
 public sealed class ValidateModelFilter : IActionFilter
@@ -409,132 +329,4 @@ public sealed class ValidateModelFilter : IActionFilter
 }
 ```
 
-Why it works:
-
-- model binding has already happened before action filters;
-- validation has already populated `ModelState`;
-- setting `context.Result` short-circuits the action.
-
-Modern answer:
-
-> In current ASP.NET Core APIs, I usually rely on `[ApiController]` for automatic model validation. I write a custom validation filter only if I need a custom response format or special MVC behavior.
-
-## Middleware vs Filters
-
-Use middleware for broad HTTP concerns:
-
-- exception handling;
-- correlation ID;
-- request logging;
-- security headers;
-- rate limiting;
-- response compression;
-- static files;
-- health checks.
-
-Use filters for MVC/action concerns:
-
-- action argument validation;
-- action timing;
-- MVC-specific exception mapping;
-- result transformation;
-- controller/action audit metadata.
-
-Decision table:
-
-| Requirement | Better fit | Why |
-| --- | --- | --- |
-| Add correlation ID to every request | Middleware | Applies before MVC and to all endpoints |
-| Reject unauthorized users | Authorization middleware / policies | Built-in security model |
-| Validate action arguments | Filter or `[ApiController]` | Needs model state and action arguments |
-| Catch all app exceptions | Middleware / `IExceptionHandler` | Catches exceptions outside MVC |
-| Add a header only for controller results | Result filter | MVC result context is useful |
-| Measure controller action time | Action filter | Wraps action execution directly |
-
-## Review Questions
-
-### What are filters?
-
-Filters are MVC components that run before or after specific MVC execution stages. They support cross-cutting concerns such as validation, action logging, exception mapping, and result transformation.
-
-### Filter vs middleware?
-
-Middleware is part of the global HTTP pipeline and can apply to all requests. Filters are part of MVC action execution and have access to MVC-specific information such as action arguments, `ModelState`, and `ActionResult`.
-
-### When would you use an action filter?
-
-Use an action filter when the logic depends on controller action execution, action arguments, model state, or action results. Examples include action timing, audit logging, and custom validation.
-
-### When would you use a resource filter?
-
-Use a resource filter when you need to run code before model binding or wrap most of MVC execution. For example, you might short-circuit large requests or implement MVC-level caching.
-
-### Why are exception filters not always enough for global error handling?
-
-Exception filters only run inside MVC. They do not catch exceptions from earlier middleware, routing, static files, authentication middleware, or Minimal API handlers outside MVC. Global exception middleware or `IExceptionHandler` is broader.
-
-### What happens if a filter sets `context.Result`?
-
-It short-circuits the current MVC stage. For example, an action filter can set `context.Result` during `OnActionExecuting`, and the controller action will not run.
-
-## Common Mistakes
-
-### Mistake: Using filters for things that belong in middleware
-
-Why it is wrong:
-
-> Filters only run for MVC actions. If you put correlation ID, security headers, or global exception handling only in filters, non-MVC endpoints may not get the same behavior.
-
-Better answer:
-
-> Use middleware for global HTTP concerns and filters for controller/action concerns.
-
-### Mistake: Using exception filters for all global exception handling
-
-Why it is wrong:
-
-> Exception filters do not cover the whole ASP.NET Core pipeline. Exceptions can happen before MVC starts.
-
-Better answer:
-
-> Prefer exception middleware or `IExceptionHandler` for consistent app-level error handling. Use exception filters only for MVC-specific cases.
-
-### Mistake: Forgetting filter order
-
-Why it is wrong:
-
-> Authorization filters, resource filters, action filters, exception filters, and result filters run at different stages. If you expect an action filter to run before model binding, your design is wrong.
-
-Better answer:
-
-> Choose the filter type based on the MVC stage where the logic must run.
-
-### Mistake: Adding heavy business logic to filters
-
-Why it is wrong:
-
-> Filters hide behavior away from the action and make business workflows harder to read, test, and debug.
-
-Better answer:
-
-> Keep filters focused on cross-cutting infrastructure concerns. Put business rules in services or domain logic.
-
-### Mistake: Blocking async work in synchronous filters
-
-Why it is wrong:
-
-> Blocking async work wastes thread pool threads and can harm throughput under load.
-
-Better answer:
-
-> Use async filter interfaces when the filter performs asynchronous work.
-
-## Practice Task
-
-Create:
-
-1. a timing action filter;
-2. a validation filter;
-3. a domain exception filter;
-4. a result filter that adds `Cache-Control: no-store`;
-5. the same correlation ID logic as middleware and explain why middleware is the better fit.
+This still illustrates how action filters can short-circuit based on MVC state, but the broader design lesson is that custom filters should exist for a real reason. If the framework already provides the desired behavior coherently, reproducing it manually often adds maintenance burden without increasing clarity.

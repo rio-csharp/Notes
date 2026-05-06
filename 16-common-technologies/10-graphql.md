@@ -4,15 +4,6 @@
 
 GraphQL is an API query language where clients request exactly the data they need.
 
-Chinese notes:
-
-- `schema`: 模式.
-- `resolver`: 解析器.
-- `over-fetching`: 过度获取.
-- `under-fetching`: 获取不足.
-- `DataLoader`: 批量加载工具.
-- `query complexity`: 查询复杂度.
-
 ## Why GraphQL Exists
 
 REST endpoints often return fixed response shapes.
@@ -333,30 +324,6 @@ REST:
 - simpler operational visibility;
 - easier for public APIs and browser/network tooling.
 
-## Common Mistakes
-
-- No query depth/complexity limits.
-- N+1 resolvers.
-- Treating GraphQL as automatically better.
-- Poor authorization per field/resource.
-- No pagination limits.
-- Business logic inside resolvers.
-- Schema changes without compatibility planning.
-
-## Knowledge Checks
-
-### When would you use GraphQL?
-
-Use GraphQL when multiple clients need flexible data shapes and REST endpoints cause over-fetching or under-fetching. Also account for operational complexity and query cost controls.
-
-### What is N+1 in GraphQL?
-
-Each parent object resolver may trigger separate child queries, causing many database calls. DataLoader and batching help solve it.
-
-### GraphQL vs REST?
-
-GraphQL gives clients flexible data selection. REST is simpler, resource-oriented, and aligns well with HTTP caching and status semantics.
-
 ## Practice Task
 
 Design:
@@ -366,4 +333,3 @@ Design:
 3. DataLoader for customers;
 4. authorization check;
 5. query complexity limit.
-

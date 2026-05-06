@@ -12,15 +12,6 @@ They are useful when creation is more complex than calling `new`, such as when:
 - lifetime must be controlled by DI;
 - test data setup needs to be readable.
 
-Chinese notes:
-
-- `creational pattern`: 创建型模式.
-- `factory`: 工厂.
-- `abstract factory`: 抽象工厂.
-- `builder`: 建造者.
-- `singleton`: 单例.
-- `prototype`: 原型.
-
 ## Factory Method
 
 Factory Method creates an object through a method instead of direct construction.
@@ -419,18 +410,3 @@ Can DI manage the lifetime instead of manual singleton code?
 Is the factory hiding dependencies like a service locator?
 Is the builder making setup clearer or just adding ceremony?
 ```
-
-## Knowledge Checks
-
-### Factory vs DI?
-
-DI handles dependency creation and lifetime. Factory is useful when selection depends on runtime data or when object creation itself is part of the application behavior.
-
-### When should you use Builder?
-
-Use Builder when construction has many steps or optional values, especially in tests where readable setup matters.
-
-### Is Singleton bad?
-
-Singleton is not inherently bad. Global mutable singleton state is dangerous. DI-managed singleton is appropriate for stateless or thread-safe services.
-

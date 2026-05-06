@@ -1,0 +1,9 @@
+# Dependency Injection Recap
+
+This chapter established dependency injection as a structural design mechanism rather than a framework convenience. Registrations, constructor graphs, lifetimes, factories, and decorators all determine how services are composed, how state is shared, and how cross-cutting behavior is introduced without distorting core application code.
+
+Several themes connect the chapter. Dependencies should remain explicit, the composition root should own object wiring, and lifetime boundaries should match real ownership and operational scope. Lifetime mistakes such as captive dependency show that DI registration is never only configuration; it directly affects correctness, thread safety, disposal, and state visibility. Factories become useful when object creation depends on runtime choice or parameters, but they should preserve visible intent rather than drift into service-locator behavior. Decorators, finally, demonstrate how dependency injection can express layered composition cleanly, allowing logging, caching, retry, or tracing behavior to wrap a core implementation without rewriting its primary responsibility.
+
+Taken as a whole, the chapter provides the conceptual base for the rest of the backend architecture. Once service composition, lifetime rules, and DI-based layering are clear, later chapters can discuss persistence, integration, and application structure without repeatedly stepping back to explain how the object graph is formed.
+
+Just as importantly, the chapter draws limits around the mechanism. The container is a composition tool, not a substitute for service design. Factories should centralize real runtime creation policy rather than expose arbitrary resolution. Decorators should isolate cross-cutting concerns rather than pile unrelated logic into opaque wrapper chains. Those limits are what keep dependency injection useful as architecture instead of allowing it to become another source of accidental complexity.

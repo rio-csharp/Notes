@@ -4,14 +4,6 @@
 
 Two pointers and sliding window are patterns for processing arrays and strings efficiently.
 
-Chinese notes:
-
-- `two pointers`: 双指针.
-- `sliding window`: 滑动窗口.
-- `window`: 窗口.
-
-The key is maintaining an invariant（不变量）.
-
 Examples:
 
 ```text
@@ -336,28 +328,6 @@ public int LengthOfLongestSubstringKDistinct(string s, int k)
     return best;
 }
 ```
-
-## Knowledge Checks
-
-### When do you use sliding window?
-
-Use sliding window when the problem asks for a contiguous subarray or substring and the window can be expanded and shrunk while maintaining useful state.
-
-### What is the difference between fixed and variable sliding window?
-
-Fixed window has constant size like `k`. Variable window changes size based on constraints, such as no duplicates or sum at least target.
-
-### Why can negative numbers break a sliding-window sum solution?
-
-Because expanding the window no longer always increases the sum, and shrinking no longer always decreases it. The monotonic assumption disappears.
-
-## Common Mistakes
-
-- Using sliding window when negative numbers break monotonicity.
-- Forgetting to shrink window.
-- Off-by-one in window length.
-- Not updating state when left pointer moves.
-- Infinite loop in while condition.
 
 ## Practice Problems
 

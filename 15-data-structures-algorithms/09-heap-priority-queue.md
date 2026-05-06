@@ -4,12 +4,6 @@
 
 A heap is a data structure that efficiently gets the minimum or maximum priority item.
 
-Chinese notes:
-
-- `heap`: 堆.
-- `priority queue`: 优先队列.
-- `min-heap`: 小顶堆.
-
 In .NET, use:
 
 ```csharp
@@ -227,27 +221,6 @@ Invariant:
 lower.Count >= upper.Count
 all values in lower <= all values in upper
 ```
-
-## Knowledge Checks
-
-### When use heap?
-
-Use heap when repeatedly retrieving smallest/largest priority item, top K elements, merging sorted lists, or scheduling by priority.
-
-### Heap complexity?
-
-Insert and remove are `O(log n)`. Peek is `O(1)`.
-
-### Why does Top K often use a heap of size K?
-
-Keeping only `k` candidates reduces heap operations from `O(log n)` to `O(log k)`.
-
-## Common Mistakes
-
-- Forgetting .NET PriorityQueue is min-heap.
-- Keeping all elements when only K are needed.
-- Wrong priority direction.
-- Not handling ties if order matters.
 
 ## Practice Problems
 

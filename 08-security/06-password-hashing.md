@@ -1,299 +1,67 @@
-# Password Hashing
+# Password Storage, Verification, And Recovery
 
 ## Core Idea
 
-Passwords must never be stored in plaintext.
+Passwords should not be stored in plaintext, and they should not be stored in reversible encrypted form merely because the system can decrypt them later. A password store exists to verify future guesses, not to recover the original secret. That is why password hashing is a distinct security problem rather than a generic cryptography problem.
 
-Chinese notes:
+This chapter focuses on password handling as a lifecycle: storage, verification, failure handling, and reset.
 
-- `hash`: 哈希.
-- `salt`: 盐.
-- `pepper`: 额外服务端密钥.
-- `password hashing`: 密码哈希.
+## Hashing Versus Encryption
 
-## Hashing vs Encryption
+Encryption is reversible with the right key. Password hashing is designed to be one-way. Passwords should therefore be hashed with a deliberately slow password-hashing algorithm rather than encrypted for later recovery.
 
-Encryption is reversible with a key.
+This is one of the most common early misconceptions in security engineering. If a system can trivially recover every original password, compromise of the database or key infrastructure becomes much more damaging.
 
-Hashing is one-way.
+## Slow Hashing Algorithms
 
-Passwords should be hashed with a slow password hashing algorithm, not encrypted.
+Appropriate password-hashing algorithms include:
 
-## Good Password Hashing Algorithms
-
-Use:
-
-- BCrypt;
 - Argon2;
+- bcrypt;
 - PBKDF2.
 
-Avoid:
+They are intentionally slower and more attack-resistant than general-purpose hashes such as SHA-256 or MD5. The slowness is a feature because it raises the cost of offline guessing after credential theft.
 
-- plain SHA256;
-- MD5;
-- unsalted hashes;
-- custom algorithms.
+## Salt And Optional Pepper
 
-## Salt
+A salt is a unique random value applied per password so that identical passwords do not produce identical stored hashes. Modern password libraries usually manage this automatically.
 
-Salt is a random value unique per password.
+A pepper is an additional application-managed secret stored separately from the database. It can add another barrier, but it also complicates rotation and operational handling. Pepper is therefore a supplement at most, not a substitute for sound hashing.
 
-Purpose:
+## Verification And Rehashing
 
-- prevents same password from having same hash;
-- protects against precomputed rainbow tables.
+Password verification is not only a yes-or-no comparison. Mature systems also consider whether the stored hash was produced with outdated cost parameters or legacy algorithms. If verification succeeds but the hash is obsolete, the system can often rehash the password with the current settings during login.
 
-Modern password hashing libraries manage salt automatically.
+This allows security posture to improve over time without forcing every user through an immediate password reset.
 
-## Pepper
+## Failure Handling And Lockout
 
-Pepper is an additional secret stored separately from database.
+Password verification should also be part of account-protection design:
 
-Use carefully:
+- generic failure messages to avoid account enumeration;
+- failed-attempt tracking;
+- temporary lockout or step-up protection where appropriate;
+- rate limiting on login endpoints;
+- security logging that avoids exposing secrets.
 
-- stored in secret manager;
-- rotation is harder;
-- not a replacement for salt.
+These controls matter because password hashing alone does not stop online guessing. Storage safety and abuse resistance must work together.
 
-## ASP.NET Core Identity
+## Password Reset As Credential Issuance
 
-ASP.NET Core Identity has built-in password hashing.
+Password reset is effectively a credential-recovery flow and should be treated with similar seriousness. A secure reset process usually:
 
-In most .NET apps, prefer using established libraries/frameworks instead of implementing your own password hashing.
+- issues a short-lived, single-use reset token;
+- stores only a hash of that token;
+- avoids revealing whether an account exists more than necessary;
+- never sends a new password directly by email;
+- invalidates the token after successful use.
 
-Example with `PasswordHasher<TUser>`:
+This is a good example of security design extending beyond storage primitives into user-facing workflows.
 
-```csharp
-public sealed class AppUser
-{
-    public int Id { get; set; }
-    public string Email { get; set; } = "";
-    public string PasswordHash { get; set; } = "";
-    public int FailedLoginCount { get; set; }
-    public DateTimeOffset? LockedUntil { get; set; }
-}
-```
+## Audit And Sensitive Logging
 
-Registration:
+Authentication events and reset attempts often deserve logging, but logs must never become a second secret store. Raw passwords, reset tokens, refresh tokens, and full authorization headers should not appear in logs. Good security logging records the event context without preserving the credential.
 
-```csharp
-builder.Services.AddScoped<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
-```
+## Design Consequences
 
-Creating a password hash:
-
-```csharp
-public sealed class UserRegistrationService
-{
-    private readonly AppDbContext _dbContext;
-    private readonly IPasswordHasher<AppUser> _passwordHasher;
-
-    public UserRegistrationService(
-        AppDbContext dbContext,
-        IPasswordHasher<AppUser> passwordHasher)
-    {
-        _dbContext = dbContext;
-        _passwordHasher = passwordHasher;
-    }
-
-    public async Task RegisterAsync(RegisterRequest request, CancellationToken ct)
-    {
-        var user = new AppUser
-        {
-            Email = request.Email.Trim().ToLowerInvariant()
-        };
-
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
-
-        _dbContext.Users.Add(user);
-        await _dbContext.SaveChangesAsync(ct);
-    }
-}
-```
-
-Request:
-
-```csharp
-public sealed record RegisterRequest(string Email, string Password);
-```
-
-## Password Verification Flow
-
-```text
-1. User submits password.
-2. Server loads password hash.
-3. Password hasher verifies password.
-4. If valid, authentication succeeds.
-5. If hash algorithm/cost is outdated, rehash.
-```
-
-Login verification:
-
-```csharp
-public async Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken ct)
-{
-    var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-
-    var user = await _dbContext.Users
-        .SingleOrDefaultAsync(x => x.Email == normalizedEmail, ct);
-
-    if (user is null)
-    {
-        await Task.Delay(TimeSpan.FromMilliseconds(200), ct);
-        return LoginResult.Invalid();
-    }
-
-    if (user.LockedUntil > DateTimeOffset.UtcNow)
-    {
-        return LoginResult.Locked();
-    }
-
-    var result = _passwordHasher.VerifyHashedPassword(
-        user,
-        user.PasswordHash,
-        request.Password);
-
-    if (result == PasswordVerificationResult.Failed)
-    {
-        user.FailedLoginCount++;
-
-        if (user.FailedLoginCount >= 5)
-        {
-            user.LockedUntil = DateTimeOffset.UtcNow.AddMinutes(15);
-        }
-
-        await _dbContext.SaveChangesAsync(ct);
-        return LoginResult.Invalid();
-    }
-
-    user.FailedLoginCount = 0;
-    user.LockedUntil = null;
-
-    if (result == PasswordVerificationResult.SuccessRehashNeeded)
-    {
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
-    }
-
-    await _dbContext.SaveChangesAsync(ct);
-
-    return LoginResult.Success(user.Id);
-}
-```
-
-Result model:
-
-```csharp
-public sealed record LoginRequest(string Email, string Password);
-
-public sealed record LoginResult(bool Succeeded, bool Locked, int? UserId)
-{
-    public static LoginResult Success(int userId) => new(true, false, userId);
-    public static LoginResult Invalid() => new(false, false, null);
-    public static LoginResult Locked() => new(false, true, null);
-}
-```
-
-Important:
-
-> Return a generic login failure message to the client. Detailed reasons belong in security logs, not user-visible responses.
-
-## Password Reset Flow
-
-A safe reset flow does not send passwords by email. It sends a short-lived, single-use token.
-
-```csharp
-public sealed class PasswordResetToken
-{
-    public long Id { get; set; }
-    public int UserId { get; set; }
-    public string TokenHash { get; set; } = "";
-    public DateTimeOffset ExpiresAt { get; set; }
-    public DateTimeOffset? UsedAt { get; set; }
-}
-```
-
-Create token:
-
-```csharp
-public async Task RequestPasswordResetAsync(string email, CancellationToken ct)
-{
-    var normalizedEmail = email.Trim().ToLowerInvariant();
-    var user = await _dbContext.Users.SingleOrDefaultAsync(x => x.Email == normalizedEmail, ct);
-
-    if (user is null)
-    {
-        return;
-    }
-
-    var tokenBytes = RandomNumberGenerator.GetBytes(32);
-    var token = WebEncoders.Base64UrlEncode(tokenBytes);
-    var tokenHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-
-    _dbContext.PasswordResetTokens.Add(new PasswordResetToken
-    {
-        UserId = user.Id,
-        TokenHash = tokenHash,
-        ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
-    });
-
-    await _dbContext.SaveChangesAsync(ct);
-    await _emailSender.SendPasswordResetAsync(user.Email, token, ct);
-}
-```
-
-Store only the token hash. Treat the raw token like a password.
-
-## Account Protection
-
-Add:
-
-- rate limiting;
-- account lockout;
-- MFA for sensitive roles;
-- login audit logs;
-- suspicious login alerts.
-
-Security log example:
-
-```csharp
-_logger.LogWarning(
-    "Failed login attempt for email hash {EmailHash} from IP {IpAddress}",
-    HashForLogging(request.Email),
-    httpContext.Connection.RemoteIpAddress?.ToString());
-```
-
-Do not log raw passwords, reset tokens, refresh tokens, or full authorization headers.
-
-## Review Questions
-
-### Why not use SHA256 for passwords?
-
-> SHA256 is too fast. Attackers can brute-force many guesses quickly. Password hashing algorithms like BCrypt, Argon2, or PBKDF2 are intentionally slow and salted.
-
-### What is salt?
-
-> Salt is a unique random value used when hashing a password, so identical passwords have different hashes and precomputed attacks are harder.
-
-### Should passwords be encrypted?
-
-> Usually no. Passwords should be hashed, not encrypted, because the server should not need to recover the original password.
-
-## Common Mistakes
-
-- Plaintext passwords.
-- Fast hash only.
-- Same salt for all users.
-- Custom crypto.
-- No login rate limiting.
-- Logging passwords accidentally.
-
-## Practice Task
-
-Design login security with:
-
-1. password hashing;
-2. per-user salt;
-3. rate limit;
-4. account lockout;
-5. MFA for admin;
-6. audit logs.
+Password security is not just about picking the right hashing function. It also involves verification policy, rehash strategy, lockout and throttling, recovery design, and disciplined logging. Systems become materially safer when password handling is treated as a lifecycle rather than as a one-time hashing call during registration.

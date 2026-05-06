@@ -4,13 +4,7 @@
 
 Assembly loading is how .NET finds and loads compiled assemblies at runtime.
 
-Chinese notes:
-
-- `assembly`: 程序集.
-- `AssemblyLoadContext`: 程序集加载上下文.
-- `plugin`: 插件.
-
-## What Is An Assembly?
+## Assembly Structure
 
 An assembly is usually a `.dll` or `.exe` containing:
 
@@ -32,13 +26,13 @@ MyApp.Application.dll
 
 Why metadata matters:
 
-> The runtime can know what types, methods, and references exist without executing the code first. Reflection, DI, serialization, and plugin discovery rely on this metadata.
+> The runtime can know what types, methods, and references exist without executing the code first. Reflection, DI, serialization, and extensibility mechanisms rely on this metadata.
 
 ## Default Loading
 
 Most applications use default assembly loading.
 
-Example:
+For example:
 
 ```csharp
 var service = new OrderService();
@@ -61,41 +55,53 @@ When `MyApp.Api` uses a type from `MyApp.Application`, the runtime can load the 
 Sometimes you load assemblies dynamically:
 
 ```csharp
-var assembly = Assembly.LoadFrom("plugins/MyPlugin.dll");
-var type = assembly.GetType("MyPlugin.PluginEntry");
+var assembly = Assembly.LoadFrom("extensions/MyExtension.dll");
+var type = assembly.GetType("MyExtension.ExtensionEntry");
 ```
 
-Use cases:
+Typical use cases include:
 
-- plugin systems;
+- extensibility systems;
 - scripting;
 - modular applications;
 - runtime extension.
 
 Important security note:
 
-> Loading an assembly means executing code from that assembly. Do not load untrusted plugin binaries into your process unless you have a clear sandboxing and trust model. `AssemblyLoadContext` is for loading and version isolation, not a full security sandbox.
+> Loading an assembly means executing code from that assembly. Do not load untrusted binaries into your process unless you have a clear sandboxing and trust model. `AssemblyLoadContext` is for loading and version isolation, not a full security sandbox.
 
 Safer dynamic loading shape:
 
 ```csharp
-var pluginPath = Path.GetFullPath("plugins/MyPlugin.dll");
-var assembly = Assembly.LoadFrom(pluginPath);
-var pluginType = assembly.GetType("MyPlugin.PluginEntry", throwOnError: true);
+var extensionPath = Path.GetFullPath("extensions/MyExtension.dll");
+var assembly = Assembly.LoadFrom(extensionPath);
+var extensionType = assembly.GetType("MyExtension.ExtensionEntry", throwOnError: true);
 
-if (!typeof(IPlugin).IsAssignableFrom(pluginType))
+if (!typeof(IRuntimeExtension).IsAssignableFrom(extensionType))
 {
-    throw new InvalidOperationException("PluginEntry must implement IPlugin.");
+    throw new InvalidOperationException("ExtensionEntry must implement IRuntimeExtension.");
 }
 
-var plugin = (IPlugin)Activator.CreateInstance(pluginType)!;
-plugin.Execute();
+var extension = (IRuntimeExtension)Activator.CreateInstance(extensionType)!;
+extension.Execute();
 ```
 
 This example shows two important practices:
 
 - validate the loaded type;
-- fail clearly when the plugin shape is wrong.
+- fail clearly when the extension shape is wrong.
+
+In practice, a safer plugin boundary often also includes a narrow shared contract assembly:
+
+```csharp
+public interface IRuntimeExtension
+{
+    string Name { get; }
+    Task ExecuteAsync(CancellationToken cancellationToken);
+}
+```
+
+The host then depends on the contract, not on arbitrary concrete plugin types. That reduces accidental coupling and makes versioning expectations clearer across the extension boundary.
 
 ## AssemblyLoadContext
 
@@ -141,41 +147,30 @@ public sealed class PluginLoadContext : AssemblyLoadContext
 
 Why `AssemblyDependencyResolver` matters:
 
-> Plugins often have their own dependencies. The resolver helps locate dependencies relative to the plugin instead of accidentally using the wrong version from the main application.
-
-## Plugin Contract
-
-A plugin system should define a small stable contract assembly.
-
-Example:
-
-```csharp
-public interface IPlugin
-{
-    string Name { get; }
-    Task ExecuteAsync(CancellationToken cancellationToken);
-}
-```
-
-The host and plugin should both reference the contract assembly. The host can then load the plugin implementation without needing to know every concrete plugin type at compile time.
-
-Keep the contract stable:
-
-- avoid changing method signatures frequently;
-- version the contract deliberately;
-- pass simple DTOs instead of framework-heavy objects;
-- define cancellation and error behavior.
+> Dynamically loaded components often have their own dependencies. The resolver helps locate dependencies relative to that component instead of accidentally using the wrong version from the main application.
 
 ## Version Conflicts
 
 Common issue:
 
 ```text
-Plugin A needs Library v1
-Plugin B needs Library v2
+Component A needs Library v1
+Component B needs Library v2
 ```
 
 Custom load contexts can help isolate dependencies.
+
+A practical plugin folder might therefore look like:
+
+```text
+plugins/
+  WeatherExtension/
+    WeatherExtension.dll
+    WeatherExtension.deps.json
+    SupportingLibrary.dll
+```
+
+The point is not the folder layout itself. The point is that dynamic loading is a dependency graph problem, not just a single-file problem.
 
 ## Unloading
 
@@ -195,7 +190,7 @@ static WeakReference LoadAndUnload(string pluginPath)
     var loadContext = new PluginLoadContext(pluginPath);
     var assembly = loadContext.LoadFromAssemblyPath(pluginPath);
 
-    // Create and run plugin here.
+    // Create and run the dynamically loaded component here.
 
     loadContext.Unload();
     return new WeakReference(loadContext);
@@ -214,82 +209,16 @@ Console.WriteLine(weakReference.IsAlive ? "Still loaded" : "Unloaded");
 
 If it stays alive, common causes include:
 
-- plugin instance still referenced;
+- loaded instance still referenced;
 - event handler still subscribed;
 - background thread still running;
-- static field holding plugin type/instance;
-- delegate from plugin stored in host.
+- static field holding loaded type or instance;
+- delegate from the loaded component stored in the host.
 
-## Review Questions
+These unloading failures are one of the reasons extensibility architectures need explicit lifecycle discipline. `AssemblyLoadContext` is powerful for dependency isolation and unloading, but it does not remove the need to manage references carefully.
 
-### What is AssemblyLoadContext?
+Version conflicts are another major design pressure in dynamic loading scenarios. Two components may depend on incompatible versions of the same library, and if both are forced into the same load context, one dependency graph may win and the other component may fail. Separate load contexts can isolate those graphs when the architecture truly needs that flexibility.
 
-> `AssemblyLoadContext` controls assembly loading in modern .NET. It is useful for plugin systems, dependency isolation, and unloading dynamically loaded assemblies.
+The broader architectural design of plugin contracts, host extensibility, and long-term extension boundaries belongs more naturally to later architecture-oriented material. In this chapter, the important platform idea is that assembly loading is both a dependency-resolution problem and a lifetime-management problem.
 
-### Why can plugin systems leak memory?
-
-> If objects, delegates, static references, or loaded types remain referenced, the collectible load context cannot be unloaded.
-
-### What is in an assembly?
-
-> IL, metadata, manifest, resources, and references to other assemblies.
-
-### Default context vs custom context?
-
-> The default context is used for normal application dependencies. A custom `AssemblyLoadContext` is useful when you need plugin isolation, custom dependency resolution, or unloading.
-
-### Why do version conflicts happen?
-
-> Two components may require different versions of the same dependency. If they share one load context, one version may be chosen and the other component may fail. Separate load contexts can isolate dependency graphs.
-
-## Common Mistakes
-
-### Mistake: Loading plugins into default context when isolation is required.
-
-Why it is wrong:
-
-> The default load context is shared by the application. Plugins loaded there are harder to isolate, unload, or version independently.
-
-Better answer:
-
-> Use a custom `AssemblyLoadContext` for plugin isolation and possible unloading.
-
-### Mistake: Treating AssemblyLoadContext as a security sandbox.
-
-Why it is wrong:
-
-> A loaded assembly runs inside the process and can execute code with the process permissions. Load context isolation does not make untrusted code safe.
-
-Better answer:
-
-> Only load trusted plugins, or isolate untrusted code in a separate process/container with a restricted permission model.
-
-### Mistake: Keeping references that prevent unloading.
-
-Why it is wrong:
-
-> An `AssemblyLoadContext` cannot unload if objects, types, delegates, threads, or static references from that context are still referenced.
-
-Better answer:
-
-> Remove references, stop plugin work, unsubscribe events, and verify unload with weak references if unloading matters.
-
-### Mistake: Ignoring dependency version conflicts.
-
-Why it is wrong:
-
-> Different plugins may need different versions of the same dependency. Without isolation, one version can accidentally satisfy another plugin and cause runtime failures.
-
-Better answer:
-
-> Plan dependency resolution and isolate plugins that need independent dependency graphs.
-
-### Mistake: Using reflection-heavy loading without error handling.
-
-Why it is wrong:
-
-> Dynamic loading can fail because files are missing, versions differ, types are absent, constructors throw, or permissions/configuration are wrong.
-
-Better answer:
-
-> Validate plugin metadata, handle load failures clearly, and log enough detail to diagnose version/type issues.
+For real systems, that often leads to a small design guideline: if the host wants unloadability, it should avoid storing arbitrary plugin instances, delegates, or event subscriptions in long-lived global state unless it also has an explicit teardown path.

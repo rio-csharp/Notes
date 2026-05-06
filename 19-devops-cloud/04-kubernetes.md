@@ -4,15 +4,6 @@
 
 Kubernetes orchestrates containers across a cluster of machines.
 
-Chinese notes:
-
-- `pod`: 最小部署单元.
-- `deployment`: 部署控制器.
-- `service`: 服务发现和负载均衡.
-- `ingress`: 入口流量.
-- `config map`: 配置.
-- `secret`: 密钥.
-
 Application engineers do not always operate the cluster directly, but they should understand how their application runs inside it.
 
 ## Pod
@@ -166,13 +157,6 @@ Pods can talk to other pods.
 Services provide stable virtual addresses.
 Ingress/load balancers bring traffic from outside the cluster.
 ```
-
-Chinese notes:
-
-- `pod IP`: Pod 的网络地址.
-- `ClusterIP`: 集群内部虚拟 IP.
-- `service discovery`: 服务发现.
-- `kube-proxy`: 维护 Service 转发规则的组件.
 
 Basic flow:
 
@@ -370,8 +354,6 @@ Kubernetes sends `SIGTERM` before killing the container.
 
 Chinese note:
 
-- `graceful shutdown`: 优雅关闭.
-
 ASP.NET Core handles graceful shutdown through the host lifetime and cancellation tokens, but your code must cooperate.
 
 Example:
@@ -423,11 +405,6 @@ Limits affect enforcement:
 CPU limit -> throttling.
 Memory limit -> possible OOMKilled.
 ```
-
-Chinese notes:
-
-- `CPU throttling`: CPU 被限流.
-- `OOMKilled`: 内存超过限制后容器被杀.
 
 Symptoms of CPU throttling:
 
@@ -556,51 +533,6 @@ Common symptoms:
 | 502/503 at ingress | no ready endpoints, backend timeout, ingress config |
 | Random restarts | OOMKilled, liveness too strict, app crash |
 | Slow under load | CPU throttling, DB bottleneck, connection pool exhaustion |
-
-## Knowledge Checks
-
-### What is the difference between pod, deployment, and service?
-
-> A pod runs containers. A deployment manages pod replicas and rolling updates. A service provides stable network access to pods.
-
-### Liveness vs readiness?
-
-> Liveness checks whether the container should be restarted. Readiness checks whether it is ready to receive traffic.
-
-### How do you deploy .NET apps to Kubernetes?
-
-> Build a Docker image, push it to a registry, create deployment/service/ingress manifests or Helm chart, configure environment variables/secrets, add health checks, and monitor logs/metrics.
-
-### How does Kubernetes route traffic to pods?
-
-> External traffic usually enters through a load balancer and ingress controller, then goes to a Service. The Service selects ready pod endpoints by label and forwards traffic to their pod IPs and target ports. Pods can change, but the Service DNS name stays stable.
-
-### Why can a Service have no endpoints?
-
-> The most common reasons are selector and label mismatch, pods not ready, pods in another namespace, or the deployment failing to create healthy pods.
-
-### Why should database checks usually not be liveness checks?
-
-> If the database has a temporary outage, liveness checks that depend on it may restart every API pod. That can create a restart storm and make recovery worse. Database checks are usually better for readiness, while liveness should verify the process itself is alive.
-
-### What does `OOMKilled` mean?
-
-> The container exceeded its memory limit and Kubernetes killed it. I would check pod events, previous logs, memory metrics, recent deployments, large allocations, memory leaks, and whether the memory limit is realistic for the .NET runtime and workload.
-
-## Common Mistakes
-
-- No readiness probe.
-- Health check depends on a flaky downstream service too aggressively.
-- Secrets committed to Git.
-- No resource limits.
-- App stores local files in container filesystem.
-- No graceful shutdown.
-- Liveness probe depends on database or external APIs.
-- Service selector does not match pod labels.
-- Wrong `targetPort`.
-- Ignoring CPU throttling.
-- Treating base64 Kubernetes Secrets as strong encryption.
-- Using local in-memory sessions in a horizontally scaled app.
 
 ## Practice Task
 

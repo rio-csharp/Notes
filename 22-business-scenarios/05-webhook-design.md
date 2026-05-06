@@ -4,14 +4,6 @@
 
 A webhook is an HTTP callback sent by one system to notify another system about an event.
 
-Chinese notes:
-
-- `webhook`: 回调通知.
-- `signature`: 签名.
-- `replay attack`: 重放攻击.
-- `idempotency`: 幂等性.
-- `dead-letter queue`: 死信队列.
-
 Webhooks are common in payments, identity, shipping, Git providers, automation platforms, and integration systems.
 
 ## Common Use Cases
@@ -365,8 +357,6 @@ For senders:
 
 Chinese note:
 
-- `SSRF`: Server-Side Request Forgery, 服务端请求伪造.
-
 ## SSRF Consideration For Webhook Senders
 
 If customers can configure webhook URLs, they might accidentally or maliciously point to internal addresses.
@@ -408,37 +398,6 @@ _logger.LogInformation(
 ```
 
 Avoid logging full payloads when they may contain sensitive data.
-
-## Knowledge Checks
-
-### How can webhook endpoints be secured?
-
-Use HTTPS, verify provider signatures, validate timestamps, restrict payload size, store event IDs for idempotency, log safely, and monitor failures.
-
-### Why return 2xx quickly?
-
-Providers often retry on timeout or non-2xx responses. Returning quickly after safe validation and storage reduces duplicate delivery and decouples provider availability from internal processing.
-
-### Why is idempotency required?
-
-Webhook delivery is usually at-least-once. The same event may arrive more than once, so processing must not duplicate side effects.
-
-### What should a webhook sender store?
-
-Store subscriptions, event IDs, delivery attempts, response status, retry schedule, final delivery status, and errors.
-
-## Common Mistakes
-
-- No signature verification.
-- No timestamp replay protection.
-- No idempotency.
-- Processing slow logic synchronously.
-- Returning `500` after event was already processed.
-- Logging sensitive payloads.
-- No dead-letter state.
-- No retry backoff.
-- No delivery logs for webhook senders.
-- Allowing webhook URLs to target internal services.
 
 ## Practice Task
 

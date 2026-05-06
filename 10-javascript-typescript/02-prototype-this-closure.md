@@ -4,12 +4,6 @@
 
 Prototype, `this`, and closure are core JavaScript concepts that often appear in engineering practice.
 
-Chinese notes:
-
-- `prototype`: 原型.
-- `closure`: 闭包.
-- `this`: 当前调用上下文.
-
 ## Prototype
 
 JavaScript objects can inherit from other objects through prototype chains.
@@ -224,8 +218,6 @@ function SearchBox({ query }: { query: string }) {
 
 The dependency array matters because the effect closes over values from the render where it was created.
 
-## Review Questions
-
 ### What is closure?
 
 > A closure is when a function retains access to variables from its lexical scope even after the outer function has returned.
@@ -237,10 +229,3 @@ The dependency array matters because the effect closes over values from the rend
 ### What is prototype chain?
 
 > When accessing a property, JavaScript checks the object first, then follows its prototype chain until it finds the property or reaches null.
-
-## Common Mistakes
-
-- Assuming `this` means where function is defined.
-- Losing `this` when passing methods as callbacks.
-- Stale closures in React effects.
-- Modifying prototypes in application code unnecessarily.

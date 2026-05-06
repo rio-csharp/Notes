@@ -4,15 +4,6 @@
 
 Production troubleshooting is a structured way to reduce impact, find evidence, understand causes, and prevent repeat failures.
 
-Chinese notes:
-
-- `incident`: 生产事故.
-- `mitigation`: 缓解措施.
-- `root cause`: 根因.
-- `postmortem`: 复盘.
-- `correlation ID`: 关联 ID, used to connect logs/traces for one request.
-- `blast radius`: 影响范围.
-
 The first principle:
 
 > Stabilize first, investigate deeply second.
@@ -466,37 +457,6 @@ Weak action item:
 ```text
 Be more careful next time.
 ```
-
-## Knowledge Checks
-
-### How do you troubleshoot a production issue?
-
-Clarify symptom, scope, and impact first. Check recent changes, logs, metrics, traces, and dependencies. If impact is high, mitigate with rollback, feature flag, scaling, or traffic reduction. After service is stable, identify root cause and create prevention actions.
-
-### Why stabilize before deep investigation?
-
-Because users are affected during the incident. Deep root cause work is important, but reducing current harm comes first when the system is degraded.
-
-### Why are correlation IDs useful?
-
-They connect logs, traces, and service calls for the same request. Without them, it is much harder to follow one failure across multiple components.
-
-### Why should postmortems focus on systems instead of blame?
-
-Most incidents come from multiple technical and process gaps. A useful postmortem improves detection, prevention, rollback, documentation, and design.
-
-## Common Mistakes
-
-- Debugging without defining impact.
-- Jumping to root cause too early.
-- Ignoring recent changes.
-- Looking only at one log line.
-- Not preserving evidence before restart.
-- Making several unrelated changes at once.
-- Increasing timeouts blindly.
-- No rollback plan.
-- No postmortem action items.
-- Blaming people instead of improving systems.
 
 ## Practice Task
 

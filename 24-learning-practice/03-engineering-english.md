@@ -4,14 +4,6 @@
 
 Engineering English is the ability to explain systems, decisions, problems, risks, and trade-offs clearly in English.
 
-Chinese notes:
-
-- `clarify`: 澄清.
-- `trade-off`: 权衡.
-- `mitigation`: 缓解措施.
-- `assumption`: 假设.
-- `constraint`: 约束.
-
 Good engineering communication is concrete, structured, and evidence-based.
 
 ## Explaining Technical Background
@@ -267,20 +259,6 @@ Suggested topics:
 - database deadlock;
 - frontend blank screen;
 - ADR trade-off.
-
-## Knowledge Checks
-
-### What makes engineering English clear?
-
-Clear engineering English is structured, concrete, and tied to evidence. It explains context, decision, trade-offs, and consequences.
-
-### Why is it okay to say you are unsure?
-
-Technical accuracy matters. It is better to state uncertainty and explain how you would verify than to pretend knowledge.
-
-### Why are incident updates different from deep technical explanations?
-
-Incident updates should be short and focused on impact, current action, and next update. Deep technical analysis can come after stabilization.
 
 ## Practice Task
 

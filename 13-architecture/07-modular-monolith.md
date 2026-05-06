@@ -4,12 +4,6 @@
 
 A modular monolith is a single deployable application organized into strong internal modules.
 
-Chinese notes:
-
-- `modular monolith`: 模块化单体.
-- `module boundary`: 模块边界.
-- `single deployment`: 单体部署.
-
 It keeps the operational simplicity of a monolith while improving code boundaries.
 
 ## Why Modular Monolith?
@@ -262,28 +256,6 @@ Extraction is easier when:
 - communication is already through contracts/events;
 - no direct cross-module database access;
 - tests cover behavior.
-
-## Knowledge Checks
-
-### What is a modular monolith?
-
-A modular monolith is one deployable application with clear internal module boundaries. It avoids distributed complexity while keeping code organized around business capabilities.
-
-### Modular monolith vs microservices?
-
-Modular monolith is simpler to deploy and transact within. Microservices allow independent deployment and scaling but add distributed systems complexity.
-
-### How do you enforce module boundaries?
-
-Through project structure, internal visibility, architecture tests, module contracts, and avoiding direct database access across modules.
-
-## Common Mistakes
-
-- Calling it modular but allowing every module to access everything.
-- Shared tables without ownership.
-- No boundary tests.
-- Too many synchronous cross-module calls.
-- Extracting too early.
 
 ## Practice Task
 

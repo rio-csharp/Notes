@@ -1,27 +1,40 @@
-# Swagger And OpenAPI
+# OpenAPI, Documentation, And Contract Visibility
 
 ## Core Idea
 
-OpenAPI is a standard for describing HTTP APIs. Swagger tools generate interactive documentation and client SDKs from OpenAPI definitions.
+An API contract that exists only in controller code is harder to review, harder to test, and harder for clients to trust. OpenAPI provides a machine-readable description of the contract, while tools such as Swagger UI make that contract inspectable by humans. The real value is not the interactive UI alone. The value is visibility.
 
-Chinese notes:
+This chapter treats OpenAPI as part of contract governance rather than as developer convenience.
 
-- `OpenAPI`: API 描述标准.
-- `Swagger`: 常用 API 文档工具.
-- `schema`: 数据结构描述.
+## Documentation As Part Of The API Surface
 
-## Why It Matters
+Clients need to know:
 
-OpenAPI helps:
+- which endpoints exist;
+- what each endpoint accepts;
+- what it returns;
+- which status codes are possible;
+- what authentication is required;
+- how errors are shaped.
 
-- frontend/backend collaboration;
-- API documentation;
-- contract review;
-- client generation;
-- testing;
-- onboarding.
+If those details are inferred only from examples or tribal knowledge, the contract is weak even if the API itself behaves correctly. Documentation therefore belongs inside the contract story, not outside it.
 
-## ASP.NET Core Setup
+## OpenAPI As A Machine-Readable Contract
+
+OpenAPI is valuable because it describes the API in a format tools can consume. That enables:
+
+- interactive documentation;
+- client SDK generation;
+- contract review in pull requests;
+- automated diffing between versions;
+- test harness generation;
+- onboarding for new teams.
+
+This is especially important once the API serves more than one consumer, because manual documentation tends to drift precisely when consistency matters most.
+
+## Swagger Tooling In ASP.NET Core
+
+ASP.NET Core integrates naturally with Swagger and OpenAPI generation:
 
 ```csharp
 builder.Services.AddEndpointsApiExplorer();
@@ -34,215 +47,55 @@ builder.Services.AddSwaggerGen(options =>
         Description = "HTTP API for orders, payments, and fulfillment."
     });
 });
-
-var app = builder.Build();
-
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
 ```
 
-Required namespaces:
+The tooling is useful because it turns runtime endpoints into a documentable surface. Even so, the generated document is only as good as the metadata the application provides.
 
-```csharp
-using Microsoft.OpenApi.Models;
-```
+## Response Metadata And Error Visibility
 
-## XML Comments
+One of the most important uses of OpenAPI metadata is making non-success responses explicit.
 
-Project file:
+If an endpoint can return:
 
-```xml
-<GenerateDocumentationFile>true</GenerateDocumentationFile>
-```
+- `200 OK`;
+- `404 Not Found`;
+- validation errors;
+- authorization failures;
+- `409 Conflict`;
 
-Controller:
+those should be reflected in the contract documentation rather than left implicit. Otherwise the client sees only the happy path while the real API surface remains larger and less predictable.
 
-```csharp
-/// <summary>
-/// Gets an order by ID.
-/// </summary>
-[HttpGet("{id:int}")]
-public async Task<ActionResult<OrderDto>> GetById(int id)
-{
-    return Ok();
-}
-```
+This is why structured error contracts such as `ProblemDetails` matter twice: once at runtime and once in documentation.
 
-Include XML comments in Swagger:
+## Authentication And Security Schemes
 
-```csharp
-builder.Services.AddSwaggerGen(options =>
-{
-    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
-    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-    options.IncludeXmlComments(xmlPath);
-});
-```
+Security requirements should also be part of the documented contract. Swagger configuration for bearer authentication is useful not only because it enables testing from the UI, but because it makes the authentication shape explicit in the generated specification.
 
-Required namespaces:
+An undocumented authentication requirement is still a contract requirement. OpenAPI simply makes it visible and tool-friendly.
 
-```csharp
-using System.Reflection;
-```
+## XML Comments, Examples, And Readability
 
-## Response Documentation
+Human-readable documentation still matters alongside machine-readable structure. XML comments, summaries, descriptions, and examples improve contract clarity, especially for:
 
-```csharp
-[ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
-[ProducesResponseType(StatusCodes.Status404NotFound)]
-[HttpGet("{id:int}")]
-public async Task<ActionResult<OrderDto>> GetById(int id)
-{
-    return Ok();
-}
-```
+- ambiguous request fields;
+- less obvious state transitions;
+- asynchronous workflows;
+- versioned or deprecated endpoints.
 
-## Authentication In Swagger
+The goal is not exhaustive prose on every endpoint. The goal is enough semantic guidance that a consumer can understand the contract without guessing the author's intent from property names alone.
 
-Swagger can be configured to send bearer tokens.
+## OpenAPI In CI And Contract Review
 
-Concept:
-
-```csharp
-options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-{
-    Name = "Authorization",
-    Type = SecuritySchemeType.Http,
-    Scheme = "Bearer",
-    BearerFormat = "JWT",
-    In = ParameterLocation.Header
-});
-```
-
-Complete JWT setup:
-
-```csharp
-builder.Services.AddSwaggerGen(options =>
-{
-    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header using the Bearer scheme.",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            []
-        }
-    });
-});
-```
-
-## Documenting Errors
-
-Use `ProblemDetails` and document it consistently.
-
-```csharp
-[ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
-[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-[ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-[HttpGet("{id:int}")]
-public async Task<ActionResult<OrderDto>> GetById(int id, CancellationToken ct)
-{
-    var order = await _orders.GetByIdAsync(id, ct);
-    return order is null ? NotFound() : Ok(order);
-}
-```
-
-Validation response:
-
-```csharp
-[ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-[HttpPost]
-public async Task<ActionResult<OrderDto>> Create(
-    CreateOrderRequest request,
-    CancellationToken ct)
-{
-    var order = await _orders.CreateAsync(request, ct);
-    return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
-}
-```
-
-## Minimal API OpenAPI Metadata
-
-```csharp
-app.MapPost("/api/orders", async (
-        CreateOrderRequest request,
-        IOrderService orders,
-        CancellationToken ct) =>
-    {
-        var order = await orders.CreateAsync(request, ct);
-        return Results.Created($"/api/orders/{order.Id}", order);
-    })
-    .WithName("CreateOrder")
-    .WithTags("Orders")
-    .Produces<OrderDto>(StatusCodes.Status201Created)
-    .ProducesValidationProblem()
-    .ProducesProblem(StatusCodes.Status500InternalServerError)
-    .WithOpenApi();
-```
-
-## OpenAPI As A Contract Check
-
-Teams can generate OpenAPI in CI and compare it against the previous version.
-
-What to check:
+One of the most mature uses of OpenAPI is contract diffing in continuous integration. Once the spec is generated consistently, teams can compare one version against the previous one and detect:
 
 - removed endpoints;
 - changed response schemas;
-- changed required fields;
-- undocumented error responses;
-- auth requirement changes;
-- version-specific docs still generated correctly.
+- newly required fields;
+- missing error documentation;
+- altered security requirements.
 
-Key point:
+This turns API review from subjective documentation checking into a more objective contract-governance process.
 
-> OpenAPI is not just a pretty UI. It is a machine-readable contract that can be reviewed and tested.
+## Design Consequences
 
-## Review Questions
-
-### What is OpenAPI?
-
-> OpenAPI is a machine-readable specification for HTTP APIs, including endpoints, request/response schemas, status codes, and authentication.
-
-### Why use Swagger?
-
-> Swagger provides interactive documentation and helps frontend, backend, QA, and external consumers understand and test APIs.
-
-### Is Swagger enough as API contract?
-
-> It helps, but teams still need versioning, examples, error contracts, and communication around breaking changes.
-
-## Common Mistakes
-
-- Swagger enabled publicly without protection.
-- Missing response status documentation.
-- DTO names unclear.
-- Error response not documented.
-- Documentation not matching actual behavior.
-
-## Practice Task
-
-Add Swagger docs for:
-
-1. orders API;
-2. request and response DTOs;
-3. validation error;
-4. JWT bearer auth;
-5. examples for common endpoints.
+OpenAPI and Swagger are most valuable when treated as contract visibility tools. They make the API inspectable, reviewable, and automatable. A good specification does not replace thoughtful versioning, error design, or semantic discipline, but it makes all of those things easier to verify. In mature API work, that visibility is not optional polish. It is part of the engineering control surface.

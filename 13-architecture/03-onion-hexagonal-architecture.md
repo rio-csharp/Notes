@@ -4,13 +4,6 @@
 
 Onion and Hexagonal Architecture protect business logic from external technical details.
 
-Chinese notes:
-
-- `Onion Architecture`: 洋葱架构.
-- `Hexagonal Architecture`: 六边形架构.
-- `port`: 端口.
-- `adapter`: 适配器.
-
 Both emphasize:
 
 ```text
@@ -299,28 +292,6 @@ public sealed class PaymentRequestedConsumer
 ```
 
 The application core does not care whether the trigger is HTTP, Kafka, RabbitMQ, or a scheduled job.
-
-## Knowledge Checks
-
-### Onion vs Hexagonal?
-
-Both protect the core domain from infrastructure. Onion describes concentric dependency layers. Hexagonal describes ports and adapters around the application core.
-
-### What is a port?
-
-A port is an interface that defines how the application communicates with the outside world, such as payment gateway or file storage.
-
-### What is an adapter?
-
-An adapter implements a port using a specific technology, such as Stripe, Azure Blob Storage, or EF Core.
-
-## Common Mistakes
-
-- Creating interfaces without real boundary value.
-- Infrastructure references in domain layer.
-- Treating architecture as folder structure only.
-- Overengineering CRUD.
-- No integration tests for adapters.
 
 ## Practice Task
 

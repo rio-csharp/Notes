@@ -4,15 +4,6 @@
 
 Backend performance is about reducing latency, increasing throughput, and keeping resource usage stable under load.
 
-Chinese notes:
-
-- `latency`: 延迟.
-- `throughput`: 吞吐量.
-- `bottleneck`: 瓶颈.
-- `thread pool starvation`: 线程池饥饿.
-- `tail latency`: 尾延迟.
-- `saturation`: 饱和.
-
 ## Performance Goals
 
 Performance work should start with a goal.
@@ -536,30 +527,3 @@ Are retries amplifying dependency failures?
 Is GC time or allocation rate high?
 Did a recent deployment change latency?
 ```
-
-## Common Mistakes
-
-- Optimizing without measuring.
-- Adding cache before fixing bad queries.
-- Returning unbounded data.
-- Retrying failed calls aggressively.
-- Ignoring p95 and p99 latency.
-- Blocking async code.
-- No timeout for external calls.
-- Unbounded parallelism.
-- Testing only on a developer machine.
-
-## Knowledge Checks
-
-### How do you troubleshoot a slow API?
-
-Check latency metrics and traces first to locate whether time is spent in application code, database, cache, or external calls. Then inspect logs, query plans, dependency timings, and recent changes. Optimize the biggest bottleneck and verify with measurements.
-
-### How do you improve API throughput?
-
-Avoid blocking calls, use async I/O, optimize database queries, add pagination, reduce payload size, use caching, tune dependency usage, and scale horizontally when the application is stateless.
-
-### Why can retries make an outage worse?
-
-Retries add more traffic to a dependency that may already be overloaded. Use backoff, jitter, limits, circuit breakers, and idempotency.
-

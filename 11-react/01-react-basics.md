@@ -4,11 +4,6 @@
 
 React is a UI library for building component-based user interfaces.
 
-Chinese notes:
-
-- `component`: 组件.
-- `props`: 组件输入.
-- `state`: 组件内部状态.
 - `JSX`: JavaScript XML-like syntax.
 
 ## Component
@@ -273,8 +268,6 @@ This example shows:
 - accessible table markup;
 - cleanup guard to avoid setting state after unmount.
 
-## Review Questions
-
 ### What is a component?
 
 > A component is a reusable UI unit that receives props and returns React elements describing what should appear on screen.
@@ -286,14 +279,6 @@ This example shows:
 ### Why should keys be stable?
 
 > Stable keys help React preserve item identity and state correctly during list changes.
-
-## Common Mistakes
-
-- Mutating state directly.
-- Using array index as key for dynamic lists.
-- Too much state at top-level.
-- Not handling loading/error/empty states.
-- Large components with too many responsibilities.
 
 ## Practice Task
 

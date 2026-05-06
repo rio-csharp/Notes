@@ -1,356 +1,100 @@
-# OWASP Top 10
+# Common Web Application Risks And Secure Design Habits
 
 ## Core Idea
 
-OWASP Top 10 is a widely recognized list of critical web application security risks.
+Security engineering improves when teams stop treating vulnerabilities as disconnected trivia and start seeing them as recurring failure patterns. Lists such as the OWASP Top 10 are useful not because every engineer must memorize category names, but because they teach the kinds of mistakes that repeatedly appear in production systems.
 
-Chinese notes:
+This chapter treats those risks as design habits and engineering failures rather than as compliance labels.
 
-- `OWASP`: Open Worldwide Application Security Project.
-- `broken access control`: 访问控制失效.
-- `injection`: 注入攻击.
-- `security misconfiguration`: 安全配置错误.
+## Broken Access Control
 
-## Why It Matters
+Broken access control is one of the most common and damaging failures in business applications. A user is authenticated, but the system fails to verify whether that user may access this tenant, this order, this account, or this operation.
 
-Full-stack engineers should understand common web risks and how to prevent them in both backend and frontend code.
+This is why backend resource-level checks matter so much. A system that checks only "is signed in" is often much less secure than it appears.
 
-Security is not only a security team responsibility. Developers make daily decisions that affect security.
+## Cryptographic Failures
 
-This file follows the OWASP Top 10:2021 categories:
+Cryptographic failures are often less about advanced mathematics than about ordinary engineering misuse:
 
-```text
-A01 Broken Access Control
-A02 Cryptographic Failures
-A03 Injection
-A04 Insecure Design
-A05 Security Misconfiguration
-A06 Vulnerable and Outdated Components
-A07 Identification and Authentication Failures
-A08 Software and Data Integrity Failures
-A09 Security Logging and Monitoring Failures
-A10 Server-Side Request Forgery
-```
+- plaintext secrets;
+- weak password hashing;
+- improper key storage;
+- no TLS enforcement;
+- sensitive values leaked into logs.
 
-## 1. Broken Access Control
+Good cryptography in application engineering usually means choosing the right established primitive and surrounding it with sound operational handling rather than inventing new algorithms.
 
-Problem:
+## Injection
 
-Users can access data or actions they should not.
+Injection flaws occur when untrusted input is allowed to alter the meaning of an interpreter boundary such as SQL, shell commands, templating engines, or query languages.
 
-Example:
+The defense pattern is correspondingly consistent:
 
-```http
-GET /api/orders/123
-```
+- parameterize data values;
+- validate structure;
+- keep untrusted input out of command syntax;
+- reduce backend privilege where possible.
 
-User changes ID:
+The lesson scales beyond SQL. Any time an application constructs a language from strings, injection risk should be considered.
 
-```http
-GET /api/orders/124
-```
+## Insecure Design
 
-If backend only checks authentication but not ownership/tenant/permission, this is broken access control.
+Some failures exist before the code is written:
 
-Prevention:
+- no rate limiting on login;
+- no idempotency on payments;
+- no tenant boundary in data access;
+- no audit trail for sensitive changes;
+- no abuse-case reasoning for privileged actions.
 
-- backend authorization;
-- resource-level checks;
-- tenant isolation;
-- deny by default;
-- audit sensitive actions.
+This is why security cannot be reduced to sanitizers and middleware. Secure design begins with the system's workflow assumptions.
 
-ASP.NET Core resource check:
+## Misconfiguration And Operational Exposure
 
-```csharp
-[HttpGet("{id:int}")]
-public async Task<ActionResult<OrderDto>> GetById(int id, CancellationToken ct)
-{
-    var userId = User.FindFirst("sub")?.Value;
-    var tenantId = User.FindFirst("tenant_id")?.Value;
+Security misconfiguration often comes from defaults and convenience:
 
-    var order = await _dbContext.Orders
-        .AsNoTracking()
-        .Where(o => o.Id == id &&
-            o.TenantId.ToString() == tenantId &&
-            o.Customer.UserId == userId)
-        .Select(o => new OrderDto(o.Id, o.Status.ToString(), o.Total))
-        .SingleOrDefaultAsync(ct);
+- overly broad CORS policies;
+- verbose production errors;
+- public storage buckets;
+- exposed admin tools;
+- weak cookie or header settings.
 
-    return order is null ? NotFound() : Ok(order);
-}
-```
+These are especially dangerous because they frequently arise outside the main business logic, where code review attention may be lower.
 
-Do not query by `Id` first and then forget ownership or tenant checks.
+## Vulnerable Dependencies And Supply Chain Risk
 
-## 2. Cryptographic Failures
+Application security also depends on the code the team did not write directly. Libraries, transitive packages, container images, and CI/CD artifacts all extend the trust surface.
 
-Problem:
+Dependency review, vulnerability scanning, and update discipline are therefore part of software maintenance, not optional hardening tasks.
 
-Sensitive data is not protected correctly.
+## Logging, Monitoring, And Detectability
 
-Examples:
+A system may prevent some attacks and still fail badly if it cannot detect abuse, trace sensitive actions, or investigate privilege changes after the fact.
 
-- plaintext passwords;
-- weak hashing;
-- no TLS;
-- secrets in source code;
-- sensitive data in logs.
+Security logging should therefore be intentional, but disciplined:
 
-Prevention:
+- log meaningful security events;
+- include correlation identifiers where useful;
+- never log raw secrets, passwords, or bearer tokens.
 
-- HTTPS;
-- strong password hashing;
-- key management;
-- secret rotation;
-- encryption at rest where needed.
+Observability is part of the security posture because undetectable failure is operationally similar to unprevented failure.
 
-Bad:
+## SSRF And Outbound Trust
 
-```csharp
-var passwordHash = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-```
+Server-side request forgery is an especially good example of modern trust-boundary failure. The server is persuaded to make a network request on behalf of attacker-controlled input, potentially reaching internal or otherwise protected destinations.
 
-Better:
+The key defense idea is that outbound requests are also a trust boundary. Allowlisting, egress controls, redirect control, and cautious URL handling matter because the server's network position is more privileged than the attacker's browser.
 
-```csharp
-var hash = _passwordHasher.HashPassword(user, password);
-```
+## Design Consequences
 
-Use established password hashing libraries and store secrets in a secret manager, not source code.
+The value of security risk taxonomies is that they teach recurring habits:
 
-## 3. Injection
+- verify ownership, not just authentication;
+- choose established cryptographic primitives correctly;
+- treat any interpreter boundary as a potential injection surface;
+- model abuse cases early;
+- configure infrastructure narrowly rather than broadly;
+- monitor sensitive actions and state changes;
+- treat outbound connectivity as part of the attack surface.
 
-Examples:
-
-- SQL injection;
-- command injection;
-- LDAP injection;
-- NoSQL injection.
-
-Prevention:
-
-- parameterized queries;
-- input validation;
-- avoid shell command construction;
-- least privilege.
-
-Bad SQL:
-
-```csharp
-var sql = $"SELECT * FROM Users WHERE Email = '{email}'";
-```
-
-Good EF Core query:
-
-```csharp
-var user = await _dbContext.Users
-    .SingleOrDefaultAsync(u => u.Email == email, ct);
-```
-
-## 4. Insecure Design
-
-Problem:
-
-The system is designed without considering abuse cases.
-
-Examples:
-
-- no rate limit on login;
-- no idempotency for payment;
-- no approval workflow for sensitive action.
-
-Prevention:
-
-- threat modeling;
-- abuse case review;
-- secure design patterns.
-
-Design checklist:
-
-```text
-Can this action be retried safely?
-Can a user access another tenant's data?
-What happens if a payment callback arrives twice?
-Is there a rate limit for this workflow?
-What audit trail exists for sensitive changes?
-```
-
-## 5. Security Misconfiguration
-
-Examples:
-
-- default credentials;
-- verbose errors in production;
-- public cloud storage;
-- overly permissive CORS;
-- missing security headers.
-
-Safer CORS example:
-
-```csharp
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("Frontend", policy =>
-    {
-        policy.WithOrigins("https://app.example.com")
-            .AllowAnyHeader()
-            .AllowAnyMethod();
-    });
-});
-```
-
-Avoid:
-
-```csharp
-policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
-```
-
-Especially do not combine arbitrary origins with credentials.
-
-## 6. Vulnerable Components
-
-Problem:
-
-Using dependencies with known vulnerabilities.
-
-Prevention:
-
-- dependency scanning;
-- package updates;
-- remove unused packages;
-- review transitive dependencies.
-
-.NET commands:
-
-```bash
-dotnet list package --vulnerable
-dotnet list package --outdated
-```
-
-## 7. Identification And Authentication Failures
-
-Examples:
-
-- weak password policy;
-- no MFA for admin;
-- long-lived tokens;
-- poor session management.
-
-Protections:
-
-- secure password hashing;
-- login rate limiting;
-- account lockout;
-- refresh token rotation;
-- MFA for privileged users;
-- generic login errors.
-
-## 8. Software And Data Integrity Failures
-
-Examples:
-
-- untrusted CI/CD artifacts;
-- no package integrity checks;
-- insecure deserialization;
-- unverified updates.
-
-Practical controls:
-
-- protected branches;
-- required reviews;
-- signed build artifacts where appropriate;
-- dependency lock files;
-- restricted deployment credentials;
-- avoid deserializing untrusted polymorphic data.
-
-## 9. Logging And Monitoring Failures
-
-Problem:
-
-Security events are not logged or monitored.
-
-Examples:
-
-- no login failure monitoring;
-- no alert on privilege changes;
-- no audit trail for admin actions.
-
-Security log example:
-
-```csharp
-_logger.LogWarning(
-    "Permission changed. Actor={ActorUserId} Target={TargetUserId} Permission={Permission}",
-    actorUserId,
-    targetUserId,
-    permission);
-```
-
-Do not log secrets, raw tokens, or passwords.
-
-## 10. SSRF
-
-Server-Side Request Forgery tricks a server into making requests to unintended internal/external resources.
-
-Prevention:
-
-- URL allowlist;
-- block private IP ranges;
-- disable unnecessary redirects;
-- network egress controls.
-
-Risky:
-
-```csharp
-var response = await _httpClient.GetAsync(request.Url, ct);
-```
-
-Safer pattern:
-
-```csharp
-var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-{
-    "api.github.com",
-    "hooks.stripe.com"
-};
-
-var uri = new Uri(request.Url);
-
-if (!allowedHosts.Contains(uri.Host))
-{
-    throw new ValidationException("URL host is not allowed.");
-}
-
-var response = await _httpClient.GetAsync(uri, ct);
-```
-
-Allowlisting is usually safer than trying to block every dangerous destination.
-
-## Review Questions
-
-### Which OWASP risk do you see most often in business apps?
-
-> Broken access control is very common. Many apps check whether a user is logged in but forget to check whether the user can access that specific tenant, order, or resource.
-
-### How do you prevent broken access control?
-
-> Enforce authorization on the backend, use resource-level checks, validate tenant ownership, deny by default, and add tests for unauthorized and forbidden scenarios.
-
-## Common Mistakes
-
-- Relying on frontend permission checks.
-- Overly broad CORS.
-- Logging tokens or passwords.
-- No rate limit on login.
-- Public file storage by accident.
-- Missing dependency scanning.
-
-## Practice Task
-
-Review an order management API and identify one risk from each category:
-
-1. access control;
-2. injection;
-3. misconfiguration;
-4. authentication failure;
-5. logging/monitoring failure.
+When those habits become normal engineering practice, the categories matter less because the design process has already internalized them.

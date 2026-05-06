@@ -1,0 +1,7 @@
+# ASP.NET Core Recap
+
+This chapter established ASP.NET Core as a coherent web application platform rather than a collection of unrelated framework features. Hosting, HTTP semantics, pipeline execution, middleware composition, routing, endpoint design, security, configuration, observability, and background processing all contribute to how a production .NET service behaves under real traffic and operational stress.
+
+Several themes connect the chapter as a whole. The request pipeline is the platform spine on which routing, authentication, authorization, and endpoint execution depend. Endpoint code should stay at the HTTP boundary and delegate business behavior rather than absorbing it. Security rules belong on the server, configuration should be typed and validated, and observability must be designed deliberately if production systems are to remain diagnosable. Background work likewise belongs to the application model, but it must be treated with the same seriousness as request handling when questions of lifetime, cancellation, idempotency, and multi-instance coordination arise.
+
+Taken together, these ideas form the practical foundation for the rest of the book's .NET application architecture. Once the reader understands how ASP.NET Core hosts requests, shapes endpoint surfaces, enforces access, receives configuration, emits operational signals, and runs work beyond the request path, later chapters can build on that platform without having to reintroduce the web host itself.

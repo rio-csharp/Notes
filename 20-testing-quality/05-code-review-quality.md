@@ -4,14 +4,6 @@
 
 Code review is a quality practice, not just an approval step.
 
-Chinese notes:
-
-- `code review`: 代码评审.
-- `pull request`: 合并请求.
-- `regression`: 回归问题.
-- `maintainability`: 可维护性.
-- `data integrity`: 数据完整性.
-
 Good review protects:
 
 - correctness;
@@ -460,36 +452,6 @@ The reviewer should:
 - separate blocking issues from suggestions;
 - approve only when comfortable with the risk;
 - ask for context when unclear.
-
-## Knowledge Checks
-
-### What should be reviewed first?
-
-Correctness, security, data integrity, authorization, and production risk should come before style or naming.
-
-### Why are large PRs risky?
-
-They hide important behavior changes, take longer to review, create more merge conflicts, and make it harder to reason about risk.
-
-### What makes a review comment useful?
-
-It explains a specific behavior or risk and gives the author a clear path to improve the code.
-
-### Why do database migrations need careful review?
-
-Schema changes can lock tables, break old application versions, lose data, or make rollback difficult.
-
-## Common Mistakes
-
-- Focusing only on formatting.
-- Huge PRs with unrelated changes.
-- Vague comments.
-- No test evidence.
-- Approving without understanding risk.
-- Personal tone instead of technical tone.
-- Ignoring authorization boundaries.
-- Ignoring migration compatibility.
-- Treating frontend hidden buttons as real security.
 
 ## Practice Task
 

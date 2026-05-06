@@ -4,12 +4,6 @@
 
 React Router manages client-side routing in React applications.
 
-Chinese notes:
-
-- `route`: 路由.
-- `nested route`: 嵌套路由.
-- `protected route`: 受保护路由.
-
 ## Basic Routes
 
 ```tsx
@@ -280,8 +274,6 @@ function OrderDetailPage() {
 }
 ```
 
-## Review Questions
-
 ### What state should be in URL?
 
 > State that should be shareable, bookmarkable, or restorable, such as search filters, page number, sort field, and selected tab.
@@ -293,14 +285,6 @@ function OrderDetailPage() {
 ### Why use nested routes?
 
 > Nested routes allow shared layouts and route-specific content through `Outlet`.
-
-## Common Mistakes
-
-- Storing shareable filters only in component state.
-- Treating route guard as security.
-- Losing query params on navigation.
-- Hardcoding strings everywhere.
-- No 404 route.
 
 ## Practice Task
 

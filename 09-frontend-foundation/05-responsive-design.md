@@ -4,12 +4,6 @@
 
 Responsive design makes UI work across different screen sizes, input types, and device capabilities.
 
-Chinese notes:
-
-- `responsive`: 响应式.
-- `breakpoint`: 断点.
-- `viewport`: 视口.
-
 ## Viewport Meta
 
 ```html
@@ -228,8 +222,6 @@ Responsive image:
 
 This page keeps controls usable on mobile, prevents table overflow from breaking layout, and avoids fixed-width containers.
 
-## Review Questions
-
 ### What is responsive design?
 
 > Responsive design adapts layout and content to different screen sizes and device capabilities using flexible grids, media queries, responsive images, and adaptive interaction patterns.
@@ -241,15 +233,6 @@ This page keeps controls usable on mobile, prevents table overflow from breaking
 ### Mobile-first vs desktop-first?
 
 > Mobile-first starts with small-screen styles and adds complexity for larger screens. It often leads to simpler responsive CSS.
-
-## Common Mistakes
-
-- Fixed width containers.
-- Tiny touch targets.
-- Text overflow on mobile.
-- No table strategy.
-- Testing only desktop.
-- Using viewport-width font sizes carelessly.
 
 ## Practice Task
 

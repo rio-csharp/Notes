@@ -4,11 +4,6 @@
 
 Integration tests verify that multiple parts of the application work together.
 
-Chinese notes:
-
-- `integration test`: 集成测试.
-- `test fixture`: 测试夹具, shared setup for tests.
-- `Testcontainers`: 用容器启动真实依赖做测试.
 - `WebApplicationFactory`: ASP.NET Core integration testing helper.
 
 Integration tests are especially valuable for ASP.NET Core because many bugs happen at boundaries:
@@ -426,35 +421,6 @@ High-value integration tests:
 - JSON shape;
 - query filtering and pagination;
 - idempotency behavior.
-
-## Knowledge Checks
-
-### Unit test vs integration test?
-
-Unit tests isolate a small piece of logic. Integration tests verify multiple components together, such as API routing, DI, middleware, EF Core, SQL, and serialization.
-
-### Why avoid EF InMemory for relational integration tests?
-
-It does not behave like a relational database. It can miss SQL translation issues, constraints, transactions, and relational query differences.
-
-### Why replace external identity providers in integration tests?
-
-Tests should be deterministic and fast. A test authentication handler lets the app exercise its authorization logic without depending on a real external login system.
-
-### Why assert error response shape?
-
-Frontend code depends on error contracts. Testing status code and response body prevents accidental API contract regressions.
-
-## Common Mistakes
-
-- Tests depend on a local developer database.
-- Tests are order-dependent.
-- No cleanup or reset strategy.
-- Using EF InMemory and missing SQL bugs.
-- Mocking too much, leaving no real integration behavior.
-- No tests for 401, 403, 404, or 409.
-- Testing only status code and ignoring response body.
-- Calling real external systems in normal integration tests.
 
 ## Practice Task
 

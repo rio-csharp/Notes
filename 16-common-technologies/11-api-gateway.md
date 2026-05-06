@@ -4,13 +4,7 @@
 
 An API Gateway is an entry point that routes client requests to backend services.
 
-Chinese notes:
-
-- `API Gateway`: API 网关.
-- `reverse proxy`: 反向代理.
 - `BFF`: Backend for Frontend.
-- `rate limiting`: 限流.
-- `request aggregation`: 请求聚合.
 
 ## Responsibilities
 
@@ -286,30 +280,6 @@ Avoid retrying non-idempotent `POST` blindly.
 - inconsistent authorization model;
 - large request/response transformations.
 
-## Common Mistakes
-
-- Business logic in gateway.
-- No rate limiting.
-- No timeout.
-- No observability.
-- Gateway as single point of failure.
-- Confusing gateway auth with service-level authorization.
-- Aggregating too much in a generic gateway instead of a BFF.
-
-## Knowledge Checks
-
-### Why use API Gateway?
-
-It provides a single entry point for clients and centralizes routing, authentication integration, rate limiting, TLS termination, and cross-cutting concerns.
-
-### API Gateway vs BFF?
-
-Gateway is usually generic infrastructure. BFF is a backend tailored to a specific frontend experience and may aggregate data for that client.
-
-### What are risks of API Gateway?
-
-It can become a bottleneck, single point of failure, or place where too much business logic accumulates.
-
 ## Practice Task
 
 Design gateway for:
@@ -320,4 +290,3 @@ Design gateway for:
 4. auth validation;
 5. rate limiting;
 6. request tracing.
-

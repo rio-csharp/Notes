@@ -4,13 +4,6 @@
 
 High CPU and memory issues require separating workload, application code, .NET runtime behavior, and infrastructure limits.
 
-Chinese notes:
-
-- `CPU`: 处理器.
-- `memory leak`: 内存泄漏.
-- `GC pressure`: GC 压力.
-- `heap`: 堆.
-- `dump`: 进程转储.
 - `OOMKilled`: container exceeded memory limit and was killed.
 
 High CPU and high memory often affect each other:
@@ -297,8 +290,6 @@ Large objects are usually allocated on the Large Object Heap.
 
 Chinese note:
 
-- `LOH`: Large Object Heap, 大对象堆.
-
 Large arrays, strings, and buffers can cause memory pressure.
 
 Risky:
@@ -498,36 +489,6 @@ Possible:
 - increase memory only when the workload legitimately needs it.
 
 Increasing memory can be valid, but it should not hide an unbounded leak.
-
-## Knowledge Checks
-
-### How do you troubleshoot high memory in .NET?
-
-Check memory metrics, GC behavior, recent changes, traffic, and container limits. If memory is still high and impact allows, capture a dump or GC dump before restart, then inspect retained object types and references.
-
-### What is GC pressure?
-
-GC pressure means the application allocates enough memory that garbage collection runs frequently or takes significant CPU time, increasing latency and reducing throughput.
-
-### Why collect a dump before restarting?
-
-Restarting clears the evidence. A dump can show which objects are retained, which threads exist, and what the process was doing during the incident.
-
-### Why can high CPU come from retries?
-
-Retries multiply work. If many requests retry a slow dependency, CPU, threads, connections, and dependency traffic can all increase at the same time.
-
-## Common Mistakes
-
-- Restarting without preserving evidence.
-- Assuming all memory growth is a leak.
-- Ignoring allocation rate and GC metrics.
-- Loading large files into memory.
-- Unbounded `MemoryCache` or static dictionaries.
-- Blocking async code with `.Result` or `.Wait()`.
-- Ignoring traffic spikes.
-- Ignoring container memory limits.
-- Adding retries without backoff and timeout.
 
 ## Practice Task
 

@@ -2,34 +2,13 @@
 
 ## Core Idea
 
-The decorator pattern wraps a service to add behavior without changing the original implementation.
+Decorators allow a service to be wrapped with additional behavior without changing the core implementation or the interface seen by callers. In DI-heavy applications, this is one of the cleanest ways to attach cross-cutting concerns such as logging, caching, metrics, retries, tracing, or auditing around an existing service.
 
-Chinese notes:
+This chapter treats decorators as part of service composition rather than as a design-pattern sidebar. The important architectural question is not merely how to wrap one service. It is how to keep business behavior focused while still allowing infrastructure behavior to be layered on through the container.
 
-- `decorator`: 装饰器.
-- `cross-cutting concern`: 横切关注点.
-- `inner service`: 被包装的内部服务.
-- `composition`: 组合.
-- `cache invalidation`: 缓存失效.
+## The Core Service And The Wrapped Interface
 
-Use decorators for:
-
-- caching;
-- logging;
-- metrics;
-- retries;
-- validation;
-- authorization;
-- tracing;
-- auditing.
-
-Key takeaway:
-
-> A decorator implements the same interface as the wrapped service and delegates to the inner service while adding behavior before, after, or around the call.
-
-## Basic Service
-
-Interface:
+Decorator design begins with a stable interface and a core implementation that focuses on its primary responsibility.
 
 ```csharp
 public interface IProductService
@@ -37,8 +16,6 @@ public interface IProductService
     Task<ProductDto?> GetByIdAsync(int id, CancellationToken cancellationToken);
 }
 ```
-
-Core implementation:
 
 ```csharp
 public sealed class ProductService : IProductService
@@ -62,9 +39,49 @@ public sealed class ProductService : IProductService
 }
 ```
 
-The core service focuses on business/data access behavior.
+The point of the core implementation is that it should remain about product retrieval. Once caching, logging, retry logic, metrics, and tracing all move directly into this class, the core behavior becomes harder to read and evolve.
 
-## Caching Decorator
+## Decorator Structure
+
+A decorator implements the same interface as the wrapped service and delegates to an inner instance while adding behavior before, after, or around the call.
+
+```csharp
+public sealed class LoggingProductService : IProductService
+{
+    private readonly IProductService _inner;
+    private readonly ILogger<LoggingProductService> _logger;
+
+    public LoggingProductService(
+        IProductService inner,
+        ILogger<LoggingProductService> logger)
+    {
+        _inner = inner;
+        _logger = logger;
+    }
+
+    public async Task<ProductDto?> GetByIdAsync(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Loading product {ProductId}", id);
+
+        var product = await _inner.GetByIdAsync(id, cancellationToken);
+
+        _logger.LogInformation(
+            "Loaded product {ProductId}. Found={Found}",
+            id,
+            product is not null);
+
+        return product;
+    }
+}
+```
+
+From the caller's perspective, nothing changes. The controller still depends on `IProductService`. The difference is in how the container composes the service chain.
+
+## Caching As A Decorator
+
+Caching is one of the most natural decorator use cases because it wraps a read-oriented service without forcing the core implementation to know about caching infrastructure directly.
 
 ```csharp
 public sealed class CachedProductService : IProductService
@@ -117,50 +134,27 @@ public sealed class CachedProductService : IProductService
 }
 ```
 
-Why this helps:
+This keeps the caching concern explicit and replaceable. It also makes testing easier because the core service and the caching policy can be reasoned about separately.
 
-- `ProductService` does not know about caching;
-- caching can be tested separately;
-- caching can be added or removed through DI;
-- the public interface stays the same.
+It also clarifies where performance behavior actually lives. Without decoration, cache policy often becomes entangled with query shape, persistence concerns, and business naming. With a decorator, the system can express that "this read path is cached" as a compositional decision rather than as hidden internal behavior of the core service.
 
-## Logging Decorator
+## Separation Of Concerns Through Decoration
 
-```csharp
-public sealed class LoggingProductService : IProductService
-{
-    private readonly IProductService _inner;
-    private readonly ILogger<LoggingProductService> _logger;
+Embedding logging or caching directly into the core service seems simple at first, but it often weakens separation of concerns. The class that should answer the business question "how do we get a product?" slowly becomes the place where cache-key design, telemetry decisions, retry policy, and infrastructure integration also live.
 
-    public LoggingProductService(
-        IProductService inner,
-        ILogger<LoggingProductService> logger)
-    {
-        _inner = inner;
-        _logger = logger;
-    }
+Decorators preserve a cleaner split:
 
-    public async Task<ProductDto?> GetByIdAsync(
-        int id,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Loading product {ProductId}", id);
+- the core implementation handles the primary behavior;
+- each decorator handles one cross-cutting concern;
+- the DI container determines how the layers are combined.
 
-        var product = await _inner.GetByIdAsync(id, cancellationToken);
+This makes the object graph more expressive. Composition becomes part of the architecture instead of being hidden inside method bodies.
 
-        _logger.LogInformation(
-            "Loaded product {ProductId}. Found={Found}",
-            id,
-            product is not null);
+That improvement is especially valuable once systems grow. A service with direct logging, retries, metrics, authorization checks, and caching may still work, but its primary behavior becomes harder to identify. Decorators keep the business path legible by moving orthogonal concerns into layers that can be inspected independently.
 
-        return product;
-    }
-}
-```
+## Manual Decoration And Its Limitations
 
-## Manual Decoration Without Scrutor
-
-Manual decoration is possible but can be awkward.
+Manual decoration is possible through explicit registration factories.
 
 ```csharp
 builder.Services.AddScoped<ProductService>();
@@ -175,15 +169,13 @@ builder.Services.AddScoped<IProductService>(sp =>
 });
 ```
 
-This works for one decorator.
+This is acceptable for simple cases, but it becomes harder to read and maintain once several decorators must be layered or when the service graph becomes large. At that point, the registration code itself starts to obscure the design.
 
-With multiple decorators, manual registration becomes harder to read.
+Manual decoration also tends to age poorly when teams need to reorder layers or apply the same pattern across many services. The code still works, but composition stops being declarative and starts becoming a fragile block of wiring logic.
 
-## Scrutor
+## Scrutor And Declarative Decoration
 
-Scrutor is a .NET library that extends DI with assembly scanning and service decoration.
-
-Concept:
+Scrutor extends the built-in container with decoration and assembly-scanning support, making this style of composition much clearer.
 
 ```csharp
 services.AddScoped<IProductService, ProductService>();
@@ -191,7 +183,7 @@ services.Decorate<IProductService, CachedProductService>();
 services.Decorate<IProductService, LoggingProductService>();
 ```
 
-Depending on registration order, the final chain is conceptually:
+Conceptually, the chain becomes:
 
 ```text
 LoggingProductService
@@ -199,15 +191,23 @@ LoggingProductService
      -> ProductService
 ```
 
-Important warning:
+The value is not only brevity. The registrations now express architectural layering directly instead of hiding it inside factory code.
 
-> Decorator order matters. Logging outside caching measures total behavior. Logging inside caching may only measure cache misses.
+That directness matters during maintenance. When a production issue involves stale cache entries, duplicated retries, or missing telemetry, teams often need to reason about composition order quickly. Declarative decoration makes those relationships easier to inspect than a series of nested registration delegates.
 
-## Assembly Scanning With Scrutor
+## Decorator Order As Behavior
 
-Scrutor can register services by convention.
+Decorator order matters because each decorator wraps the service produced by the previous registration step.
 
-Example:
+If logging wraps caching, the logs may observe cache hits and misses. If caching wraps logging, the logging decorator may see only cache misses. The same principle applies to metrics, retry policies, tracing, and authorization wrappers.
+
+This is one of the reasons decorators are powerful: they make behavior ordering explicit. It is also one of the reasons they must be designed carefully. Composition order is not incidental detail. It changes what the application does.
+
+For the same reason, decorators should stay small and conceptually single-purpose. A wrapper that both caches, rewrites exceptions, emits metrics, and performs authorization checks is no longer improving separation of concerns. It is merely relocating a tangled implementation into another class.
+
+## Assembly Scanning And Registration Conventions
+
+Scrutor also supports assembly scanning for convention-based registration.
 
 ```csharp
 services.Scan(scan => scan
@@ -217,16 +217,13 @@ services.Scan(scan => scan
     .WithScopedLifetime());
 ```
 
-Use scanning carefully:
+This can be useful when conventions are simple and well understood. It can also become a source of hidden behavior if registration rules are too broad or surprising. The design trade-off is therefore similar to many DI features: less ceremony can be helpful, but only if it does not make the dependency graph harder to inspect.
 
-- conventions should be simple;
-- avoid surprising registrations;
-- review what gets registered;
-- explicit registration is often clearer for critical services.
+In book terms, assembly scanning belongs to the same family of convenience mechanisms as keyed services and delegate factories. It reduces registration noise, but it should not be allowed to hide architectural intent. If a reader cannot tell why a service exists in the graph or which implementation was selected, the convenience has gone too far.
 
-## Decorator vs Inheritance
+## Decorator Versus Inheritance
 
-Inheritance:
+Inheritance is sometimes used as an alternative way to "add behavior," but it is usually a weaker fit for this kind of service composition.
 
 ```csharp
 public class CachedProductService : ProductService
@@ -234,146 +231,33 @@ public class CachedProductService : ProductService
 }
 ```
 
-Problems:
+This creates tight coupling to the base implementation and makes behavior stacking awkward. Composition through decorators is generally more flexible because it allows several independent wrappers to be combined while leaving the core implementation focused and isolated.
 
-- tightly couples to base class implementation;
-- can break encapsulation;
-- one inheritance chain is rigid;
-- combining behaviors becomes hard.
+The difference is architectural. Inheritance extends one class hierarchy. Decoration composes several orthogonal behaviors around a stable interface.
 
-Decorator:
+## Caching Design Still Has To Be Correct
 
-```text
-IProductService
-  LoggingProductService
-    CachedProductService
-      ProductService
-```
+A cache decorator is not automatically a good cache design. Several deeper decisions still matter.
 
-Benefits:
-
-- composition-based;
-- behaviors can be stacked;
-- core implementation stays focused;
-- easier to test each behavior.
-
-## Caching Decorator Design Issues
-
-Caching looks simple, but this topic often comes up because deeper questions.
-
-### What should be cached?
-
-Good candidates:
-
-- read-heavy queries;
-- stable reference data;
-- expensive external calls;
-- product/category details with acceptable staleness.
-
-Bad candidates:
-
-- commands with side effects;
-- highly sensitive user-specific data without careful key design;
-- rapidly changing data that must be strongly consistent.
-
-### Cache key design
-
-Bad:
-
-```csharp
-var key = $"product";
-```
-
-Why it is wrong:
-
-> Every product would share the same key.
-
-Better:
+The cache key must be meaningful:
 
 ```csharp
 var key = $"product:{id}";
 ```
 
-For tenant systems:
+In multi-tenant systems, tenant or scope identity may also matter:
 
 ```csharp
 var key = $"tenant:{tenantId}:product:{id}";
 ```
 
-### Cache invalidation
+Cache candidate selection matters as well. Read-heavy, moderately stable data is often a good fit. Highly volatile data or side-effecting operations are often poor candidates. Freshness expectations matter just as much as read performance.
 
-If product data changes, cached data may become stale.
+Most importantly, invalidation cannot be ignored. If cached reads exist, the write path must have a strategy for keeping the cache acceptably fresh.
 
-Options:
+## Read/Write Separation And Invalidation
 
-- short TTL;
-- delete cache on update;
-- publish invalidation messages;
-- versioned cache keys;
-- event-driven invalidation.
-
-Practical explanation:
-
-> Caching improves read performance, but I must define freshness requirements and invalidation strategy. Otherwise the cache can return stale or incorrect data.
-
-## Complete Registration Example
-
-Install Scrutor:
-
-```powershell
-dotnet add package Scrutor
-```
-
-Register the core service and decorators:
-
-```csharp
-builder.Services.AddScoped<IProductService, ProductService>();
-builder.Services.Decorate<IProductService, CachedProductService>();
-builder.Services.Decorate<IProductService, LoggingProductService>();
-```
-
-The resolved chain is:
-
-```text
-IProductService
-  -> LoggingProductService
-     -> CachedProductService
-        -> ProductService
-```
-
-Controller usage does not change:
-
-```csharp
-[ApiController]
-[Route("api/products")]
-public sealed class ProductsController : ControllerBase
-{
-    private readonly IProductService _products;
-
-    public ProductsController(IProductService products)
-    {
-        _products = products;
-    }
-
-    [HttpGet("{id:int}")]
-    public async Task<ActionResult<ProductDto>> GetById(
-        int id,
-        CancellationToken ct)
-    {
-        var product = await _products.GetByIdAsync(id, ct);
-
-        return product is null ? NotFound() : Ok(product);
-    }
-}
-```
-
-This is the main benefit: the controller depends on `IProductService`, while DI decides whether caching, logging, metrics, or tracing wraps the core implementation.
-
-## Cache Invalidation Example
-
-If reads are cached, writes need an invalidation strategy.
-
-Separate read and write contracts keep the design clearer:
+One clean way to handle invalidation is to separate read and write contracts.
 
 ```csharp
 public interface IProductQueryService
@@ -386,8 +270,6 @@ public interface IProductCommandService
     Task UpdatePriceAsync(int id, decimal price, CancellationToken ct);
 }
 ```
-
-Read decorator:
 
 ```csharp
 public sealed class CachedProductQueryService : IProductQueryService
@@ -432,8 +314,6 @@ public sealed class CachedProductQueryService : IProductQueryService
 }
 ```
 
-Write decorator that invalidates after a successful update:
-
 ```csharp
 public sealed class CacheInvalidatingProductCommandService : IProductCommandService
 {
@@ -456,8 +336,6 @@ public sealed class CacheInvalidatingProductCommandService : IProductCommandServ
 }
 ```
 
-Shared key helper:
-
 ```csharp
 public static class ProductCacheKeys
 {
@@ -465,134 +343,16 @@ public static class ProductCacheKeys
 }
 ```
 
-Registration:
+This design is a good example of decorators remaining architectural rather than cosmetic. The read path and the write path both participate in the cache strategy.
 
-```csharp
-builder.Services.AddScoped<IProductQueryService, ProductQueryService>();
-builder.Services.Decorate<IProductQueryService, CachedProductQueryService>();
+That is an important correction to a common mistake. Caching is not a read-side optimization alone. It is a consistency policy. Once decorators are introduced, the surrounding design has to account for invalidation, freshness, and scope identity with the same seriousness as latency.
 
-builder.Services.AddScoped<IProductCommandService, ProductCommandService>();
-builder.Services.Decorate<IProductCommandService, CacheInvalidatingProductCommandService>();
-```
+## Retry Decorators And Idempotency
 
-Key point:
+Retry behavior is another strong candidate for decoration, but it has to respect the semantics of the wrapped operation.
 
-> A cache decorator should not be only about faster reads. It must also fit the write path, freshness rules, and failure behavior.
+Retrying an idempotent read or a transient dependency call may be reasonable. Retrying a non-idempotent command, such as charging a payment without an idempotency key, may create duplicate side effects.
 
-## Retry Decorator Warning
+Decorators make retry composition easy. They do not remove the need to understand the safety of the wrapped operation.
 
-Retries are useful for transient failures, but dangerous around non-idempotent operations.
-
-Bad:
-
-```text
-Retry payment charge without idempotency key.
-```
-
-Why it is dangerous:
-
-> The customer may be charged twice if the first request succeeded but the response was lost.
-
-Better:
-
-> Retry only safe/idempotent operations, or use idempotency keys for commands.
-
-## Review Questions
-
-### What is decorator pattern?
-
-Decorator wraps an implementation with another implementation of the same interface to add behavior without modifying the original class.
-
-### Decorator vs inheritance?
-
-Decorator uses composition and is more flexible. Inheritance creates a static hierarchy and can become fragile when combining behaviors.
-
-### What is Scrutor?
-
-Scrutor is a .NET library that extends Microsoft DI with assembly scanning and service decoration.
-
-### Why use decorators instead of adding logging/caching directly?
-
-Decorators keep cross-cutting concerns separate from core business logic. They make behaviors reusable, testable, and configurable through DI.
-
-### Why does decorator order matter?
-
-Because each decorator wraps the previous service. For example, logging outside caching sees cache hits and misses, while logging inside caching may only see cache misses.
-
-### What is a cache invalidation problem?
-
-It is the problem of keeping cached data consistent enough after the source data changes. Solutions include TTL, explicit invalidation, event-driven invalidation, and versioned keys.
-
-## Common Mistakes
-
-### Mistake: Decorator order confusion
-
-Why it is wrong:
-
-> Different order changes behavior, logging, metrics, retry scope, and caching semantics.
-
-Better answer:
-
-> Decide the intended behavior and register decorators in a deliberate order.
-
-### Mistake: Circular dependencies
-
-Why it is wrong:
-
-> A decorator must receive the inner implementation, not resolve itself again.
-
-Better answer:
-
-> Use Scrutor or careful manual registration so the decorator wraps the previous implementation.
-
-### Mistake: Too much business logic in decorators
-
-Why it is wrong:
-
-> Decorators should handle cross-cutting concerns. Business rules hidden in decorators are hard to discover.
-
-Better answer:
-
-> Keep domain behavior in services/domain objects and use decorators for infrastructure concerns.
-
-### Mistake: Caching commands with side effects
-
-Why it is wrong:
-
-> Commands change state. Caching them can skip required side effects or return misleading results.
-
-Better answer:
-
-> Cache read queries, not state-changing commands, unless there is a very deliberate design.
-
-### Mistake: No cache invalidation
-
-Why it is wrong:
-
-> Users may receive stale or incorrect data after updates.
-
-Better answer:
-
-> Define TTL and invalidation strategy based on business freshness requirements.
-
-### Mistake: Retrying non-idempotent operations without protection
-
-Why it is wrong:
-
-> Duplicate side effects can happen, such as double charging or duplicate order creation.
-
-Better answer:
-
-> Use retries for safe operations or add idempotency keys for commands.
-
-## Practice Task
-
-Create:
-
-1. `IProductService`;
-2. `ProductService`;
-3. `CachedProductService`;
-4. `LoggingProductService`;
-5. Scrutor registration for both decorators;
-6. a note explaining the decorator order;
-7. a cache invalidation strategy for product updates.
+This illustrates the broader limit of the pattern. Decorators are excellent for attaching orthogonal behavior, but they cannot repair a poor underlying contract. If the wrapped interface does not distinguish idempotent reads from state-changing commands, the decoration layer has less information than it needs to apply safe policy.

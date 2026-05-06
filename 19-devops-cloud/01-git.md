@@ -4,15 +4,6 @@
 
 Git is a distributed version control system. Good Git practice helps teams change code safely, understand history, and recover from mistakes.
 
-Chinese notes:
-
-- `branch`: 分支.
-- `merge`: 合并.
-- `rebase`: 变基.
-- `pull request`: 合并请求.
-- `commit`: 提交.
-- `conflict`: 冲突.
-
 ## Daily Commands
 
 ```bash
@@ -206,8 +197,6 @@ git reset --hard
 
 A good PR includes:
 
-- what changed;
-- why it changed;
 - test evidence;
 - screenshots for UI;
 - migration notes;
@@ -261,27 +250,3 @@ git push origin v1.4.0
 ```
 
 Tags mark release points. CI/CD can deploy from tags.
-
-## Common Mistakes
-
-- Huge PRs.
-- Force-pushing shared branches carelessly.
-- Poor commit messages.
-- Resolving conflicts without understanding code.
-- Mixing unrelated refactors with features.
-- Committing generated secrets or local config.
-- Not checking staged diff before commit.
-
-## Knowledge Checks
-
-### Merge vs rebase?
-
-Merge preserves branch history. Rebase creates a linear history by replaying commits, but rewrites history and should be used carefully on shared branches.
-
-### What makes a good pull request?
-
-Small focused scope, clear description, tests, risk notes, and an easy review path.
-
-### How do you handle conflicts?
-
-Understand both changes, resolve intentionally, run tests, and avoid blindly accepting one side.

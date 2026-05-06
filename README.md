@@ -2,6 +2,15 @@
 
 Private Markdown notes content for CodeCafe.
 
+## Latest Downloads
+
+The latest generated book files are published automatically from `main`:
+
+- [Latest Release](https://github.com/rio-csharp/Notes/releases/tag/latest)
+- [notes.epub](https://github.com/rio-csharp/Notes/releases/download/latest/notes.epub)
+- [notes.pdf](https://github.com/rio-csharp/Notes/releases/download/latest/notes.pdf)
+- [notes.html](https://github.com/rio-csharp/Notes/releases/download/latest/notes.html)
+
 ## Purpose
 
 This repository stores the read-only source notes that CodeCafe mounts into the

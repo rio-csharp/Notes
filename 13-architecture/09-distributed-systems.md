@@ -4,13 +4,6 @@
 
 A distributed system has multiple components communicating over a network.
 
-Chinese notes:
-
-- `distributed system`: 分布式系统.
-- `latency`: 延迟.
-- `partial failure`: 局部失败.
-- `consistency`: 一致性.
-
 The hard part is not just splitting code. The hard part is handling failure, latency, and consistency.
 
 ## Key Realities
@@ -123,8 +116,6 @@ If payment fails:
 release inventory
 cancel order
 ```
-
-This is compensation（补偿）, not rollback in the database transaction sense.
 
 Engineering perspective:
 
@@ -410,30 +401,6 @@ public sealed class CorrelationIdHandler : DelegatingHandler
     }
 }
 ```
-
-## Knowledge Checks
-
-### What makes distributed systems hard?
-
-Partial failure, network latency, timeouts, retries, duplicate messages, data consistency, observability, and operational complexity.
-
-### What is eventual consistency?
-
-It means different parts of the system may temporarily see different data, but they converge to a consistent state over time.
-
-### How do you make retries safe?
-
-Use idempotency keys, unique constraints, deduplication, and careful retry policies with backoff.
-
-## Common Mistakes
-
-- No timeout.
-- Retrying everything immediately.
-- Assuming exactly-once delivery.
-- No correlation ID.
-- No idempotency.
-- Ignoring clock/time issues.
-- No fallback or degradation plan.
 
 ## Practice Task
 

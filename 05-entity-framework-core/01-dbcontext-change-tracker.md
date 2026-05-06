@@ -1,28 +1,14 @@
-# DbContext And Change Tracker
+# DbContext And The Change Tracker
 
 ## Core Idea
 
-`DbContext` is the main EF Core object used to query and save data.
+`DbContext` is the operational center of EF Core. It is the object through which the application queries the database, tracks entity instances, coordinates updates, and commits a unit of work. The change tracker is not a secondary convenience attached to that process. It is one of the main reasons EF Core can translate object-level changes into relational commands.
 
-Chinese notes:
+This chapter begins with `DbContext` because most of the rest of EF Core only makes sense once its execution model is clear. Query behavior, relationship fix-up, update patterns, concurrency handling, and performance trade-offs all depend on how long a context lives, what it tracks, and when that tracked state is converted into SQL.
 
-- `DbContext`: EF Core 数据上下文.
-- `Change Tracker`: 变更跟踪器.
-- `unit of work`: 工作单元.
-- `entity state`: 实体状态.
+## `DbContext` As A Unit Of Work Boundary
 
-`DbContext` combines:
-
-- database connection configuration;
-- entity mapping;
-- LINQ query translation;
-- change tracking;
-- unit-of-work behavior;
-- transaction coordination for `SaveChanges`.
-
-## DbContext Lifetime
-
-In ASP.NET Core, `DbContext` is usually registered as scoped:
+In ASP.NET Core applications, `DbContext` is usually registered as scoped:
 
 ```csharp
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -31,16 +17,61 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 });
 ```
 
-Why scoped?
+That default is not merely conventional. It reflects the fact that a web request often maps naturally to one application-level unit of work. A single request loads some entities, applies domain decisions, and saves the resulting state changes before the scope ends.
 
-- one request often represents one unit of work;
-- `DbContext` is not thread-safe;
-- change tracker should not live too long;
-- sharing across requests can leak state and cause bugs.
+This lifetime matches several important EF Core assumptions:
 
-## Entity States
+- the context is not thread-safe;
+- tracked state should remain short-lived;
+- the identity map should describe one coherent working set rather than the entire application;
+- disposal should release database-related resources promptly.
 
-EF Core tracks entities in states:
+When a `DbContext` is allowed to live too long, the cost is not only memory growth. The tracked graph becomes stale, entity identity becomes harder to reason about, and writes may accidentally include state that no longer belongs to the current operation.
+
+## Context Responsibilities
+
+From the application's perspective, a `DbContext` performs several related responsibilities:
+
+- it exposes entity sets through `DbSet<T>`;
+- it holds model metadata and mapping rules;
+- it translates LINQ expressions into provider-specific commands;
+- it tracks entity state when tracking is enabled;
+- it coordinates insert, update, and delete operations during `SaveChanges`;
+- it manages transactions for a single save operation when the provider supports them.
+
+These responsibilities are closely connected. EF Core is not just a query library and not just an update library. It is a persistence unit that combines object graph tracking with relational command generation.
+
+## `DbSet<T>` And Query Roots
+
+`DbSet<T>` is the usual entry point for entity queries and persistence operations.
+
+```csharp
+public sealed class AppDbContext : DbContext
+{
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<Customer> Customers => Set<Customer>();
+}
+```
+
+At runtime, a `DbSet<T>` is not a preloaded collection. It is a query root and a persistence boundary for one entity type. A call such as:
+
+```csharp
+var orders = await _dbContext.Orders
+    .Where(o => o.Status == OrderStatus.Submitted)
+    .ToListAsync(ct);
+```
+
+describes a database query. A call such as:
+
+```csharp
+_dbContext.Orders.Add(order);
+```
+
+adds an entity to the current unit of work so that the change tracker can later include it in the save pipeline.
+
+## Entity State And Change Tracking
+
+The change tracker represents each tracked entity with a state such as:
 
 - `Detached`
 - `Unchanged`
@@ -48,202 +79,88 @@ EF Core tracks entities in states:
 - `Modified`
 - `Deleted`
 
-Example:
+These states are not bookkeeping trivia. They determine which SQL operations EF Core will generate.
 
 ```csharp
-var order = await _dbContext.Orders.FindAsync(orderId);
+var order = await _dbContext.Orders.FirstAsync(o => o.Id == orderId, ct);
 order.Status = OrderStatus.Cancelled;
-
-await _dbContext.SaveChangesAsync();
-```
-
-EF detects that `Status` changed and generates an `UPDATE`.
-
-## Under The Hood: Identity Map
-
-EF Core uses an identity map（身份映射） inside the `DbContext`.
-
-The idea:
-
-```text
-Entity type + primary key -> one tracked object instance
-```
-
-Example:
-
-```csharp
-var order1 = await _dbContext.Orders.FindAsync(10);
-var order2 = await _dbContext.Orders.FirstAsync(o => o.Id == 10);
-
-Console.WriteLine(ReferenceEquals(order1, order2)); // usually true in same DbContext
-```
-
-Why:
-
-- prevents two different objects representing the same row in one context;
-- makes relationship fix-up possible;
-- avoids conflicting changes in one unit of work.
-
-This also explains why long-lived `DbContext` instances are dangerous:
-
-- stale tracked entities;
-- memory growth;
-- surprising updates;
-- identity map contains old state.
-
-## Under The Hood: Original Values And Snapshots
-
-For many entities, EF Core keeps original values so it can detect changes.
-
-Conceptually:
-
-```text
-Tracked Order
-  Current values:
-    Status = Paid
-    Total = 100
-
-  Original values:
-    Status = Pending
-    Total = 100
-```
-
-When `SaveChanges` runs, EF can compare current values with original values and generate SQL only for changed columns in many cases.
-
-Example:
-
-```csharp
-var order = await _dbContext.Orders.FirstAsync(o => o.Id == id, ct);
-order.Status = OrderStatus.Paid;
 
 await _dbContext.SaveChangesAsync(ct);
 ```
 
-Possible SQL:
+In this example, EF Core tracks the loaded entity as `Unchanged`, observes a property mutation, marks the relevant entry as modified, and then emits an `UPDATE` during `SaveChanges`.
 
-```sql
-UPDATE Orders
-SET Status = @p0
-WHERE Id = @p1;
+This is one of the major differences between EF Core and a thin SQL abstraction. The application changes objects. EF Core interprets those changes in terms of relational persistence.
+
+## Identity Map And Object Consistency
+
+Within one `DbContext`, EF Core normally keeps one tracked object instance per entity key. This is the identity map.
+
+```text
+Entity type + primary key -> one tracked instance in one context
 ```
 
-Important nuance:
+```csharp
+var order1 = await _dbContext.Orders.FindAsync([10], ct);
+var order2 = await _dbContext.Orders.FirstAsync(o => o.Id == 10, ct);
 
-- EF Core can use snapshot change tracking;
-- notification-based tracking is possible if entities implement change notification patterns;
-- APIs like `Update(entity)` may mark many properties as modified even if only one changed.
+Console.WriteLine(ReferenceEquals(order1, order2)); // typically true
+```
 
-## DetectChanges
+The identity map matters because it prevents one context from carrying multiple conflicting in-memory representations of the same row. It also enables relationship fix-up, consistent updates, and more predictable graph behavior.
 
-`DetectChanges` is the process of scanning tracked entities and comparing values.
+The cost is that a long-lived context gradually accumulates tracked objects. Once that happens, queries may reuse old in-memory instances, navigation properties may reconnect unexpectedly, and memory pressure rises with the size of the working set. The identity map is therefore one reason short-lived contexts are an architectural requirement rather than a performance preference.
 
-It can happen automatically before `SaveChanges`.
+## Snapshot Tracking And Change Detection
 
-For large graphs, this can cost CPU.
+For many entities, EF Core keeps original values so it can compare them with current values later.
 
-Example problem:
+```text
+Tracked Order
+  Original Status = Pending
+  Current  Status = Paid
+```
+
+That comparison is part of change detection. Conceptually, EF Core needs to know:
+
+- which entities are new;
+- which are deleted;
+- which properties changed on existing rows;
+- whether any concurrency tokens must be checked.
+
+In many applications, this happens automatically and invisibly enough that it is easy to forget there is real work involved. That work becomes visible once the tracked graph becomes large or once `SaveChanges` is called too frequently inside loops.
+
+## `DetectChanges` And Its Cost Model
+
+`DetectChanges` scans tracked entries and compares current state with the snapshot EF Core previously recorded.
+
+For small units of work, that cost is often negligible. For large graphs or repeated save calls, it becomes material. A pattern such as:
 
 ```csharp
 foreach (var item in manyItems)
 {
     _dbContext.Items.Add(item);
-    await _dbContext.SaveChangesAsync(ct); // bad: repeated change detection and database calls
+    await _dbContext.SaveChangesAsync(ct);
 }
 ```
 
-Better:
+usually performs poorly for two reasons:
+
+- it creates many database round trips;
+- it repeatedly runs change detection on a growing tracked set.
+
+The better default is to preserve a meaningful unit-of-work boundary:
 
 ```csharp
 _dbContext.Items.AddRange(manyItems);
 await _dbContext.SaveChangesAsync(ct);
 ```
 
-For very large bulk operations, consider:
+For large batch-style operations, EF Core may still not be the best mechanism. Set-based updates, raw SQL, or provider-specific bulk tooling may be more appropriate because the change tracker is optimized for ordinary application units of work, not for arbitrarily large data movement jobs.
 
-- batching;
-- provider-specific bulk tools;
-- raw SQL;
-- disabling auto detect changes temporarily only when you deeply understand the code path.
+## Tracking Queries And No-Tracking Queries
 
-Example:
-
-```csharp
-var oldValue = _dbContext.ChangeTracker.AutoDetectChangesEnabled;
-
-try
-{
-    _dbContext.ChangeTracker.AutoDetectChangesEnabled = false;
-
-    foreach (var item in manyItems)
-    {
-        _dbContext.Items.Add(item);
-    }
-}
-finally
-{
-    _dbContext.ChangeTracker.AutoDetectChangesEnabled = oldValue;
-}
-
-await _dbContext.SaveChangesAsync(ct);
-```
-
-Use this carefully. It is an optimization, not a default style.
-
-## Relationship Fix-up
-
-EF Core can automatically connect navigation properties when related entities are tracked.
-
-Example:
-
-```csharp
-var order = await _dbContext.Orders.FirstAsync(o => o.Id == orderId, ct);
-var items = await _dbContext.OrderItems
-    .Where(i => i.OrderId == orderId)
-    .ToListAsync(ct);
-```
-
-If relationships are configured, EF can connect:
-
-```text
-order.Items -> items
-item.Order -> order
-```
-
-This is useful but can surprise you when many entities are tracked.
-
-Engineering perspective:
-
-> The change tracker is helpful for unit-of-work updates, but it has memory and CPU cost. For read-only queries, projections and `AsNoTracking` are often better.
-
-## Add / Attach / Update
-
-### Add
-
-Marks entity as `Added`.
-
-```csharp
-_dbContext.Orders.Add(order);
-```
-
-### Attach
-
-Starts tracking an existing entity as `Unchanged`.
-
-```csharp
-_dbContext.Orders.Attach(order);
-```
-
-### Update
-
-Marks entire entity graph as `Modified`.
-
-```csharp
-_dbContext.Orders.Update(order);
-```
-
-Be careful with `Update` in APIs because it can update columns unintentionally.
-
-## Tracking Query
+Tracking is valuable when the application intends to update the loaded entities:
 
 ```csharp
 var order = await _dbContext.Orders
@@ -253,9 +170,7 @@ order.Status = OrderStatus.Paid;
 await _dbContext.SaveChangesAsync(ct);
 ```
 
-Use tracking when you plan to modify entities.
-
-## No-tracking Query
+For read-only flows, tracking often adds cost without value:
 
 ```csharp
 var orders = await _dbContext.Orders
@@ -269,104 +184,48 @@ var orders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-Use no-tracking for read-only queries.
+No-tracking queries reduce:
 
-Benefits:
+- change tracker memory usage;
+- snapshot creation work;
+- relationship fix-up overhead;
+- accidental coupling between read models and later updates in the same scope.
 
-- less memory;
-- less CPU;
-- avoids unnecessary tracking overhead.
+This distinction is foundational for the rest of the chapter. EF Core is often most effective when write-oriented flows and read-oriented flows are treated differently instead of using full tracking everywhere by habit.
 
-## Identity Resolution
+## Identity Resolution Without Full Tracking
 
-Tracking queries return the same object instance for the same entity key within one `DbContext`.
-
-No-tracking queries do not by default.
-
-Option:
+EF Core also supports:
 
 ```csharp
 .AsNoTrackingWithIdentityResolution()
 ```
 
-Useful when you need no tracking but want repeated entities resolved to same instance.
+This mode can be useful when the application wants read-only behavior but still benefits from reusing the same object instance for repeated entity keys during materialization. It sits between full tracking and ordinary no-tracking.
 
-## SaveChanges
+Even so, it should be used deliberately. The common read path in API work is still no-tracking projection into DTOs rather than materializing large entity graphs for output.
 
-`SaveChanges`:
+## `Add`, `Attach`, And `Update`
 
-1. detects changes;
-2. validates mapping constraints;
-3. creates SQL commands;
-4. executes in transaction where appropriate;
-5. updates entity states.
+The entry-point methods on `DbSet<T>` express different intent:
 
 ```csharp
-await _dbContext.SaveChangesAsync(ct);
-```
-
-## Under The Hood: SaveChanges Pipeline
-
-`SaveChanges` is not just "send SQL".
-
-Conceptual flow:
-
-```text
-SaveChanges
-  -> DetectChanges
-  -> collect Added/Modified/Deleted entries
-  -> apply value generation if needed
-  -> create insert/update/delete commands
-  -> order commands based on relationships
-  -> execute commands, usually in a transaction
-  -> handle database-generated values
-  -> accept changes and update entity states
-```
-
-Example:
-
-```csharp
-var order = new Order(customerId);
-order.AddItem(productId, quantity: 2);
-
 _dbContext.Orders.Add(order);
-await _dbContext.SaveChangesAsync(ct);
+_dbContext.Orders.Attach(order);
+_dbContext.Orders.Update(order);
 ```
 
-EF may need to:
+- `Add` treats the entity as new and marks it `Added`;
+- `Attach` begins tracking an existing entity as unchanged;
+- `Update` marks the entity, and often its reachable graph, as modified.
 
-- insert `Orders`;
-- get generated `Order.Id`;
-- insert `OrderItems` with the generated `OrderId`;
-- commit transaction.
+This is why `Update` should be used carefully in disconnected scenarios. It is easy to mark far more state as modified than the application actually intended, especially in HTTP APIs that receive partial or loosely validated payloads.
 
-This is why EF Core understands relationships and entity states.
+For most business updates, the safer pattern is:
 
-## Batching
-
-EF Core can batch multiple SQL commands into fewer round trips.
-
-Example:
-
-```csharp
-_dbContext.Products.Add(new Product("A"));
-_dbContext.Products.Add(new Product("B"));
-_dbContext.Products.Add(new Product("C"));
-
-await _dbContext.SaveChangesAsync(ct);
-```
-
-EF Core may send multiple inserts in a batch depending on provider and configuration.
-
-Key point:
-
-> `SaveChanges` is a unit-of-work boundary. Calling it once per row usually creates unnecessary round trips and change tracking overhead. Calling it once for a meaningful business operation is usually better.
-
-## Common Update Pattern
-
-Avoid blindly mapping request to entity with all fields.
-
-Better:
+1. load the current entity state;
+2. apply deliberate changes;
+3. save the context.
 
 ```csharp
 public async Task UpdateOrderAddressAsync(
@@ -391,7 +250,58 @@ public async Task UpdateOrderAddressAsync(
 }
 ```
 
-## DbContext Pooling
+That pattern keeps the unit of work explicit and preserves domain behavior that would otherwise be bypassed by graph-wide state replacement.
+
+## Relationship Fix-Up
+
+When related entities are tracked in the same context, EF Core can connect navigation properties automatically.
+
+```csharp
+var order = await _dbContext.Orders.FirstAsync(o => o.Id == orderId, ct);
+var items = await _dbContext.OrderItems
+    .Where(i => i.OrderId == orderId)
+    .ToListAsync(ct);
+```
+
+If the relationship is configured, EF Core can connect:
+
+```text
+order.Items -> items
+item.Order  -> order
+```
+
+This relationship fix-up is convenient because it keeps tracked graphs internally consistent. It is also one more reason that a long-lived context becomes harder to predict. Once enough entities are tracked, the in-memory graph acquires behavior of its own, which may be useful during one unit of work but confusing across unrelated operations.
+
+## The `SaveChanges` Pipeline
+
+`SaveChanges` is not just "send SQL to the database." It is a small execution pipeline:
+
+```text
+SaveChanges
+  -> detect changes
+  -> collect tracked entries by state
+  -> generate insert/update/delete commands
+  -> order commands according to key and relationship constraints
+  -> execute them, usually in a transaction
+  -> receive generated values
+  -> update tracked state
+```
+
+This pipeline explains why EF Core can insert a parent row, obtain the generated key, and then insert related children within one save operation:
+
+```csharp
+var order = new Order(customerId);
+order.AddItem(productId, quantity: 2);
+
+_dbContext.Orders.Add(order);
+await _dbContext.SaveChangesAsync(ct);
+```
+
+The context understands enough about the tracked graph to translate that object change into the right relational sequence.
+
+## Context Pooling
+
+EF Core also supports context pooling:
 
 ```csharp
 builder.Services.AddDbContextPool<AppDbContext>(options =>
@@ -400,125 +310,14 @@ builder.Services.AddDbContextPool<AppDbContext>(options =>
 });
 ```
 
-Pooling can reduce allocation overhead.
+Pooling can reduce allocation overhead in high-throughput applications, but it should not be treated as a free optimization. A pooled context instance is reused across scopes, so any custom mutable state placed directly on the context becomes dangerous unless it is correctly reset.
 
-Be careful:
+This is one reason a `DbContext` should primarily represent persistence infrastructure, not a container for arbitrary request-specific flags. Pooling is most effective when the context remains lean and the rest of the request state lives elsewhere.
 
-- do not store per-request state directly on `DbContext`;
-- reset custom state;
-- understand tenant context interactions.
+## Design Consequences
 
-## Review Questions
+Three practical design rules follow from this chapter.
 
-### What does DbContext do?
+First, keep `DbContext` short-lived and aligned with a real unit of work. Second, treat tracking as an intentional cost paid for update-oriented behavior rather than as the default shape of every query. Third, preserve explicit update boundaries instead of trying to force EF Core into bulk-processing or graph-replacement patterns it was not primarily designed to optimize.
 
-> `DbContext` represents a session with the database. It handles querying, change tracking, mapping, and saving changes as a unit of work.
-
-### What is change tracking?
-
-> Change tracking is EF Core's mechanism for remembering entity instances and detecting what changed so it can generate insert, update, and delete SQL.
-
-### How does EF Core know what changed?
-
-> For tracked entities, EF Core keeps state and often original value snapshots. Before saving, it detects changes by comparing current values with original values, then generates SQL for added, modified, or deleted entities.
-
-### Tracking vs no-tracking?
-
-> Tracking queries are useful when updating entities. No-tracking queries are better for read-only scenarios because they reduce memory and CPU overhead.
-
-### Is DbContext thread-safe?
-
-> No. A `DbContext` should not be used concurrently from multiple threads.
-
-## Common Mistakes
-
-### Mistake: Using one `DbContext` as singleton
-
-Why it is wrong:
-
-> `DbContext` is stateful and not thread-safe. A singleton context would share tracked entities across requests, grow memory, return stale data, and create concurrency bugs.
-
-Better answer:
-
-> Register `DbContext` as scoped for web requests, or create short-lived contexts/scopes for background units of work.
-
-### Mistake: Returning tracked entities from API
-
-Why it is wrong:
-
-> It leaks persistence models as API contracts, may expose internal fields, can create circular JSON serialization, and keeps API shape coupled to database shape.
-
-Better answer:
-
-> Project to DTOs for API responses, usually with `AsNoTracking`.
-
-### Mistake: Calling `Update` on detached request DTOs blindly
-
-Why it is wrong:
-
-> `Update` can mark the entire entity graph as modified. A client may overwrite columns it should not control, such as `CreatedAt`, `OwnerUserId`, or `RowVersion`.
-
-Better answer:
-
-> Load the existing entity, check authorization, update allowed fields explicitly, then call `SaveChanges`.
-
-### Mistake: Tracking huge read-only query results
-
-Why it is wrong:
-
-> The change tracker keeps entity instances and snapshots, which increases memory and CPU usage.
-
-Better answer:
-
-> Use `AsNoTracking` and DTO projection for read-only list/query endpoints.
-
-### Mistake: Keeping `DbContext` alive too long
-
-Why it is wrong:
-
-> Long-lived contexts accumulate tracked entities, return stale identity-map results, and make unit-of-work boundaries unclear.
-
-Better answer:
-
-> Keep context lifetime short and aligned with a request, command, or background batch.
-
-### Mistake: Parallel operations on the same `DbContext`
-
-Why it is wrong:
-
-> `DbContext` does not support concurrent operations. Parallel queries or saves on the same context can throw exceptions or corrupt tracking assumptions.
-
-Better answer:
-
-> Await each operation sequentially on one context, or create separate contexts for truly parallel work.
-
-### Mistake: Calling `SaveChanges` inside a loop
-
-Why it is wrong:
-
-> It creates many database round trips and repeated change detection. It may also commit partial work unintentionally.
-
-Better answer:
-
-> Add/update a batch and call `SaveChanges` once per meaningful unit of work. For large set-based operations, consider `ExecuteUpdate`, `ExecuteDelete`, raw SQL, or bulk tools.
-
-### Mistake: Assuming `AsNoTracking` is always faster
-
-Why it is wrong:
-
-> It is usually better for read-only queries, but if you load repeated entities in a complex graph, no-tracking can create duplicate instances. Also, if you need updates, no-tracking adds extra attach/update complexity.
-
-Better answer:
-
-> Use tracking for modifications, `AsNoTracking` for read-only DTO queries, and `AsNoTrackingWithIdentityResolution` when identity resolution matters without tracking.
-
-## Practice Task
-
-Build an API with:
-
-1. tracked update endpoint;
-2. no-tracking list endpoint;
-3. detached update example;
-4. concurrency conflict;
-5. logging generated SQL;
-6. comparison of memory usage for tracking vs no-tracking query.
+Those rules are simple, but they explain a large share of both EF Core's strengths and its failure modes.

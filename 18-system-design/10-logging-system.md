@@ -4,12 +4,6 @@
 
 Design a centralized logging system for applications and services.
 
-Chinese notes:
-
-- `centralized logging`: 集中式日志.
-- `log ingestion`: 日志采集.
-- `retention`: 保留期.
-
 ## Requirements
 
 Functional:
@@ -148,26 +142,3 @@ Do not log:
 - credit card data;
 - secrets;
 - sensitive personal data unless required and protected.
-
-## Common Mistakes
-
-- Plain text logs only.
-- No trace ID.
-- Sensitive data in logs.
-- Synchronous logging to remote system.
-- No retention policy.
-- Too much noisy logging.
-
-## Knowledge Checks
-
-### Why structured logs?
-
-Structured logs allow querying by fields like traceId, service, tenantId, and orderId, which makes troubleshooting much faster.
-
-### How do you avoid logging system affecting application?
-
-Use async buffering, agents, queues, backpressure handling, and avoid synchronous remote log writes in the request path.
-
-### How do you control cost?
-
-Use sampling, retention policies, log levels, excluding noisy logs, and separating audit/security logs from debug logs.

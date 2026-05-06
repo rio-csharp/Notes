@@ -4,13 +4,6 @@
 
 Repository abstracts access to aggregate persistence. Unit of Work coordinates committing changes as one transaction.
 
-Chinese notes:
-
-- `repository`: 仓储.
-- `unit of work`: 工作单元.
-- `aggregate`: 聚合.
-- `transaction boundary`: 事务边界.
-
 EF Core already provides:
 
 - `DbSet<T>`: repository-like collection;
@@ -226,8 +219,6 @@ Now every caller can decide:
 
 - whether to include items;
 - whether to track;
-- which filters are valid;
-- which aggregate invariants matter.
 
 Better for application boundaries:
 
@@ -369,18 +360,3 @@ Does query code need projection instead of aggregate loading?
 Are transaction boundaries explicit?
 Do integration tests verify real database behavior?
 ```
-
-## Knowledge Checks
-
-### Do you need repository with EF Core?
-
-Not always. EF Core already has repository and unit-of-work-like patterns. Use repositories when they protect domain boundaries or hide complex persistence. Avoid generic repositories that add no value.
-
-### What is Unit of Work?
-
-Unit of Work tracks changes and commits them as one transaction. In EF Core, `DbContext.SaveChanges` plays this role.
-
-### Why can returning `IQueryable` be risky?
-
-It lets callers compose persistence details from outside the repository boundary, which can leak tracking, includes, filters, and aggregate loading rules everywhere.
-

@@ -1,8 +1,10 @@
 # .NET Execution Model
 
-## What This Topic Means
+## Core Idea
 
 The .NET execution model explains how C# code becomes running machine code.
+
+This chapter focuses on the path from source code to executing instructions. It is intentionally narrower than the next chapter. Here the concern is execution flow. The next chapter concentrates on alternative compilation and publishing strategies such as ReadyToRun, trimming, and Native AOT.
 
 High-level flow:
 
@@ -17,23 +19,18 @@ C# source code
 
 Important terms:
 
-- `IL` / `CIL` / `MSIL`: Intermediate Language（中间语言）.
-- `CLR`: Common Language Runtime（公共语言运行时）.
-- `JIT`: Just-In-Time compilation（即时编译）.
 - `Assembly`: compiled `.dll` or `.exe` containing IL and metadata.
 - `Managed code`: code executed under CLR control.
 - `Native code`: machine code executed directly by CPU.
 
-## Why This Matters
+## Operational Significance
 
 Understanding the execution model helps explain runtime behavior:
 
-- why first request can be slower;
-- why reflection has overhead;
-- why generics behave differently in .NET compared with Java;
-- why GC can pause execution;
-- why async code still uses threads at certain points;
-- why deployment options like ReadyToRun or Native AOT matter.
+- why build artifacts are IL and metadata instead of final CPU-specific binaries;
+- why startup and steady-state performance can differ;
+- why runtime services such as JIT and GC affect application behavior even when the source code does not change;
+- why deployment choices can change startup characteristics.
 
 ## Compilation Flow
 
@@ -60,6 +57,23 @@ Metadata includes:
 
 This is why .NET supports reflection.
 
+If you inspect build output after:
+
+```bash
+dotnet build
+```
+
+you will typically see assemblies such as:
+
+```text
+bin/Release/net8.0/RuntimeDemo.dll
+bin/Release/net8.0/RuntimeDemo.pdb
+bin/Release/net8.0/RuntimeDemo.deps.json
+bin/Release/net8.0/RuntimeDemo.runtimeconfig.json
+```
+
+That file set helps reinforce the model. The assembly contains IL and metadata. The `.deps.json` and `.runtimeconfig.json` files help the runtime determine dependencies and framework requirements when the application starts.
+
 Try this small program:
 
 ```csharp
@@ -83,8 +97,8 @@ When the application runs, CLR loads assemblies. In modern .NET, loading is hand
 Key points:
 
 - multiple versions of assemblies can be difficult to manage;
-- plugins may use custom `AssemblyLoadContext`;
-- dynamic loading can cause memory leaks if contexts are not unloaded properly.
+- extensibility scenarios may use custom `AssemblyLoadContext`;
+- dynamic loading requires careful reference management if unloadability matters.
 
 ### Step 3: JIT Compilation
 
@@ -105,43 +119,17 @@ VM/container resource changes:
 
 > Increasing CPU or memory for a VM does not usually cause all already-JIT-compiled methods to be recompiled immediately. More CPU mainly affects parallelism, thread scheduling, thread pool behavior, and server GC capacity. More memory mainly affects GC pressure and memory limits. Restarting the process lets the runtime initialize under the new environment.
 
-Clear wording:
+JIT compilation is per-process. Resource changes affect runtime behavior, especially GC and scheduling, but already generated method code is not generally regenerated just because the VM now has more CPU or memory.
 
-> JIT compilation is per-process. Resource changes affect runtime behavior, especially GC and scheduling, but already generated method code is not generally regenerated just because the VM now has more CPU or memory.
+In real services, this often appears as a cold-start versus warm-process difference. The first request after process start may pay:
 
-## ReadyToRun And Native AOT
+- host startup;
+- assembly loading;
+- first-use JIT compilation;
+- dependency graph initialization;
+- cache warm-up inside the application.
 
-This file gives the runtime path at a high level. The next file, `04-jit-aot-il.md`, focuses more deeply on IL, JIT, ReadyToRun, Native AOT, and their trade-offs.
-
-### ReadyToRun
-
-ReadyToRun precompiles some IL into native code before runtime.
-
-Benefits:
-
-- faster startup;
-- less JIT work.
-
-Trade-offs:
-
-- larger binaries;
-- less runtime-specific optimization than JIT.
-
-### Native AOT
-
-Native AOT compiles the app ahead of time into native code.
-
-Benefits:
-
-- very fast startup;
-- smaller runtime dependency;
-- good for CLI tools, serverless, small services.
-
-Trade-offs:
-
-- reflection needs special care;
-- dynamic code generation is limited;
-- not every library works perfectly.
+Later requests usually avoid much of that first-use work, which is why startup latency and steady-state throughput should be measured separately.
 
 ## Stack And Heap
 
@@ -164,7 +152,7 @@ Managed heap:
   closure objects
 ```
 
-Example:
+For example:
 
 ```csharp
 public class User
@@ -180,9 +168,7 @@ public static void Demo()
 }
 ```
 
-Practical explanation:
-
-> In C#, a local variable of reference type usually stores a reference in the stack frame, while the object itself is allocated on the managed heap. Value types can be stored inline, but exact placement depends on context, such as fields, arrays, closures, boxing, and JIT optimizations.
+In C#, a local variable of reference type usually stores a reference in the stack frame, while the object itself is allocated on the managed heap. Value types can be stored inline, but exact placement depends on context, such as fields, arrays, closures, boxing, and JIT optimizations.
 
 Concrete examples:
 
@@ -201,7 +187,7 @@ public static void Demo()
 }
 ```
 
-Closure example:
+A closure makes this more concrete:
 
 ```csharp
 public static Func<int> CreateCounter()
@@ -218,41 +204,13 @@ public static Func<int> CreateCounter()
 
 The lambda can run after `CreateCounter` returns, so `count` cannot behave like an ordinary stack-only local. The compiler creates a closure object so the captured value can live longer.
 
-## Garbage Collection
+## Object Lifetime And Reachability
 
-GC automatically reclaims objects that are no longer reachable.
+Object lifetime in .NET depends on reachability rather than lexical scope alone.
 
-Core concepts:
+If a reference to an object remains reachable from a GC root, the object can stay alive even after the local variable that first referenced it has gone out of scope.
 
-- GC roots（GC 根）;
-- Gen 0, Gen 1, Gen 2;
-- Large Object Heap;
-- finalization;
-- `IDisposable`;
-- allocation pressure;
-- memory leak in managed code.
-
-Important nuance:
-
-Managed code can still leak memory if objects remain referenced.
-
-Example:
-
-```csharp
-public class EventLeak
-{
-    public event Action? SomethingHappened;
-
-    public void Subscribe(Action handler)
-    {
-        SomethingHappened += handler;
-    }
-}
-```
-
-If a long-lived object keeps event handlers referencing short-lived objects, those objects cannot be collected.
-
-Reachability example:
+For example:
 
 ```csharp
 public static class UserCache
@@ -272,37 +230,15 @@ public static void Demo()
 }
 ```
 
-After `Demo` returns, the local variable `user` is gone, but the static field `UserCache.Current` still references the object. The object is reachable from a GC root, so GC cannot collect it.
+After `Demo` returns, the local variable `user` is gone, but the static field `UserCache.Current` still references the object. The object remains reachable and therefore stays alive.
 
-## Async Execution Model
+The dedicated garbage collection chapter covers generations, heap segments, leaks, pause behavior, and memory diagnostics in detail.
 
-`async/await` does not mean a new thread is created.
+## Async As Part Of Runtime Execution
 
-For I/O-bound work:
+`async/await` does not automatically create a new thread. Instead, it changes how the runtime schedules work and continuations.
 
-```csharp
-public async Task<string> DownloadAsync(HttpClient client)
-{
-    return await client.GetStringAsync("https://example.com");
-}
-```
-
-The thread can return to the thread pool while the I/O operation is pending. When the operation completes, the continuation is scheduled.
-
-Bad blocking version:
-
-```csharp
-public string DownloadBlocking(HttpClient client)
-{
-    return client.GetStringAsync("https://example.com").Result;
-}
-```
-
-Why this is bad:
-
-> The thread is blocked while waiting. In server applications, enough blocked threads can cause thread pool starvation and high latency.
-
-Better version:
+For I/O-bound work, the current thread can return to the thread pool while the operation is waiting externally, and the continuation can be scheduled later when the work completes.
 
 ```csharp
 public async Task<string> DownloadAsync(HttpClient client, CancellationToken ct)
@@ -311,13 +247,25 @@ public async Task<string> DownloadAsync(HttpClient client, CancellationToken ct)
 }
 ```
 
-Important terms:
+This matters in the execution model because runtime behavior is not only about native code generation. It is also about scheduling, continuation flow, and how managed execution cooperates with external I/O.
 
-- async state machine;
-- continuation;
-- `SynchronizationContext`;
-- `TaskScheduler`;
-- thread pool.
+Another concrete example is file processing. Compare:
+
+```csharp
+var bytes = await File.ReadAllBytesAsync(path, ct);
+```
+
+with:
+
+```csharp
+await using var stream = File.OpenRead(path);
+```
+
+Both may succeed functionally, but they produce very different execution characteristics. The first tends to allocate one large buffer and can increase heap pressure. The second streams work through a disposable resource boundary and often cooperates better with memory limits.
+
+## Relationship To Publishing Strategy
+
+The model in this chapter describes the default path: source code becomes IL and metadata, assemblies are loaded, methods are compiled to native code, and the runtime executes them inside the process. The next chapter changes the question from "how does code execute?" to "how much of that work happens at runtime versus publish time?"
 
 ## Practical Demo
 
@@ -353,109 +301,4 @@ Run:
 dotnet run -c Release
 ```
 
-Then publish:
-
-```bash
-dotnet publish -c Release
-dotnet publish -c Release -p:PublishReadyToRun=true
-```
-
-Compare startup and output size.
-
-## Review Questions
-
-### What happens when C# code runs?
-
-Detailed explanation:
-
-> C# is compiled by Roslyn into IL and metadata inside an assembly. At runtime, the CLR loads the assembly, verifies types, manages memory and exceptions, and JIT-compiles IL methods into native machine code when needed. The CPU executes that native code. GC manages heap memory, and the runtime also provides services like reflection, thread pool, and exception handling.
-
-### Is C# interpreted?
-
-Good answer:
-
-> Normally no. C# is compiled to IL first, then IL is JIT-compiled to native machine code. There are also ahead-of-time options like ReadyToRun and Native AOT.
-
-### Why can reflection be slower?
-
-Answer:
-
-> Reflection reads metadata and often resolves members dynamically at runtime. It bypasses some compile-time checks and may involve dynamic invocation, boxing, and access checks. For hot paths, cached delegates or generated code are usually faster.
-
-### What happens if CPU or memory changes after JIT?
-
-> Existing JIT-generated code is usually reused in the current process. More CPU can improve parallelism and thread scheduling. More memory can reduce GC pressure. The runtime does not normally recompile every method only because VM resources changed. Restarting the process or tiered compilation can produce different optimized code paths.
-
-## Common Mistakes
-
-### Mistake: "C# directly compiles to machine code."
-
-Why it is wrong:
-
-> In normal .NET execution, C# compiles to IL and metadata first. The CLR loads the assembly, then the JIT compiles IL methods into native machine code at runtime. Native AOT is a special deployment model, not the default mental model.
-
-Better answer:
-
-> C# usually compiles to IL, then the CLR JIT-compiles IL to native code when methods run.
-
-### Mistake: "All value types are always on the stack."
-
-Why it is wrong:
-
-> Value type placement depends on context. A value type can be stored inside an object on the heap, inside an array, boxed into an object, captured by a closure, or optimized by the JIT.
-
-Better answer:
-
-> Value types have value semantics, but their physical storage location depends on where and how they are used.
-
-### Mistake: "Async creates a new thread."
-
-Why it is wrong:
-
-> For I/O-bound work, `await` usually lets the current thread return to the thread pool while the operating system waits for I/O completion. When the I/O finishes, the continuation is scheduled. A new thread is not automatically created for every async operation.
-
-Better answer:
-
-> `async/await` is about non-blocking asynchronous control flow. It may use thread pool threads for continuations, but it does not mean "start a new thread."
-
-### Mistake: "The .NET SDK and .NET Runtime are the same."
-
-Why it is wrong:
-
-> The SDK contains tools for building and publishing apps, such as the compiler and CLI. The runtime is what is needed to run an already-built app.
-
-Better answer:
-
-> Developers usually install the SDK. Production servers may only need the runtime unless they build code on the server.
-
-### Mistake: "GC prevents all memory leaks."
-
-Why it is wrong:
-
-> GC can collect unreachable managed objects, but it cannot collect objects that are still referenced. Long-lived collections, static references, event subscriptions, caches without eviction, and unclosed unmanaged resources can still cause memory problems.
-
-Better answer:
-
-> GC prevents many manual memory management bugs, but managed applications can still leak memory through unintended references or unmanaged resources.
-
-## Deeper Checks
-
-### How does tiered compilation improve performance?
-
-> Tiered compilation starts by generating code quickly so startup is faster. If a method becomes hot, the runtime can recompile it with stronger optimizations later. This balances startup time and long-running performance.
-
-### When would you consider Native AOT?
-
-> I would consider Native AOT for CLI tools, serverless functions, small services, or workloads where startup time, memory footprint, and deployment size matter. I would be careful if the app depends heavily on reflection, dynamic loading, runtime code generation, or libraries that are not AOT-friendly.
-
-### Why can reflection-heavy libraries have issues with Native AOT?
-
-> Native AOT needs to know what code and metadata to keep at publish time. Reflection-heavy code may access types or members dynamically, so the compiler may trim metadata that the app later expects. Those members need explicit configuration, source generation, or a different library approach.
-
-### How does GC affect latency-sensitive services?
-
-> GC can pause managed threads to collect and compact memory. In latency-sensitive services, allocation rate, large object allocations, Gen 2 collections, and memory pressure can increase tail latency. The practical fix is to measure allocation hot spots, reduce unnecessary allocations, tune runtime settings only when needed, and load test.
-
-### How would you investigate high memory usage in a .NET service?
-
-> I would first check whether memory is steadily growing or stabilizing. Then I would inspect metrics, GC counters, allocation rate, heap dumps, top object types, large object heap usage, caches, event subscriptions, static references, and recent deployments. I would also check container memory limits if running in Docker or Kubernetes.
+Then publish and compare startup behavior or output characteristics in the next chapter, which focuses specifically on JIT, ReadyToRun, and Native AOT.

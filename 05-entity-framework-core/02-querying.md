@@ -1,28 +1,20 @@
-# EF Core Querying
+# Query Translation And Read Models
 
 ## Core Idea
 
-EF Core querying is about writing LINQ queries that are translated into SQL and executed by the database.
+EF Core querying is the process of describing a data request in LINQ, allowing the provider to translate that expression into database commands, and materializing the result into entities or projected read models. The important point is that LINQ in EF Core is not ordinary in-memory LINQ. It is a query description language whose meaning depends on translation.
 
-Chinese notes:
+This chapter focuses on read behavior rather than general performance tuning. The goal is to explain how query shape influences SQL shape, why projection is so important, and where query boundaries should live in a layered application.
 
-- `query translation`: 查询翻译.
-- `expression tree`: 表达式树.
-- `client evaluation`: 客户端计算.
-- `projection`: 投影.
-- `SARGable`: 可被索引有效利用的查询形式.
+## `IQueryable<T>` As A Deferred Query Description
 
-## IQueryable
-
-EF Core queries usually start as `IQueryable<T>`.
+An EF Core query usually starts as `IQueryable<T>`:
 
 ```csharp
 IQueryable<Order> query = _dbContext.Orders;
 ```
 
-The query is not executed immediately. EF Core builds an expression tree and translates it to SQL when the query is enumerated.
-
-Execution methods:
+At this stage, the application does not yet have results. It has an expression tree describing a potential query. Execution happens only when the query is materialized through methods such as:
 
 - `ToListAsync`
 - `FirstOrDefaultAsync`
@@ -30,31 +22,37 @@ Execution methods:
 - `CountAsync`
 - `AnyAsync`
 
-Key takeaway:
+That deferred model is useful because it allows filters, ordering, projection, and pagination to compose into one provider-translated command instead of several disconnected operations.
 
-> `IQueryable` is a query description that a provider can translate. `IEnumerable` is in-memory enumeration.
+## Expression Trees, Not Delegates
 
-## Under The Hood: Query Translation Pipeline
+The distinction between queryable and in-memory LINQ matters because EF Core can inspect expression trees:
 
-EF Core query execution is not "LINQ runs in memory first".
-
-For `IQueryable<T>`, LINQ builds an expression tree（表达式树）.
-
-Conceptual pipeline:
-
-```text
-C# LINQ query
-  -> expression tree
-  -> EF Core query preprocessing
-  -> provider translation
-  -> SQL generation
-  -> parameterization
-  -> database execution
-  -> materialization into objects/DTOs
-  -> optional change tracking
+```csharp
+Expression<Func<Order, bool>> predicate = o => o.Total > 100;
 ```
 
-Example:
+It cannot translate arbitrary executable delegates:
+
+```csharp
+Func<Order, bool> predicate = o => o.Total > 100;
+```
+
+Once a query crosses into `IEnumerable<T>` or `AsEnumerable()`, the provider translation boundary has ended and the remaining operators run in memory. That boundary is one of the most important concepts in EF Core because performance problems often come from crossing it too early or accidentally.
+
+## The Query Translation Pipeline
+
+Conceptually, EF Core querying looks like this:
+
+```text
+LINQ expression
+  -> expression tree analysis
+  -> provider translation
+  -> SQL generation and parameterization
+  -> database execution
+  -> result materialization
+  -> optional tracking
+```
 
 ```csharp
 var query = _dbContext.Orders
@@ -67,113 +65,35 @@ var query = _dbContext.Orders
     });
 ```
 
-Before `ToListAsync`, this is a query description, not a result list.
+Before enumeration, this is only a query definition. Once materialized:
 
 ```csharp
 var items = await query.ToListAsync(ct);
 ```
 
-Only now EF Core translates and sends SQL.
+the provider translates the expression into database-specific SQL and executes it.
 
-## Expression Tree vs Delegate
+## Provider Translation And Database Reality
 
-This is a common review trap.
+EF Core is not one SQL engine. It is a provider-based abstraction over several engines. SQL Server, PostgreSQL, SQLite, and others differ in functions, SQL dialect, indexing behavior, and execution plans. A LINQ expression that looks harmless in C# may translate differently across providers, or may translate in a way that undermines index usage.
 
-`IQueryable<T>` uses expression trees:
-
-```csharp
-Expression<Func<Order, bool>> predicate = o => o.Total > 100;
-```
-
-EF Core can inspect the expression and translate it to SQL.
-
-`IEnumerable<T>` uses delegates:
-
-```csharp
-Func<Order, bool> predicate = o => o.Total > 100;
-```
-
-A delegate is executable .NET code, not something the database provider can translate.
-
-Practical explanation:
-
-> `IQueryable` represents a query expression that a provider can translate. `IEnumerable` represents in-memory enumeration. Calling `AsEnumerable` switches from provider translation to client-side LINQ.
-
-## Provider Translation
-
-EF Core is provider-based.
-
-SQL Server, PostgreSQL, SQLite, and other providers translate expressions differently because their SQL dialects and database functions differ.
-
-Example:
+For example:
 
 ```csharp
 query.Where(o => o.CreatedAt.Date == targetDate)
 ```
 
-This may translate differently by provider, and it may hurt index usage.
-
-Better:
+often produces less index-friendly SQL than a range predicate:
 
 ```csharp
-query.Where(o =>
-    o.CreatedAt >= start &&
-    o.CreatedAt < end);
+query.Where(o => o.CreatedAt >= start && o.CreatedAt < end);
 ```
 
-This is easier to translate and more likely to be SARGable.
+This is why serious EF Core work still requires relational thinking. LINQ is the authoring surface, but the database remains the execution engine.
 
-## Query Compilation And Caching
+## Projection As The Default Read Pattern
 
-EF Core compiles the expression tree into an executable query plan and caches query plans by query shape.
-
-Good:
-
-```csharp
-var order = await _dbContext.Orders
-    .Where(o => o.Id == orderId)
-    .FirstOrDefaultAsync(ct);
-```
-
-The value `orderId` becomes a parameter. The query shape can be reused.
-
-For very hot paths, compiled queries can reduce overhead:
-
-```csharp
-private static readonly Func<AppDbContext, int, Task<Order?>> GetOrderById =
-    EF.CompileAsyncQuery((AppDbContext db, int id) =>
-        db.Orders.FirstOrDefault(o => o.Id == id));
-```
-
-Use compiled queries only after measuring. Most application queries are fine without them.
-
-## Materialization And Tracking
-
-After SQL returns rows, EF Core materializes results.
-
-For entity queries:
-
-```csharp
-var orders = await _dbContext.Orders.ToListAsync(ct);
-```
-
-EF Core creates entity instances and may track them.
-
-For projection:
-
-```csharp
-var orders = await _dbContext.Orders
-    .Select(o => new OrderListItemDto(o.Id, o.Total))
-    .ToListAsync(ct);
-```
-
-EF Core creates DTOs and usually does less tracking work.
-
-Engineering perspective:
-
-> Query performance is affected not only by SQL execution, but also by translation, materialization, tracking, and how much data is transferred from the database.
-
-## Basic Query
+For API reads and list pages, projection is usually the most important query habit.
 
 ```csharp
 var orders = await _dbContext.Orders
@@ -184,53 +104,59 @@ var orders = await _dbContext.Orders
     .Select(o => new OrderListItemDto
     {
         Id = o.Id,
+        CustomerName = o.Customer.Name,
         Total = o.Total,
         CreatedAt = o.CreatedAt
     })
     .ToListAsync(ct);
 ```
 
-Generated SQL will roughly include:
+Projection helps because it:
 
-- `WHERE`;
-- `ORDER BY`;
-- `TOP` or `OFFSET/FETCH`;
-- selected columns only.
+- narrows the selected columns;
+- avoids loading entity graphs the API does not need;
+- reduces materialization cost;
+- usually pairs naturally with no-tracking;
+- keeps response shape independent from entity shape.
 
-## Projection
+A common anti-pattern is to load full entities first and shape them later in memory. That approach often turns EF Core into a row-fetching mechanism instead of a query translator.
 
-Projection is one of the most important EF Core performance techniques.
+## Entity Materialization Versus Read Models
 
-Bad:
+Entity materialization is still appropriate when the application intends to update those entities or perform domain behavior over an aggregate. For pure read paths, DTO or read-model projection is usually a better fit.
 
 ```csharp
-var orders = await _dbContext.Orders
-    .Include(o => o.Customer)
-    .ToListAsync(ct);
+var order = await _dbContext.Orders
+    .FirstAsync(o => o.Id == id, ct);
 ```
 
-Better for list page:
+This makes sense for update-oriented work. By contrast:
 
 ```csharp
-var orders = await _dbContext.Orders
+var item = await _dbContext.Orders
     .AsNoTracking()
-    .Select(o => new OrderListItemDto
-    {
-        Id = o.Id,
-        CustomerName = o.Customer.Name,
-        Total = o.Total
-    })
-    .ToListAsync(ct);
+    .Where(o => o.Id == id)
+    .Select(o => new OrderDetailsDto(
+        o.Id,
+        o.Customer.Name,
+        o.Status.ToString(),
+        o.Total,
+        o.CreatedAt))
+    .SingleOrDefaultAsync(ct);
 ```
 
-## Dynamic Filtering
+is often the better design for a read endpoint because it expresses read intent directly.
+
+## Dynamic Query Composition
+
+One of `IQueryable<T>`'s strengths is that it allows conditional composition while still keeping one database query boundary.
 
 ```csharp
 public async Task<PagedResult<OrderListItemDto>> SearchAsync(
     OrderSearchRequest request,
     CancellationToken ct)
 {
-    var query = _dbContext.Orders.AsNoTracking().AsQueryable();
+    IQueryable<Order> query = _dbContext.Orders.AsNoTracking();
 
     if (request.Status is not null)
     {
@@ -271,23 +197,11 @@ public async Task<PagedResult<OrderListItemDto>> SearchAsync(
 }
 ```
 
-Suggested request model:
+This pattern is useful because it preserves query translation until the last responsible moment while still keeping the read model explicit.
 
-```csharp
-public sealed class OrderSearchRequest
-{
-    public OrderStatus? Status { get; init; }
-    public int? CustomerId { get; init; }
-    public DateTimeOffset? CreatedFrom { get; init; }
-    public DateTimeOffset? CreatedTo { get; init; }
-    public int Page { get; init; } = 1;
-    public int PageSize { get; init; } = 20;
-}
-```
+## Client Evaluation And Translation Failures
 
-## Client Evaluation
-
-Bad:
+A common source of confusion is introducing logic into a query that the provider cannot translate.
 
 ```csharp
 var orders = await _dbContext.Orders
@@ -295,9 +209,7 @@ var orders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-EF Core may not translate `IsImportant` to SQL.
-
-Better:
+If `IsImportant` is an arbitrary .NET method, EF Core usually cannot convert it into SQL. The safer alternative is to express the condition in provider-translatable terms:
 
 ```csharp
 var importantStatuses = new[] { OrderStatus.Paid, OrderStatus.PendingReview };
@@ -307,39 +219,40 @@ var orders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-## First vs Single
+This is not merely about avoiding exceptions. The larger rule is that database filters should remain database-shaped as long as they are part of the provider query.
 
-`First`:
+## `First`, `Single`, `Any`, And Execution Semantics
 
-- returns first row;
-- does not require uniqueness.
+Terminal operators also communicate intent:
 
-`Single`:
-
-- expects exactly one row;
-- throws if more than one.
-
-Use `Single` when uniqueness is a business/data invariant.
-
-## Any vs Count
-
-Good:
+- `First` means the application wants one row but does not assert uniqueness;
+- `Single` means the application expects exactly one row and treats duplicates as a correctness failure;
+- `Any` asks for existence and usually maps more efficiently than counting rows and comparing against zero.
 
 ```csharp
 var exists = await _dbContext.Users
     .AnyAsync(u => u.Email == email, ct);
 ```
 
-Avoid:
+Choosing the right terminal operator improves both readability and execution semantics.
 
-```csharp
-var exists = await _dbContext.Users
-    .CountAsync(u => u.Email == email, ct) > 0;
-```
+## Query Boundaries In Application Architecture
 
-`Any` can stop earlier.
+One of the recurring design mistakes in EF Core codebases is leaking `IQueryable<T>` upward into controllers or unrelated layers.
 
-## Inspect Generated SQL
+At first, this can look flexible. In practice, it often blurs ownership of:
+
+- which filters are allowed;
+- when execution occurs;
+- whether tracking is enabled;
+- which joins and includes are acceptable;
+- where persistence concerns stop.
+
+It is usually better for query composition to live in the application or data-access layer, with materialization happening at a clear boundary. A controller should ideally receive read models or application-level results, not an unfinished persistence query.
+
+## Inspecting Generated SQL
+
+During development and troubleshooting, EF Core can expose the generated SQL:
 
 ```csharp
 var sql = _dbContext.Orders
@@ -347,96 +260,10 @@ var sql = _dbContext.Orders
     .ToQueryString();
 ```
 
-Use this during debugging and performance review.
+This is one of the most useful ways to verify that the LINQ query is expressing the database query the team intended. It also provides a bridge between application reasoning and database reasoning, which is essential when diagnosing slow reads, incorrect joins, or surprising translation choices.
 
-## Review Questions
+## Design Consequences
 
-### How does EF Core translate LINQ to SQL?
+Good EF Core query design usually follows a consistent pattern. Keep the query provider-translatable for as long as possible, project into read models for API output, use no-tracking by default for reads, and inspect generated SQL when the query becomes important enough that translation details matter.
 
-> EF Core builds an expression tree from the LINQ query, then the database provider translates supported expressions into SQL. The query is executed when enumerated by methods like `ToListAsync` or `FirstOrDefaultAsync`.
-
-### Why is projection important?
-
-> Projection selects only the columns needed by the API response. It reduces I/O, memory usage, serialization cost, and change tracking overhead.
-
-### What causes client-side evaluation problems?
-
-> Using local methods or unsupported expressions inside queries can prevent translation. It may either throw or cause too much data to be loaded before filtering.
-
-### Why is `IQueryable` dangerous to leak from repository to controller?
-
-> It leaks persistence concerns upward, can cause query composition in unexpected layers, and makes it harder to reason about execution boundaries. I prefer to keep query construction in the data-access/application layer and materialize at a clear boundary.
-
-## Common Mistakes
-
-### Mistake: Calling `ToListAsync` before applying filters
-
-Why it is wrong:
-
-> It loads too much data into memory and shifts filtering from the database to the application.
-
-Better answer:
-
-> Compose the query first, then materialize at the boundary.
-
-### Mistake: Returning `IQueryable` from controller
-
-Why it is wrong:
-
-> It leaks query composition outside the data layer and can create hidden runtime query behavior.
-
-Better answer:
-
-> Return materialized DTOs from the API boundary.
-
-### Mistake: Using unsupported local methods in queries
-
-Why it is wrong:
-
-> EF Core may not translate them, causing client-side evaluation or runtime exceptions.
-
-Better answer:
-
-> Rewrite the logic in translatable expressions or move the logic before or after the query boundary when appropriate.
-
-### Mistake: Loading full entities for list DTOs
-
-Why it is wrong:
-
-> It transfers more data than needed and may track unnecessary entities.
-
-Better answer:
-
-> Use projection to shape data directly into DTOs.
-
-### Mistake: Using `Include` when projection is enough
-
-Why it is wrong:
-
-> `Include` loads full entity graphs, which can be heavier than needed for read endpoints.
-
-Better answer:
-
-> Use `Include` only when you actually need tracked related entities. For read models, projection is often better.
-
-### Mistake: Not checking generated SQL
-
-Why it is wrong:
-
-> LINQ can look elegant while producing inefficient SQL.
-
-Better answer:
-
-> Inspect `ToQueryString`, query plans, and runtime metrics when performance matters.
-
-## Practice Task
-
-Build an order search endpoint with:
-
-1. optional filters;
-2. sorting;
-3. pagination;
-4. DTO projection;
-5. `ToQueryString` inspection;
-6. comparison between entity loading and projection.
-
+Those choices make the read side more predictable and also reduce the temptation to use entity materialization where a read model would be cleaner and cheaper.

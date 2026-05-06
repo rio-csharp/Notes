@@ -4,13 +4,6 @@
 
 TanStack Query, often still called React Query, manages server state in React applications.
 
-Chinese notes:
-
-- `server state`: 服务端状态.
-- `cache invalidation`: 缓存失效.
-- `stale`: 过期但仍可显示.
-- `optimistic update`: 乐观更新.
-
 Server state is different from client state.
 
 Server state:
@@ -183,12 +176,9 @@ Why it matters:
 
 `staleTime`:
 
-- how long data is considered fresh;
 - fresh data does not refetch automatically.
 
 `gcTime`:
-
-- how long unused cached data stays in memory.
 
 Example:
 
@@ -338,8 +328,6 @@ if (query.error instanceof ApiError && query.error.status === 401) {
 }
 ```
 
-## Review Questions
-
 ### What problem does React Query solve?
 
 > React Query manages server state: fetching, caching, stale data, background refetch, retries, pagination, mutations, and cache invalidation.
@@ -351,15 +339,6 @@ if (query.error instanceof ApiError && query.error.status === 401) {
 ### What is cache invalidation?
 
 > It means marking cached data as stale or removing it after a mutation so the UI can refetch correct data.
-
-## Common Mistakes
-
-- Missing parameters in query key.
-- Using React Query for local UI state.
-- Invalidating too broadly.
-- Not handling loading/error/empty states.
-- Overusing optimistic updates.
-- Ignoring cancellation and race conditions.
 
 ## Practice Task
 

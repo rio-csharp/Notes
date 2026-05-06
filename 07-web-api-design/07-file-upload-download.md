@@ -1,16 +1,14 @@
-# File Upload And Download APIs
+# File Transfer APIs And Binary Boundaries
 
 ## Core Idea
 
-File APIs must handle binary data safely, efficiently, and securely.
+File upload and download endpoints are specialized API surfaces. They differ from ordinary JSON endpoints because they move binary content, impose memory and storage pressure, and create security risks that are easy to underestimate. For that reason, file transfer should be treated as a deliberate boundary in API design rather than as "just another controller action."
 
-Chinese notes:
+This chapter focuses on how binary transfer changes the contract and operational design of an API.
 
-- `multipart/form-data`: 文件上传表单格式.
-- `streaming`: 流式处理.
-- `pre-signed URL`: 预签名 URL.
+## Small Uploads Versus Large Uploads
 
-## Small File Upload Through API
+Small file uploads can often be handled directly through the application API:
 
 ```csharp
 [HttpPost("files")]
@@ -28,349 +26,102 @@ public async Task<IActionResult> Upload(IFormFile file, CancellationToken ct)
 }
 ```
 
-More complete endpoint:
+That approach is acceptable only within bounded size and throughput assumptions. Once files become large or frequent, direct API handling often becomes the wrong boundary because the web server is now responsible for streaming, buffering, and guarding large payloads under normal request pressure.
 
-```csharp
-[HttpPost("files")]
-[RequestSizeLimit(10 * 1024 * 1024)]
-public async Task<ActionResult<FileUploadResponse>> Upload(
-    IFormFile file,
-    CancellationToken ct)
-{
-    if (file.Length == 0)
-    {
-        return BadRequest("File is empty.");
-    }
+## Direct-To-Storage Upload Patterns
 
-    if (file.Length > 10 * 1024 * 1024)
-    {
-        return BadRequest("File is too large.");
-    }
+For larger uploads, a more scalable design is often:
 
-    var allowedContentTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-        "image/png",
-        "image/jpeg",
-        "application/pdf"
-    };
+1. the client asks the API for upload authorization;
+2. the API validates file intent and creates metadata;
+3. the API returns a short-lived upload URL or token;
+4. the client uploads directly to object storage;
+5. the API or background workers validate, scan, and process the stored object.
 
-    if (!allowedContentTypes.Contains(file.ContentType))
-    {
-        return BadRequest("Unsupported file type.");
-    }
+This changes the role of the API. It stops being the byte transport path and becomes the policy, authorization, and metadata boundary. That is often the correct separation at scale.
 
-    var safeOriginalName = Path.GetFileName(file.FileName);
-    var storageKey = $"uploads/{Guid.NewGuid():N}{Path.GetExtension(safeOriginalName)}";
+## Metadata As Part Of The Contract
 
-    await using var stream = file.OpenReadStream();
-    await _fileStorage.SaveAsync(storageKey, stream, file.ContentType, ct);
+File systems and object stores still need relational metadata:
 
-    var metadata = new FileMetadata
-    {
-        Id = Guid.NewGuid(),
-        OriginalFileName = safeOriginalName,
-        StorageKey = storageKey,
-        ContentType = file.ContentType,
-        SizeBytes = file.Length,
-        UploadedByUserId = User.FindFirst("sub")?.Value,
-        CreatedAt = DateTimeOffset.UtcNow,
-        ScanStatus = "Pending"
-    };
+- original file name;
+- storage key;
+- content type;
+- size;
+- uploader identity;
+- tenant ownership;
+- scan status;
+- processing status;
+- creation time.
 
-    _dbContext.Files.Add(metadata);
-    await _dbContext.SaveChangesAsync(ct);
+This metadata is what turns raw binary storage into an application-level resource. Without it, the API cannot reliably authorize access, track lifecycle state, or expose the file as part of the system's domain.
 
-    return Ok(new FileUploadResponse(metadata.Id, metadata.OriginalFileName));
-}
-```
+## Validation Beyond Filename And MIME Type
 
-Response:
+File APIs need stronger validation than many ordinary JSON endpoints.
 
-```csharp
-public sealed record FileUploadResponse(Guid FileId, string FileName);
-```
-
-Metadata entity:
-
-```csharp
-public sealed class FileMetadata
-{
-    public Guid Id { get; set; }
-    public string OriginalFileName { get; set; } = "";
-    public string StorageKey { get; set; } = "";
-    public string ContentType { get; set; } = "";
-    public long SizeBytes { get; set; }
-    public string? UploadedByUserId { get; set; }
-    public string ScanStatus { get; set; } = "Pending";
-    public DateTimeOffset CreatedAt { get; set; }
-}
-```
-
-## Validation
-
-Validate:
+Relevant checks often include:
 
 - file size;
-- extension;
+- allowed extension;
 - content type;
-- file signature when possible;
-- user permission;
-- tenant ID;
-- malware scanning for risky files.
+- file signature or magic bytes where applicable;
+- tenant or user authorization;
+- malware scanning or quarantine workflow;
+- storage quota rules.
 
-Do not trust file name or content type blindly.
+The important principle is not to trust client-supplied filename or content type as authoritative truth. A file endpoint is an input boundary with unusually high abuse potential.
 
-## Large File Upload
+## Download Semantics
 
-For large files, prefer direct upload to object storage:
+Downloads also require explicit design. A secure file download endpoint is not merely "open the object and send it back." It must decide:
 
-```text
-1. Client asks API for upload URL.
-2. API validates request and creates metadata.
-3. API returns short-lived upload URL.
-4. Client uploads directly to storage.
-5. Client confirms upload.
-6. Worker scans/processes file.
-```
+- whether the caller is authorized;
+- whether the file is available yet;
+- whether the file should be streamed by the API or accessed through a signed storage URL;
+- whether access should be logged;
+- whether the file name and content type sent back to the client are safe and correct.
 
-Pre-signed upload response:
+Those questions make download behavior part of the API contract, not just part of infrastructure.
 
-```json
-{
-  "fileId": "845704dc-e015-48ef-81d1-4c79d5d2c2ac",
-  "uploadUrl": "https://storage.example.com/uploads/...",
-  "expiresAt": "2026-05-03T12:30:00Z"
-}
-```
+## Streaming Versus Redirecting
 
-API shape:
+Two broad download patterns are common.
 
-```csharp
-public sealed record CreateUploadRequest(
-    string FileName,
-    string ContentType,
-    long SizeBytes);
+The API may stream the file directly, which keeps authorization centralized and lets the application enforce response headers itself.
 
-public sealed record CreateUploadResponse(
-    Guid FileId,
-    string UploadUrl,
-    DateTimeOffset ExpiresAt);
-```
+Or the API may return a short-lived signed URL, shifting the actual byte transfer to object storage while keeping authorization and audit decisions in the application layer.
 
-Endpoint:
+The right choice depends on file size, infrastructure shape, caching goals, and how much control the API must retain over the transfer path.
 
-```csharp
-[HttpPost("files/upload-url")]
-public async Task<ActionResult<CreateUploadResponse>> CreateUploadUrl(
-    CreateUploadRequest request,
-    CancellationToken ct)
-{
-    if (request.SizeBytes <= 0 || request.SizeBytes > 500 * 1024 * 1024)
-    {
-        return BadRequest("Invalid file size.");
-    }
+## Security Risks
 
-    var fileId = Guid.NewGuid();
-    var safeName = Path.GetFileName(request.FileName);
-    var storageKey = $"pending/{fileId:N}/{safeName}";
-    var expiresAt = DateTimeOffset.UtcNow.AddMinutes(15);
+File endpoints introduce several classes of risk:
 
-    var uploadUrl = await _fileStorage.CreateUploadUrlAsync(
-        storageKey,
-        request.ContentType,
-        expiresAt,
-        ct);
+- path traversal through unsafe filename handling;
+- accidental public access to private storage;
+- malware or hostile content;
+- oversized uploads causing memory or storage pressure;
+- insecure download authorization;
+- tenant boundary leakage.
 
-    _dbContext.Files.Add(new FileMetadata
-    {
-        Id = fileId,
-        OriginalFileName = safeName,
-        StorageKey = storageKey,
-        ContentType = request.ContentType,
-        SizeBytes = request.SizeBytes,
-        UploadedByUserId = User.FindFirst("sub")?.Value,
-        ScanStatus = "UploadPending",
-        CreatedAt = DateTimeOffset.UtcNow
-    });
+This is why random storage keys, filename sanitization, strict access control, and quarantine or scan workflows are so important. Binary content should not be treated as morally equivalent to validated JSON input.
 
-    await _dbContext.SaveChangesAsync(ct);
+## Lifecycle And Cleanup
 
-    return Ok(new CreateUploadResponse(fileId, uploadUrl, expiresAt));
-}
-```
+File workflows often involve abandoned uploads, partially processed content, expired signed URLs, and temporary storage objects that no longer correspond to live business records. Cleanup is therefore part of the design, not an afterthought.
 
-## Download API
+A robust file-transfer architecture usually includes:
 
-Option 1: API streams file.
+- expiration for pending uploads;
+- cleanup jobs for abandoned objects;
+- processing-state transitions;
+- audit visibility for failed scans or blocked files.
 
-```csharp
-[HttpGet("files/{id:guid}/download")]
-public async Task<IActionResult> Download(Guid id, CancellationToken ct)
-{
-    var file = await _fileService.GetForDownloadAsync(id, User, ct);
-    return File(file.Stream, file.ContentType, file.FileName);
-}
-```
+These lifecycle mechanics are what keep file APIs operationally stable over time.
 
-Service result:
+## Design Consequences
 
-```csharp
-public sealed record DownloadFileResult(
-    Stream Stream,
-    string ContentType,
-    string FileName);
-```
+File transfer endpoints should be modeled as specialized resource workflows. Small uploads may remain inside the application boundary, but large-scale transfer usually belongs in a direct-to-storage pattern with the API acting as the authorization and metadata authority. Validation, download authorization, malware handling, and cleanup are all part of the contract quality of such endpoints.
 
-Secure lookup:
-
-```csharp
-public async Task<DownloadFileResult> GetForDownloadAsync(
-    Guid fileId,
-    ClaimsPrincipal user,
-    CancellationToken ct)
-{
-    var userId = user.FindFirst("sub")?.Value;
-
-    var file = await _dbContext.Files
-        .AsNoTracking()
-        .SingleOrDefaultAsync(x => x.Id == fileId, ct);
-
-    if (file is null)
-    {
-        throw new NotFoundException("File not found.");
-    }
-
-    if (file.UploadedByUserId != userId)
-    {
-        throw new ForbiddenException("You do not have access to this file.");
-    }
-
-    if (file.ScanStatus != "Clean")
-    {
-        throw new ConflictException("File is not available yet.");
-    }
-
-    var stream = await _fileStorage.OpenReadAsync(file.StorageKey, ct);
-
-    return new DownloadFileResult(
-        stream,
-        file.ContentType,
-        file.OriginalFileName);
-}
-```
-
-Option 2: API returns pre-signed URL.
-
-```json
-{
-  "downloadUrl": "https://storage.example.com/...",
-  "expiresAt": "2026-04-28T12:00:00Z"
-}
-```
-
-## Security
-
-Important:
-
-- authorize every download;
-- avoid public buckets unless intended;
-- avoid path traversal;
-- sanitize file names;
-- use random storage keys;
-- scan files before making available;
-- log access for sensitive files.
-
-Path traversal risk:
-
-```csharp
-var path = Path.Combine(uploadRoot, file.FileName); // risky
-```
-
-If `file.FileName` contains `..\..\web.config`, it may escape the intended folder.
-
-Safer:
-
-```csharp
-var safeOriginalName = Path.GetFileName(file.FileName);
-var storageFileName = $"{Guid.NewGuid():N}{Path.GetExtension(safeOriginalName)}";
-var path = Path.Combine(uploadRoot, storageFileName);
-```
-
-Still validate extensions and content. A safe file name does not prove the file is safe.
-
-## Cleanup Job
-
-Abandoned direct uploads should expire.
-
-```csharp
-public sealed class AbandonedUploadCleanupWorker : BackgroundService
-{
-    private readonly IServiceScopeFactory _scopeFactory;
-
-    public AbandonedUploadCleanupWorker(IServiceScopeFactory scopeFactory)
-    {
-        _scopeFactory = scopeFactory;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
-
-        while (await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var storage = scope.ServiceProvider.GetRequiredService<IFileStorage>();
-
-            var cutoff = DateTimeOffset.UtcNow.AddHours(-24);
-
-            var abandoned = await dbContext.Files
-                .Where(x => x.ScanStatus == "UploadPending" && x.CreatedAt < cutoff)
-                .Take(100)
-                .ToListAsync(stoppingToken);
-
-            foreach (var file in abandoned)
-            {
-                await storage.DeleteIfExistsAsync(file.StorageKey, stoppingToken);
-                dbContext.Files.Remove(file);
-            }
-
-            await dbContext.SaveChangesAsync(stoppingToken);
-        }
-    }
-}
-```
-
-## Review Questions
-
-### How do you handle large file uploads?
-
-> I prefer direct upload to object storage using short-lived pre-signed URLs, with metadata stored in the database and background scanning/processing.
-
-### Why not load whole file into memory?
-
-> Large files can exhaust memory and hurt API performance. Streaming or direct-to-storage upload is safer and more scalable.
-
-### How do you secure downloads?
-
-> Check authorization in the API, then either stream the file or return a short-lived signed download URL.
-
-## Common Mistakes
-
-- Trusting file extension.
-- Public storage container by accident.
-- Loading file fully into memory.
-- No size limit.
-- No authorization on download.
-- No cleanup for abandoned uploads.
-
-## Practice Task
-
-Build:
-
-1. small file upload endpoint;
-2. file validation;
-3. metadata table;
-4. direct upload design;
-5. secure download endpoint;
-6. abandoned upload cleanup job.
+When these concerns are ignored, file APIs become one of the fastest ways for an otherwise clean platform to accumulate security and operational debt.

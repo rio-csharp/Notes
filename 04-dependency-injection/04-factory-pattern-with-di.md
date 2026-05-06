@@ -2,25 +2,13 @@
 
 ## Core Idea
 
-Factories create objects when construction requires runtime data, selection logic, or parameters that are not known at DI registration time.
+Dependency injection works best when the container can decide the full object graph at composition time. Factories become useful when that is not enough: when object creation depends on runtime values, when multiple implementations are valid and the choice depends on input, or when a service must create a short-lived object with parameters the container cannot know in advance.
 
-Chinese notes:
+This chapter treats factories not as an alternative to dependency injection, but as one of the ways DI remains explicit even when object creation becomes dynamic. The central design question is not merely whether a factory exists. It is whether the factory preserves visible dependencies or collapses into a disguised service locator.
 
-- `factory`: 工厂.
-- `runtime data`: 运行时数据.
-- `selection logic`: 选择逻辑.
-- `service locator`: 服务定位器, an anti-pattern when overused.
-- `keyed service`: 带 key 的服务.
+## Constructor Injection As The Default
 
-DI creates services. Factories help when you need dynamic creation.
-
-Key takeaway:
-
-> I use a factory when the caller needs to choose an implementation based on runtime input, but I keep the factory focused so it does not become a service locator.
-
-## When DI Alone Is Enough
-
-If the dependency is fixed, use normal constructor injection.
+Many situations that seem to invite a factory do not actually need one.
 
 ```csharp
 public sealed class OrderService
@@ -34,38 +22,41 @@ public sealed class OrderService
 }
 ```
 
-Registration:
-
 ```csharp
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<OrderService>();
 ```
 
-No factory is needed because there is one clear implementation.
+No factory is required here because the dependency is fixed. The consumer does not choose the implementation at runtime, and the container can construct the graph directly.
 
-## When A Factory Is Useful
+Factories are most useful when there is a genuine creation decision left unresolved until runtime.
 
-Use a factory when:
+## Factories As Runtime Selection Boundaries
 
-- implementation depends on runtime data;
-- object creation needs runtime parameters;
-- multiple implementations are valid;
-- creation logic is complex but should be centralized;
-- you want to hide keyed-service or selection details.
+Factories are appropriate when:
 
-Examples:
+- implementation choice depends on runtime input;
+- construction requires runtime parameters;
+- several implementations of the same role exist and selection should be centralized;
+- object creation is dynamic but should still remain explicit and testable.
+
+Typical examples include:
 
 ```text
-channel = "email" -> EmailSender
-channel = "sms"   -> SmsSender
+channel = email -> EmailSender
+channel = sms   -> SmsSender
 
-reportType = "pdf"  -> PdfReportGenerator
-reportType = "xlsx" -> ExcelReportGenerator
+reportType = pdf  -> PdfReportGenerator
+reportType = xlsx -> ExcelReportGenerator
 ```
 
-## Simple Factory
+The factory's purpose is to keep that decision in one place rather than distributing it across callers.
 
-Service interface:
+That boundary matters for more than cleanliness. Once runtime selection logic is duplicated across controllers, handlers, or background jobs, the application no longer has one consistent composition rule for that family of services. Validation, fallback behavior, telemetry, and policy checks begin to drift apart. A factory is therefore valuable not only because it creates objects, but because it centralizes one specific creation policy.
+
+## A Focused Selection Factory
+
+A simple example is notification-channel selection.
 
 ```csharp
 public interface INotificationSender
@@ -73,8 +64,6 @@ public interface INotificationSender
     Task SendAsync(string message, CancellationToken cancellationToken);
 }
 ```
-
-Implementations:
 
 ```csharp
 public sealed class EmailSender : INotificationSender
@@ -85,9 +74,7 @@ public sealed class EmailSender : INotificationSender
         return Task.CompletedTask;
     }
 }
-```
 
-```csharp
 public sealed class SmsSender : INotificationSender
 {
     public Task SendAsync(string message, CancellationToken cancellationToken)
@@ -98,7 +85,13 @@ public sealed class SmsSender : INotificationSender
 }
 ```
 
-Factory:
+```csharp
+public enum NotificationChannel
+{
+    Email,
+    Sms
+}
+```
 
 ```csharp
 public sealed class NotificationSenderFactory
@@ -110,27 +103,23 @@ public sealed class NotificationSenderFactory
         _serviceProvider = serviceProvider;
     }
 
-    public INotificationSender Create(string channel)
+    public INotificationSender Create(NotificationChannel channel)
     {
-        return channel.ToLowerInvariant() switch
+        return channel switch
         {
-            "email" => _serviceProvider.GetRequiredService<EmailSender>(),
-            "sms" => _serviceProvider.GetRequiredService<SmsSender>(),
-            _ => throw new NotSupportedException($"Channel '{channel}' is not supported.")
+            NotificationChannel.Email => _serviceProvider.GetRequiredService<EmailSender>(),
+            NotificationChannel.Sms => _serviceProvider.GetRequiredService<SmsSender>(),
+            _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, null)
         };
     }
 }
 ```
-
-Registration:
 
 ```csharp
 builder.Services.AddTransient<EmailSender>();
 builder.Services.AddTransient<SmsSender>();
 builder.Services.AddScoped<NotificationSenderFactory>();
 ```
-
-Usage:
 
 ```csharp
 public sealed class NotificationService
@@ -143,7 +132,7 @@ public sealed class NotificationService
     }
 
     public async Task NotifyAsync(
-        string channel,
+        NotificationChannel channel,
         string message,
         CancellationToken cancellationToken)
     {
@@ -153,47 +142,21 @@ public sealed class NotificationService
 }
 ```
 
-Why this is acceptable:
+This works because the factory has a narrow and meaningful purpose. The application service still depends on a domain-relevant abstraction rather than on arbitrary runtime access to the container.
 
-> `IServiceProvider` is hidden inside a focused factory. Application services still depend on a meaningful domain abstraction, not on the whole container.
+The deeper point is that the factory API exposes a business decision, not a container capability. `Create(NotificationChannel channel)` says that the application chooses a sender by channel. It does not expose registration mechanics, named strings, or generic runtime resolution as part of the domain model.
 
-## Avoid Runtime Strings Everywhere
+## Narrow Factory Boundaries Versus Service Location
 
-Scattered strings are fragile.
+The presence of `IServiceProvider` inside a factory does not automatically make the design a service locator. The difference lies in scope and purpose.
 
-Bad:
+If a class injects `IServiceProvider` merely to resolve any service it feels like at runtime, the container has leaked into ordinary application code and dependencies are hidden. If a factory uses the provider only to construct one family of related choices behind an explicit method, the design remains focused and understandable.
 
-```csharp
-factory.Create("EMAIL");
-factory.Create("email");
-factory.Create("Email");
-```
+The container is hidden inside the factory, but the decision boundary is still visible in the factory's public API.
 
-Better:
+## Delegate Factories
 
-```csharp
-public enum NotificationChannel
-{
-    Email,
-    Sms
-}
-```
-
-```csharp
-public INotificationSender Create(NotificationChannel channel)
-{
-    return channel switch
-    {
-        NotificationChannel.Email => _serviceProvider.GetRequiredService<EmailSender>(),
-        NotificationChannel.Sms => _serviceProvider.GetRequiredService<SmsSender>(),
-        _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, null)
-    };
-}
-```
-
-## Factory Delegate
-
-A factory delegate can be registered directly.
+For smaller cases, a delegate factory can be enough.
 
 ```csharp
 builder.Services.AddTransient<EmailSender>();
@@ -209,8 +172,6 @@ builder.Services.AddScoped<Func<NotificationChannel, INotificationSender>>(sp =>
     };
 });
 ```
-
-Usage:
 
 ```csharp
 public sealed class NotificationService
@@ -233,50 +194,30 @@ public sealed class NotificationService
 }
 ```
 
-Trade-off:
+This pattern is compact, but named factory classes often age better when logic becomes richer, validation becomes more complex, or the factory itself needs tests and documentation.
 
-> Delegate factories are compact, but a named factory class is easier to test and document when selection logic grows.
+Delegate factories also have a discoverability cost. A named type communicates intent in the object graph and gives the selection rule a natural home for explanation and testing. A bare `Func<...>` stays lightweight, but it is easier for that lightweight pattern to become opaque once the decision logic stops being trivial.
 
-## Keyed Services
+## Keyed Services And Selection By Identity
 
-Modern .NET supports keyed services.
-
-Registration:
+Modern .NET also supports keyed services, which can be useful when several implementations of the same interface are distinguished by names or keys.
 
 ```csharp
 builder.Services.AddKeyedTransient<INotificationSender, EmailSender>("email");
 builder.Services.AddKeyedTransient<INotificationSender, SmsSender>("sms");
 ```
 
-Usage through provider:
-
 ```csharp
 var sender = serviceProvider.GetRequiredKeyedService<INotificationSender>("email");
 ```
 
-Attribute injection can also be used in supported scenarios:
+Keyed services reduce the need for some manual selection plumbing, but they do not remove the design question. Raw string keys scattered throughout the application can become their own loosely typed protocol. A focused factory or a shared key abstraction often remains clearer when selection is a meaningful part of the domain.
 
-```csharp
-public sealed class WelcomeService
-{
-    private readonly INotificationSender _emailSender;
+For that reason, keyed services are often most effective as infrastructure support rather than as the entire public design. They can simplify registration and resolution internally while a factory, policy object, or dedicated abstraction still presents a more stable API to the rest of the application.
 
-    public WelcomeService([FromKeyedServices("email")] INotificationSender emailSender)
-    {
-        _emailSender = emailSender;
-    }
-}
-```
+## Factories For Runtime Parameters
 
-Note:
-
-> Keyed services are useful, but I still avoid spreading raw keys everywhere. A focused factory or constants can keep the code maintainable.
-
-## Factory For Runtime Parameters
-
-DI cannot know values that exist only at runtime.
-
-Example:
+Some object creation cannot be handled by the container alone because part of the constructor data exists only at runtime.
 
 ```csharp
 public sealed class ReportExportJob
@@ -300,8 +241,6 @@ public sealed class ReportExportJob
 }
 ```
 
-Factory:
-
 ```csharp
 public sealed class ReportExportJobFactory
 {
@@ -323,57 +262,34 @@ public sealed class ReportExportJobFactory
 }
 ```
 
-This is not service locator because:
+This is one of the most legitimate uses of a factory in DI-heavy code. The static dependencies remain injected. The dynamic values become explicit method parameters. The factory bridges the gap without hiding what the created object actually needs.
 
-- dependencies are explicit in the factory constructor;
-- runtime values are explicit method parameters;
-- the factory has one focused purpose.
+This use case also shows why factories are often preferable to overloading the container with data it should not own. A report identifier, tenant identifier, file path, or user-selected export format belongs to a specific operation. Treating such values as method parameters keeps them at the correct boundary instead of smearing request-specific data into registration code.
 
-## Factory Lifetime Rules
+## Factory Lifetime Still Matters
 
-Factory lifetime still matters.
-
-Bad:
+Factories do not escape lifetime rules any more than factory registrations do.
 
 ```csharp
 builder.Services.AddScoped<AppDbContext>();
 builder.Services.AddSingleton<ReportExportJobFactory>();
 ```
 
-If `ReportExportJobFactory` injects `AppDbContext`, it creates a captive dependency.
+If the factory captures `AppDbContext`, the design now has the same lifetime problem as any other singleton depending on scoped infrastructure.
 
-Better:
+A factory's lifetime must therefore remain compatible with the lifetimes of the dependencies it stores. If it depends on scoped services, it is usually scoped as well.
 
 ```csharp
 builder.Services.AddScoped<ReportExportJobFactory>();
 ```
 
-Or for background work:
+In long-lived infrastructure such as background services, the usual solution is to create a scope and resolve the factory inside that scope rather than stretching the factory's dependencies into singleton lifetime.
 
-```csharp
-public sealed class ReportWorker
-{
-    private readonly IServiceScopeFactory _scopeFactory;
+In practice, this means factory design should be reviewed with the same discipline as any other service. A factory is not automatically "just glue code." If it stores collaborators, coordinates policy, or creates disposable runtime objects, its lifetime and ownership model need to be explicit.
 
-    public ReportWorker(IServiceScopeFactory scopeFactory)
-    {
-        _scopeFactory = scopeFactory;
-    }
+## The Real Service Locator Problem
 
-    public async Task RunAsync(CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var factory = scope.ServiceProvider.GetRequiredService<ReportExportJobFactory>();
-        var job = factory.Create(reportId: 123, requestedBy: "system");
-
-        await Task.CompletedTask;
-    }
-}
-```
-
-## Factory vs Service Locator
-
-Service locator anti-pattern:
+The service locator anti-pattern appears when arbitrary runtime resolution replaces explicit dependencies.
 
 ```csharp
 public sealed class OrderService
@@ -393,15 +309,7 @@ public sealed class OrderService
 }
 ```
 
-Why it is bad:
-
-- dependencies are hidden;
-- tests are harder;
-- missing registrations fail at runtime;
-- class can resolve anything;
-- responsibility is unclear.
-
-Focused factory:
+This hides the true requirements of the class, makes failures more implicit, and turns the object into a runtime composition root of its own. That is very different from a narrow factory such as:
 
 ```csharp
 public interface INotificationSenderFactory
@@ -410,96 +318,6 @@ public interface INotificationSenderFactory
 }
 ```
 
-Why it is better:
+The difference is not merely stylistic. One preserves visible intent. The other makes dependency structure harder to see and test.
 
-- purpose is clear;
-- selection logic is centralized;
-- application service depends on a meaningful abstraction;
-- the factory can be tested directly.
-
-## Review Questions
-
-### When do you use factory with DI?
-
-Use a factory when the implementation choice depends on runtime data, or when object creation needs runtime parameters not known at registration time.
-
-### Is factory the same as service locator?
-
-Not always. A focused factory for one domain concept is acceptable. It becomes service locator when application code injects `IServiceProvider` broadly and resolves arbitrary dependencies.
-
-### How do keyed services help?
-
-Keyed services allow multiple implementations of the same interface to be registered and resolved by key. They are useful for provider/channel selection, but raw keys should be managed carefully.
-
-### What lifetime should a factory have?
-
-The factory lifetime must be compatible with its dependencies. If it depends on scoped services, it should usually be scoped. A singleton factory should not capture scoped dependencies.
-
-### How do you test a factory?
-
-Test supported keys/channels, unsupported cases, lifetime assumptions if relevant, and whether the correct implementation is returned.
-
-## Common Mistakes
-
-### Mistake: Injecting `IServiceProvider` everywhere
-
-Why it is wrong:
-
-> It turns DI into service locator and hides dependencies.
-
-Better answer:
-
-> Use constructor injection by default. Put dynamic resolution behind focused factories.
-
-### Mistake: Factories that know too much
-
-Why it is wrong:
-
-> A giant factory becomes a central dependency hub and violates separation of concerns.
-
-Better answer:
-
-> Keep factories focused by domain concept, such as notification sender factory or report generator factory.
-
-### Mistake: Runtime strings scattered everywhere
-
-Why it is wrong:
-
-> Typos become runtime failures and refactoring becomes risky.
-
-Better answer:
-
-> Use enums, constants, typed keys, or a focused factory API.
-
-### Mistake: Not testing unsupported cases
-
-Why it is wrong:
-
-> Unknown runtime input may fail in production with unclear errors.
-
-Better answer:
-
-> Test unsupported keys/channels and return clear exceptions or validation errors.
-
-### Mistake: Singleton factory captures scoped services
-
-Why it is wrong:
-
-> This is still a captive dependency even if the scoped service is inside a factory.
-
-Better answer:
-
-> Match the factory lifetime to its dependencies or create scopes explicitly in background infrastructure.
-
-## Practice Task
-
-Create:
-
-1. `INotificationSender`;
-2. `EmailSender`;
-3. `SmsSender`;
-4. `NotificationSenderFactory`;
-5. an enum-based channel selection;
-6. a test case for unsupported channel;
-7. a short explanation of why the factory is not service locator.
-
+The practical test is straightforward. If the factory can be described as a stable creation policy in the language of the domain or the infrastructure boundary, it is usually legitimate. If it mainly exists to give a class ad hoc access to the container, it is probably a service locator in disguise.

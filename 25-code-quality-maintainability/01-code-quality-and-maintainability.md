@@ -4,15 +4,6 @@
 
 Code quality is not about making code look clever. It is about making software easier to understand, change, test, debug, and operate.
 
-Chinese notes:
-
-- `maintainability`: 可维护性.
-- `cohesion`: 内聚.
-- `coupling`: 耦合.
-- `technical debt`: 技术债.
-- `refactoring`: 重构.
-- `complexity`: 复杂度.
-
 Good code supports future work. It helps the next engineer understand the intention, change behavior safely, and diagnose problems when production behaves differently from expectations.
 
 ## What Maintainable Code Feels Like
@@ -478,7 +469,6 @@ _logger.LogInformation("done");
 
 Good logs include:
 
-- what happened;
 - important identifiers;
 - correlation ID through logging scope;
 - safe context;
@@ -734,42 +724,6 @@ Useful signals:
 - unsupported old abstractions.
 
 Metrics should guide investigation, not replace judgment.
-
-## Knowledge Checks
-
-### What does maintainable code mean?
-
-Maintainable code is easy to understand, safe to change, testable, observable, and consistent with system boundaries.
-
-### How should technical debt be handled?
-
-Make it visible, connect it to risk, prioritize high-impact debt, and improve it incrementally during related work when possible.
-
-### What should code review focus on first?
-
-Correctness, security, data integrity, authorization, and production risk should come before naming or formatting.
-
-### Why is observability part of code quality?
-
-Code that cannot be diagnosed in production is hard to operate. Useful logs, metrics, traces, and correlation IDs make behavior understandable when things fail.
-
-### Why can over-abstraction hurt maintainability?
-
-An abstraction that does not represent a real boundary adds indirection without reducing complexity. It makes the code harder to follow.
-
-## Common Mistakes
-
-- Refactoring without tests.
-- Overengineering abstractions.
-- Ignoring naming.
-- Huge pull requests.
-- Code review focused only on style.
-- Technical debt not documented.
-- Returning database entities directly from APIs.
-- Hiding business rules in controllers.
-- Swallowing exceptions.
-- No logs for important state changes.
-- Frontend components mixing data fetching, formatting, permissions, and layout too deeply.
 
 ## Practice Task
 

@@ -1,27 +1,14 @@
-# REST API Design
+# HTTP APIs, Resources, And Semantics
 
 ## Core Idea
 
-REST API design is about modeling resources and operations using HTTP correctly and consistently.
+A well-designed web API is not merely a set of endpoints that happen to return JSON. It is a contract built on HTTP semantics, resource boundaries, status codes, and predictable representations. Good API design reduces accidental ambiguity for clients and makes system behavior easier to evolve, observe, and secure.
 
-Chinese notes:
+This opening chapter establishes that foundation. The later files build on it by treating DTOs, pagination, versioning, idempotency, documentation, and file transfer as consequences of API contract design rather than as isolated implementation techniques.
 
-- `resource`: 资源.
-- `idempotent`: 幂等.
-- `contract`: 契约.
+## Resource-Oriented Thinking
 
-Good APIs are:
-
-- predictable;
-- consistent;
-- secure;
-- versionable;
-- easy to debug;
-- hard to misuse.
-
-## Resource Naming
-
-Use nouns, not verbs.
+An API becomes easier to understand when it models resources and their relationships clearly.
 
 Good:
 
@@ -29,134 +16,76 @@ Good:
 GET /api/orders
 GET /api/orders/123
 POST /api/orders
-PUT /api/orders/123
 DELETE /api/orders/123
 ```
 
-Avoid:
+Less clear:
 
 ```http
 GET /api/getOrders
 POST /api/createOrder
 ```
 
-## HTTP Methods
+The point is not stylistic purity. Resource-oriented naming gives the client a more stable mental model. The URI identifies the resource or collection, while the HTTP method expresses the action being attempted.
 
-### GET
+## HTTP Methods And Meaning
 
-Read resource.
+HTTP methods carry semantics that clients, intermediaries, and engineers rely on.
 
-Safe and idempotent.
+- `GET` reads a representation and should be safe.
+- `POST` usually creates a resource or triggers a non-idempotent operation.
+- `PUT` typically replaces a resource representation and is normally designed to be idempotent.
+- `PATCH` applies a partial modification.
+- `DELETE` removes a resource or marks it removed according to the system's deletion model.
 
-```http
-GET /api/orders/123
-```
+Using these methods consistently matters because it affects retries, caching, debugging, and client expectations. An API that uses `POST` for every action may still function, but it loses much of the semantic structure HTTP already provides.
 
-### POST
+## Safe, Unsafe, And Idempotent Operations
 
-Create resource or perform non-idempotent action.
+Two distinctions matter early.
 
-```http
-POST /api/orders
-```
+A safe operation does not change server state in the normal course of use. `GET` is the classic example.
 
-### PUT
+An idempotent operation is one whose repeated application produces the same final effect as a single application. `PUT` and `DELETE` are often designed this way even though they are not safe.
 
-Replace full resource.
+These properties are not academic. They influence how clients retry requests, how intermediaries behave, and how infrastructure treats failures. Later in this chapter, idempotency receives its own file because it becomes especially important for non-idempotent workflows such as payments and order submission.
 
-```http
-PUT /api/orders/123
-```
+## Status Codes As Behavior Signals
 
-### PATCH
+Status codes are part of the contract, not decoration.
 
-Partial update.
+Some of the most important ones are:
 
-```http
-PATCH /api/orders/123
-```
+- `200 OK` for successful reads or updates with a response body;
+- `201 Created` when a new resource has been created;
+- `202 Accepted` when processing is asynchronous and not yet complete;
+- `204 No Content` when the operation succeeded and no response body is needed;
+- `400 Bad Request` for malformed or structurally invalid input;
+- `401 Unauthorized` when authentication is missing or invalid;
+- `403 Forbidden` when the caller is authenticated but not allowed;
+- `404 Not Found` when the addressed resource does not exist or is not visible;
+- `409 Conflict` when the request conflicts with current resource state;
+- `422 Unprocessable Entity` when the syntax is valid but the requested state change is semantically unacceptable;
+- `429 Too Many Requests` for rate limiting;
+- `500 Internal Server Error` for unexpected server-side failure.
 
-### DELETE
+The important point is consistency. A client should be able to learn what the API means from the status code without reverse-engineering endpoint-specific exception behavior.
 
-Delete resource.
+## `201 Created`, `202 Accepted`, And Asynchronous Work
 
-```http
-DELETE /api/orders/123
-```
+APIs often blur together "the request was accepted" and "the work is complete." Those are different states.
 
-## Status Codes
+`201 Created` is appropriate when the resource has actually been created and can be referenced immediately.
 
-- `200 OK`: successful read/update with response body.
-- `201 Created`: resource created.
-- `202 Accepted`: accepted for async processing.
-- `204 No Content`: successful with no body.
-- `400 Bad Request`: invalid input.
-- `401 Unauthorized`: not authenticated.
-- `403 Forbidden`: authenticated but not allowed.
-- `404 Not Found`: resource not found.
-- `409 Conflict`: conflict with current state.
-- `422 Unprocessable Entity`: semantic validation error.
-- `429 Too Many Requests`: rate limited.
-- `500 Internal Server Error`: unexpected server error.
+`202 Accepted` is appropriate when the server has accepted the command but the real work will complete asynchronously. In those cases, the API should usually expose a resource or operation identifier the client can use to check progress later.
 
-## DTOs
+This distinction becomes important in workflows such as report generation, payment processing, or large file ingestion, where synchronous completion may be either too slow or operationally unsafe.
 
-Do not expose EF entities directly.
+## Error Contracts
 
-Request:
+Error handling is one of the most neglected parts of many APIs. Random exception text is not a contract.
 
-```csharp
-public sealed record CreateOrderRequest(
-    int CustomerId,
-    IReadOnlyList<CreateOrderItemRequest> Items);
-```
-
-Response:
-
-```csharp
-public sealed record OrderResponse(
-    int Id,
-    int CustomerId,
-    decimal Total,
-    string Status,
-    DateTimeOffset CreatedAt);
-```
-
-Why:
-
-- prevents over-posting;
-- protects internal schema;
-- supports API versioning;
-- allows frontend-friendly shape.
-
-## Pagination
-
-Request:
-
-```http
-GET /api/orders?page=1&pageSize=20&status=Paid&sort=-createdAt
-```
-
-Response:
-
-```json
-{
-  "items": [],
-  "page": 1,
-  "pageSize": 20,
-  "total": 1250
-}
-```
-
-For large datasets, consider cursor pagination:
-
-```http
-GET /api/orders?cursor=eyJjcmVhdGVkQXQiOiIyMDI2...&limit=50
-```
-
-## Validation Error Format
-
-Use `ProblemDetails`.
+A structured format such as `ProblemDetails` creates a predictable error surface:
 
 ```json
 {
@@ -170,36 +99,24 @@ Use `ProblemDetails`.
 }
 ```
 
-## Idempotency
+This helps clients distinguish validation failures, authorization problems, state conflicts, and server errors without parsing arbitrary strings. It also gives operators better correlation between client-visible failures and server-side traces.
 
-For payment or order creation, client retries can create duplicates.
+## URI Stability And Resource Identity
 
-Use an idempotency key:
+Good API design benefits from stable URIs. If clients must constantly reinterpret endpoint structure, the API contract is weak even if the payloads are correct.
 
-```http
-POST /api/payments
-Idempotency-Key: payment-order-123
-```
+Resource identity should therefore be explicit and durable enough that clients can safely reference:
 
-Server stores key and result.
+- one specific resource;
+- one collection;
+- one subresource;
+- one operation outcome.
 
-If the same key is used again, return the original result.
+This is also why API design overlaps with domain design. A weak domain boundary often produces weak URI structure because the system is unsure what the client is really addressing.
 
-## Versioning
+## Controllers As Contract Boundaries
 
-Options:
-
-```http
-/api/v1/orders
-/api/orders?api-version=1.0
-Accept: application/vnd.company.orders.v1+json
-```
-
-Engineering perspective:
-
-> I choose versioning strategy based on client control and compatibility needs. Public APIs need stricter versioning. Internal APIs may evolve with consumer coordination.
-
-## Example Controller
+A controller action illustrates the relationship among resource addressing, status code semantics, and DTOs:
 
 ```csharp
 [ApiController]
@@ -240,26 +157,10 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-## Review Questions
+The value of code like this is not only that it compiles. It makes the API contract legible: the collection is searchable, creation returns a location for the new resource, and missing resources become `404`.
 
-### What makes an API RESTful?
+## Design Consequences
 
-> It models resources with stable URIs, uses HTTP methods according to their semantics, returns meaningful status codes, and uses representations like JSON to transfer resource state.
+Good HTTP API design starts with stable resources, meaningful methods, explicit status codes, and structured errors. Once those foundations are solid, later concerns such as DTO shape, pagination, versioning, retries, and documentation have a place to attach.
 
-### PUT vs PATCH?
-
-> PUT usually replaces the whole resource and is idempotent. PATCH partially updates a resource and may be idempotent depending on design.
-
-### 401 vs 403?
-
-> 401 means authentication is missing or invalid. 403 means the user is authenticated but does not have permission.
-
-## Common Mistakes
-
-- Returning `200 OK` for every result.
-- Exposing database entities directly.
-- No pagination on list APIs.
-- No consistent error format.
-- Ignoring idempotency for payment/order APIs.
-- Breaking API contracts without versioning.
-
+Without that foundation, the later topics become patchwork. With it, the API begins to behave like a durable contract instead of a controller-shaped transport layer.

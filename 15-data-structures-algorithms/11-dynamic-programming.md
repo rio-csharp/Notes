@@ -4,13 +4,6 @@
 
 Dynamic programming solves problems by reusing results of overlapping subproblems.
 
-Chinese notes:
-
-- `dynamic programming`: 动态规划.
-- `state`: 状态.
-- `transition`: 状态转移.
-- `memoization`: 记忆化.
-
 ## When To Use DP
 
 Look for:
@@ -24,9 +17,6 @@ Look for:
 DP is usually about answering three questions:
 
 ```text
-1. What does dp[i] or dp[i][j] mean?
-2. How do I transition from smaller states to larger states?
-3. What are the base cases?
 ```
 
 ## Fibonacci With Memoization
@@ -338,32 +328,6 @@ bottom-up iteration
 ```
 
 Memoization is often easier to write when recursion matches the problem. Tabulation is often easier to optimize for space.
-
-## Knowledge Checks
-
-### How do you approach DP?
-
-Define the state, identify the transition, set base cases, decide iteration order, and optimize space if possible.
-
-### Memoization vs tabulation?
-
-Memoization is top-down recursion with cache. Tabulation is bottom-up iteration.
-
-### Why is DP hard?
-
-The difficult part is defining the state and transition correctly.
-
-### Why does 0/1 knapsack optimized DP loop backward?
-
-Backward iteration prevents the same item from being used multiple times in one iteration.
-
-## Common Mistakes
-
-- No clear state definition.
-- Wrong base case.
-- Off-by-one in arrays.
-- Using DP where greedy works.
-- Not explaining recurrence.
 
 ## Practice Problems
 

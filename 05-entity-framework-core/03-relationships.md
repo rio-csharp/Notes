@@ -1,25 +1,14 @@
-# EF Core Relationships
+# Relationships And Graph Loading
 
 ## Core Idea
 
-EF Core relationships define how entities are connected and how those connections map to relational database foreign keys.
+EF Core relationships connect object-model navigation properties to relational foreign keys and constraints. That mapping is conceptually simple, but the engineering consequences are not. Relationship configuration influences schema shape, delete behavior, aggregate loading, query size, and the difference between a clean read model and an accidental object graph explosion.
 
-Chinese notes:
+This chapter therefore treats relationships as both a modeling concern and a query concern. The schema definition is only the beginning. The real design work lies in deciding which relationships are required, how they should be deleted, and when related data should be loaded at all.
 
-- `one-to-many`: 一对多.
-- `one-to-one`: 一对一.
-- `many-to-many`: 多对多.
-- `navigation property`: 导航属性.
-- `foreign key`: 外键.
-- `relationship fix-up`: 关系修复, EF connects tracked related objects automatically.
+## Foreign Keys And Navigation Properties
 
-Key takeaway:
-
-> A navigation property is an object-model convenience. The database relationship is represented by foreign keys and constraints.
-
-## Foreign Key vs Navigation Property
-
-Example:
+Consider:
 
 ```csharp
 public sealed class Order
@@ -30,23 +19,15 @@ public sealed class Order
 }
 ```
 
-`CustomerId` is the foreign key.
+`CustomerId` is the relational foreign key. `Customer` is the navigation property in the object model. They describe the same relationship from different directions.
 
-`Customer` is the navigation property.
+This distinction matters because navigations are not the relationship itself. They are an application-facing representation of it. The database enforces the real referential rule through foreign keys and constraints, while EF Core uses navigations to make that rule easier to work with in code.
 
-Important:
+One practical consequence follows immediately: the existence of a navigation property does not mean the related entity is loaded. Loading is a separate decision.
 
-> Having a navigation property does not mean the related entity is already loaded. Loading depends on tracking state and query strategy.
+## One-To-Many
 
-## One-to-many
-
-Example:
-
-```text
-Customer -> Orders
-```
-
-Entity:
+One-to-many is the most common relationship shape:
 
 ```csharp
 public sealed class Customer
@@ -65,8 +46,6 @@ public sealed class Order
 }
 ```
 
-Fluent API:
-
 ```csharp
 modelBuilder.Entity<Order>()
     .HasOne(o => o.Customer)
@@ -75,20 +54,11 @@ modelBuilder.Entity<Order>()
     .OnDelete(DeleteBehavior.Restrict);
 ```
 
-What this means:
+At the relational level, each `Order` row points to one `Customer`. At the object level, the navigation pair allows the application to traverse the relationship in both directions.
 
-- each `Order` has one `Customer`;
-- each `Customer` can have many `Orders`;
-- `Order.CustomerId` is the FK column;
-- delete behavior is restricted.
+## One-To-One
 
-## One-to-one
-
-Example:
-
-```text
-User -> UserProfile
-```
+One-to-one relationships are less common and require more care because the database still needs a uniqueness guarantee on the dependent side.
 
 ```csharp
 public sealed class User
@@ -106,36 +76,22 @@ public sealed class UserProfile
 }
 ```
 
-Configuration:
-
 ```csharp
 modelBuilder.Entity<User>()
     .HasOne(u => u.Profile)
     .WithOne(p => p.User)
     .HasForeignKey<UserProfile>(p => p.UserId);
-```
 
-Database note:
-
-> A true one-to-one relationship usually needs a unique constraint or unique index on the dependent foreign key.
-
-Example:
-
-```csharp
 modelBuilder.Entity<UserProfile>()
     .HasIndex(p => p.UserId)
     .IsUnique();
 ```
 
-## Many-to-many
+Without the uniqueness guarantee, the intended one-to-one rule is not fully enforced in relational terms.
 
-Example:
+## Many-To-Many And Explicit Join Entities
 
-```text
-Student <-> Course
-```
-
-Simple many-to-many:
+EF Core supports simple many-to-many relationships without an explicit join type:
 
 ```csharp
 public sealed class Student
@@ -151,9 +107,7 @@ public sealed class Course
 }
 ```
 
-EF Core can create a join table automatically.
-
-When the join table has extra data, create an explicit join entity:
+That convenience is useful when the relationship really is just membership. Once the join itself carries business meaning, an explicit join entity is usually the correct model:
 
 ```csharp
 public sealed class Enrollment
@@ -169,201 +123,20 @@ public sealed class Enrollment
 }
 ```
 
-Configuration:
+An explicit join entity is appropriate when the relationship has its own:
 
-```csharp
-modelBuilder.Entity<Enrollment>()
-    .HasKey(e => new { e.StudentId, e.CourseId });
-
-modelBuilder.Entity<Enrollment>()
-    .HasOne(e => e.Student)
-    .WithMany(s => s.Enrollments)
-    .HasForeignKey(e => e.StudentId);
-
-modelBuilder.Entity<Enrollment>()
-    .HasOne(e => e.Course)
-    .WithMany(c => c.Enrollments)
-    .HasForeignKey(e => e.CourseId);
-```
-
-Use explicit join entity when the relationship has:
-
-- created date;
+- timestamps;
 - status;
 - ordering;
-- role;
+- role semantics;
 - audit fields;
-- soft-delete flag;
-- business behavior.
+- domain behavior.
 
-## Loading Related Data
+At that point, the join is no longer hidden infrastructure. It is part of the domain model.
 
-### Eager Loading
+## Required And Optional Relationships
 
-Eager loading loads related data as part of the query.
-
-```csharp
-var orders = await _dbContext.Orders
-    .Include(o => o.Customer)
-    .ToListAsync(ct);
-```
-
-Use when:
-
-- you need full related entities;
-- you are performing domain behavior that needs an aggregate graph;
-- query size is controlled.
-
-### Explicit Loading
-
-Explicit loading loads related data after an entity is already loaded.
-
-```csharp
-await _dbContext.Entry(order)
-    .Collection(o => o.Items)
-    .LoadAsync(ct);
-```
-
-Use when:
-
-- you conditionally need related data;
-- loading logic is deliberate and visible.
-
-### Lazy Loading
-
-Lazy loading loads navigation properties automatically when accessed.
-
-Be careful:
-
-> Lazy loading can hide database queries and cause N+1 problems, especially during JSON serialization or loops.
-
-## N+1 Example
-
-Bad:
-
-```csharp
-var orders = await _dbContext.Orders.ToListAsync(ct);
-
-foreach (var order in orders)
-{
-    Console.WriteLine(order.Customer.Name);
-}
-```
-
-If lazy loading is enabled, this can run:
-
-```text
-1 query for orders
-N queries for customers
-```
-
-Better with projection:
-
-```csharp
-var orders = await _dbContext.Orders
-    .AsNoTracking()
-    .Select(o => new OrderListItemDto
-    {
-        Id = o.Id,
-        CustomerName = o.Customer.Name,
-        Total = o.Total
-    })
-    .ToListAsync(ct);
-```
-
-Better with `Include` when full entity graph is needed:
-
-```csharp
-var orders = await _dbContext.Orders
-    .Include(o => o.Customer)
-    .ToListAsync(ct);
-```
-
-## Projection Is Often Better
-
-For API list pages:
-
-```csharp
-var orders = await _dbContext.Orders
-    .AsNoTracking()
-    .Select(o => new OrderListItemDto
-    {
-        Id = o.Id,
-        CustomerName = o.Customer.Name,
-        Total = o.Total
-    })
-    .ToListAsync(ct);
-```
-
-This is often better than loading full entity graphs because it:
-
-- selects only needed columns;
-- avoids unnecessary tracking;
-- reduces memory;
-- avoids circular serialization;
-- keeps API response shape independent from entity shape.
-
-## Relationship Fix-up
-
-When related entities are tracked in the same `DbContext`, EF Core can connect navigations automatically.
-
-Example:
-
-```csharp
-var customer = await _dbContext.Customers
-    .FirstAsync(c => c.Id == customerId, ct);
-
-var orders = await _dbContext.Orders
-    .Where(o => o.CustomerId == customerId)
-    .ToListAsync(ct);
-```
-
-EF can set:
-
-```text
-customer.Orders -> orders
-order.Customer -> customer
-```
-
-Why it matters:
-
-> Relationship fix-up is useful, but it can surprise you if a long-lived context has many tracked entities. Another reason to keep `DbContext` short-lived.
-
-## Delete Behavior
-
-```csharp
-modelBuilder.Entity<Order>()
-    .HasOne(o => o.Customer)
-    .WithMany(c => c.Orders)
-    .OnDelete(DeleteBehavior.Restrict);
-```
-
-Common options:
-
-- `Cascade`: delete dependents automatically;
-- `Restrict`: block delete if dependents exist;
-- `SetNull`: set nullable FK to null;
-- `NoAction`: database enforces behavior without EF client cascade.
-
-Use cascade delete carefully in business systems.
-
-Example risk:
-
-```text
-Delete Customer
-  -> automatically delete Orders
-  -> automatically delete OrderItems
-  -> lose financial history
-```
-
-Better for many business systems:
-
-- restrict delete;
-- soft delete;
-- archive;
-- require explicit deletion workflow.
-
-## Required vs Optional Relationship
+Required and optional relationships should be expressed consistently in both CLR shape and relational mapping.
 
 Required:
 
@@ -379,98 +152,146 @@ public int? CustomerId { get; set; }
 public Customer? Customer { get; set; }
 ```
 
-Important:
+This is not just a style preference. Mismatches between nullable reference intent, foreign-key nullability, and business rules create confusion both for developers and for generated schema.
 
-> Nullable reference types and nullable FK properties should match your relationship intent.
+## Delete Behavior As A Business Decision
 
-## Review Questions
+Delete behavior is one of the most underestimated relationship decisions.
 
-### Include vs projection?
+```csharp
+modelBuilder.Entity<Order>()
+    .HasOne(o => o.Customer)
+    .WithMany(c => c.Orders)
+    .OnDelete(DeleteBehavior.Restrict);
+```
 
-`Include` loads related entities. Projection selects only the fields needed for a DTO. For API read models, projection is often more efficient.
+Common options include:
 
-### When should you create explicit many-to-many join entity?
+- `Cascade`
+- `Restrict`
+- `SetNull`
+- `NoAction`
 
-When the relationship has additional data, such as created date, role, ordering, status, audit fields, or behavior.
+The correct choice depends on business semantics, not on what is most convenient for the ORM. Cascading through a graph may be acceptable for clearly owned technical data. It is often dangerous for financial, audit, or historical data.
 
-### Why can lazy loading be dangerous?
+Deleting a customer and automatically deleting related orders may be operationally disastrous even if the cascade path is technically valid. In such systems, soft delete, archival, or explicit removal workflows are often more appropriate than automatic cascade deletion.
 
-It can hide database queries and cause N+1 performance problems, especially in loops and JSON serialization.
+## Loading Related Data
 
-### Does a navigation property mean related data is loaded?
+Schema configuration and loading strategy should be kept conceptually separate. A relationship may exist without being loaded, and loading should follow actual use rather than object-model convenience.
 
-No. A navigation property describes the relationship in the object model. Related data is loaded only if it was included, explicitly loaded, lazy-loaded, or already tracked and fixed up.
+EF Core supports three broad loading styles:
 
-### What is relationship fix-up?
+- eager loading;
+- explicit loading;
+- lazy loading.
 
-Relationship fix-up is EF Core connecting navigation properties between tracked entities when it sees matching keys.
+## Eager Loading
 
-### How do you choose delete behavior?
+Eager loading retrieves related data as part of the query:
 
-Choose based on business rules. Cascade is convenient but can delete too much. Restrict or soft delete is often safer for financial, audit, or history data.
+```csharp
+var orders = await _dbContext.Orders
+    .Include(o => o.Customer)
+    .ToListAsync(ct);
+```
 
-## Common Mistakes
+This can be appropriate when the application truly needs related entities as entities. It is less appropriate when the output is a read model that only needs a few related columns, because projection is often more efficient and more explicit.
 
-### Mistake: Loading huge graphs with multiple `Include`s
+## Explicit Loading
 
-Why it is wrong:
+Explicit loading fetches related data later and visibly:
 
-> It can create large joins, duplicate data, high memory usage, and slow serialization.
+```csharp
+await _dbContext.Entry(order)
+    .Collection(o => o.Items)
+    .LoadAsync(ct);
+```
 
-Better answer:
+This style is useful when the need for related data depends on a prior business decision. It makes the loading boundary explicit, which is often preferable to implicit behavior in complex application flows.
 
-> Use projection for API read models, split queries for large graphs, and only include what the use case needs.
+## Lazy Loading And Hidden Query Behavior
 
-### Mistake: Using lazy loading in high-traffic APIs
+Lazy loading retrieves related data automatically when a navigation is accessed. The convenience is obvious, but so is the risk: query execution becomes implicit.
 
-Why it is wrong:
+That implicitness is the real problem. Hidden round trips are difficult to reason about during code review, easy to trigger accidentally in loops, and especially dangerous near serialization boundaries.
 
-> It hides database queries and often creates N+1 problems.
+For that reason, many teams either avoid lazy loading entirely or use it only under tightly controlled circumstances.
 
-Better answer:
+## The N+1 Problem
 
-> Prefer explicit projection or intentional `Include`.
+The classic failure mode is the N+1 query problem:
 
-### Mistake: Not configuring delete behavior
+```csharp
+var orders = await _dbContext.Orders.ToListAsync(ct);
 
-Why it is wrong:
+foreach (var order in orders)
+{
+    Console.WriteLine(order.Customer.Name);
+}
+```
 
-> Default behavior may not match business rules and can either block deletes unexpectedly or delete too much.
+If lazy loading is enabled, this may execute one query for the orders and then one additional query per order for customers. That destroys performance not because any single query is terrible, but because round-trip count explodes with result size.
 
-Better answer:
+In most API read paths, the better pattern is projection:
 
-> Configure delete behavior deliberately and test it.
+```csharp
+var orders = await _dbContext.Orders
+    .AsNoTracking()
+    .Select(o => new OrderListItemDto
+    {
+        Id = o.Id,
+        CustomerName = o.Customer.Name,
+        Total = o.Total
+    })
+    .ToListAsync(ct);
+```
 
-### Mistake: Confusing navigation properties with actual database loading
+The query stays relational, the data shape stays small, and the controller receives exactly the response shape it needs.
 
-Why it is wrong:
+## Relationship Fix-Up And Tracked Graphs
 
-> A navigation property can be null or empty because it was not loaded, not because the relationship does not exist.
+When related entities are tracked in the same context, EF Core can connect their navigations automatically.
 
-Better answer:
+```csharp
+var customer = await _dbContext.Customers
+    .FirstAsync(c => c.Id == customerId, ct);
 
-> Know which loading strategy the query uses.
+var orders = await _dbContext.Orders
+    .Where(o => o.CustomerId == customerId)
+    .ToListAsync(ct);
+```
 
-### Mistake: Exposing entity graphs directly from controllers
+After both queries, EF Core can often wire:
 
-Why it is wrong:
+```text
+customer.Orders -> orders
+order.Customer  -> customer
+```
 
-> It can create circular serialization, overexpose fields, and couple API contracts to persistence shape.
+This relationship fix-up is useful within one unit of work, but it reinforces a broader lesson from the previous chapter: large tracked graphs acquire behavior that is helpful only if the unit-of-work boundary remains disciplined.
 
-Better answer:
+## `Include` Versus Projection
 
-> Return DTOs shaped for the endpoint.
+One of the most important practical choices in EF Core is deciding whether the application needs related entities or only related values.
 
-## Practice Task
+`Include` is appropriate when:
 
-Model:
+- the application will traverse a real aggregate graph;
+- update behavior depends on loaded related entities;
+- the object graph itself is the needed shape.
 
-1. customer and orders;
-2. order and order items;
-3. user and profile;
-4. student and course enrollment;
-5. projection query;
-6. `Include` query;
-7. delete behavior test;
-8. one N+1 example and fix.
+Projection is usually better when:
 
+- building API DTOs;
+- rendering list or detail pages;
+- returning read-oriented application models;
+- avoiding unnecessary tracking and navigation materialization.
+
+This distinction helps prevent one of the most common EF Core misuses: treating entity graphs as default response models.
+
+## Design Consequences
+
+Relationship design in EF Core is not finished when the mapping compiles. The important questions are whether the relationship matches real business ownership, whether delete behavior is safe, and whether related data should be loaded as entities at all.
+
+Strong EF Core codebases usually have a clear answer to all three. They model relationships deliberately, restrict or soften destructive cascades where the domain requires it, and prefer projection over graph loading in read paths that do not truly need entities.

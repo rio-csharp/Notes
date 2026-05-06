@@ -4,12 +4,6 @@
 
 Hash tables provide fast average-case lookup, insertion, and deletion.
 
-Chinese notes:
-
-- `hash table`: 哈希表.
-- `Dictionary`: 字典.
-- `HashSet`: 哈希集合.
-
 ## Dictionary
 
 ```csharp
@@ -277,27 +271,6 @@ Operations are `O(1)` because:
 
 - dictionary finds nodes quickly;
 - linked list moves/removes known nodes quickly.
-
-## Knowledge Checks
-
-### Dictionary average complexity?
-
-Average lookup/insert/delete is `O(1)`, but worst case can degrade due to collisions.
-
-### Dictionary vs HashSet?
-
-`Dictionary` maps keys to values. `HashSet` stores unique values and checks membership.
-
-### Why do hash table keys need stable equality?
-
-The dictionary uses hash code and equality to find the bucket and key. If a key's hash-related fields mutate after insertion, lookup may search the wrong bucket.
-
-## Common Mistakes
-
-- Forgetting duplicate keys.
-- Modifying dictionary while enumerating.
-- Using list for repeated membership checks.
-- Ignoring custom equality for complex keys.
 
 ## Practice Problems
 

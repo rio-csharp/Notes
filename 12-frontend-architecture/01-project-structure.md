@@ -6,23 +6,6 @@ Frontend architecture is the set of decisions that makes a frontend application 
 
 It is not only folder names. It includes:
 
-- where business features live;
-- how pages, components, hooks, API clients, and types depend on each other;
-- how state is placed;
-- how shared UI is governed;
-- how routes are loaded;
-- how environment configuration is validated;
-- how teams avoid accidental coupling.
-
-Chinese notes:
-
-- `feature-based structure`: 按业务功能组织.
-- `shared components`: 共享组件.
-- `server state`: 服务端状态.
-- `boundary`: 边界.
-- `coupling`: 耦合.
-- `public API`: 模块对外暴露的入口.
-
 ## A Practical React Structure
 
 A common structure for a medium or large React application is:
@@ -612,8 +595,6 @@ A design system is a shared language for UI.
 
 Chinese note:
 
-- `design system`: 设计系统.
-
 It usually includes:
 
 - color tokens;
@@ -1045,26 +1026,3 @@ Do components expose accessible states?
 Are tests written at the same boundaries as the architecture?
 Can obsolete feature flags be found and removed?
 ```
-
-## Knowledge Checks
-
-### Why organize by feature instead of only by technical type?
-
-Feature-based organization keeps business-related files together. It improves ownership and reduces navigation cost when changing a business workflow.
-
-### What belongs in `shared`?
-
-Reusable infrastructure that has no direct ownership by a single business feature. Examples include UI primitives, API client infrastructure, generic hooks, formatting utilities, and shared types such as pagination.
-
-### Why should shared UI avoid importing feature types?
-
-Because it reverses the dependency direction. Shared code becomes coupled to business modules, making it harder to reuse and harder to change.
-
-### What should go into global state?
-
-Only client state that is truly shared across distant parts of the app and cannot be better represented as local state, URL state, server state, or persisted backend state.
-
-### When are micro-frontends useful?
-
-They are useful when independent teams and independent deployments matter enough to justify runtime integration cost. They are usually not the first solution for a normal folder-organization problem.
-

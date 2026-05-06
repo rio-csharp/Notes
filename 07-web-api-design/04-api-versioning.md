@@ -1,284 +1,121 @@
-# API Versioning
+# Versioning And Contract Evolution
 
 ## Core Idea
 
-API versioning helps evolve APIs without breaking existing clients.
+API versioning exists because contracts outlive server deployments. Some clients cannot upgrade immediately, some are outside the team's operational control, and some depend on response shapes or behavior that would break if changed casually. Versioning is therefore not a badge of maturity by itself. It is a response to real contract longevity.
 
-Chinese notes:
+The deeper goal is not to create versions eagerly. It is to evolve the contract carefully enough that new versions are introduced only when compatibility can no longer be preserved.
 
-- `versioning`: 版本管理.
-- `breaking change`: 破坏性变更.
-- `backward compatible`: 向后兼容.
+## Conditions That Create Versioning Pressure
 
-## When Versioning Is Needed
+Versioning pressure usually rises when:
 
-Use versioning when:
-
-- external clients depend on your API;
-- mobile apps cannot update immediately;
-- multiple frontend versions exist;
+- the API is public or externally consumed;
+- mobile or installed clients update slowly;
+- multiple client versions coexist for long periods;
+- independent deployment schedules prevent coordinated upgrades;
 - breaking changes are unavoidable.
 
-Internal APIs may still need versioning if consumers deploy independently.
+Internal APIs may also need versioning if teams deploy independently and consumer coordination is weak.
 
-## Versioning Strategies
+## Backward Compatibility First
 
-### URL Versioning
+The best versioning strategy is often to avoid versioning pressure through careful backward-compatible change.
+
+Usually safe:
+
+- add an optional response field;
+- add an optional request field;
+- add a new endpoint;
+- expand behavior in a way old clients can ignore.
+
+Usually breaking:
+
+- remove or rename a field;
+- change a field type;
+- change semantic meaning;
+- change requiredness;
+- remove an endpoint;
+- change status-code behavior in a way clients depend on.
+
+This distinction matters because versioning should not become an excuse for careless contract change. It should be reserved for cases where compatibility has truly run out.
+
+## Common Versioning Strategies
+
+Several strategies are common:
+
+URL versioning:
 
 ```http
 GET /api/v1/orders
 GET /api/v2/orders
 ```
 
-Pros:
-
-- obvious;
-- easy to route;
-- easy to document.
-
-Cons:
-
-- version is in URL, not resource concept.
-
-### Query String Versioning
+Query-string versioning:
 
 ```http
 GET /api/orders?api-version=1.0
 ```
 
-### Header Versioning
+Header versioning:
 
 ```http
 GET /api/orders
 X-API-Version: 1.0
 ```
 
-### Media Type Versioning
+Media-type versioning:
 
 ```http
 Accept: application/vnd.company.orders.v1+json
 ```
 
-## ASP.NET Core URL Versioning Example
+Each is valid in the right environment. The choice depends less on ideology than on visibility, tooling support, caching implications, and how explicit the team wants version selection to be for clients.
 
-Package commonly used:
+## Versioning As Contract Narrative
 
-```powershell
-dotnet add package Asp.Versioning.Mvc
-dotnet add package Asp.Versioning.Mvc.ApiExplorer
-```
+A version is not just a routing token. It is a statement that the contract has diverged meaningfully.
 
-Registration:
+For example, changing:
 
-```csharp
-builder.Services.AddApiVersioning(options =>
-{
-    options.DefaultApiVersion = new ApiVersion(1, 0);
-    options.AssumeDefaultVersionWhenUnspecified = true;
-    options.ReportApiVersions = true;
-    options.ApiVersionReader = new UrlSegmentApiVersionReader();
-})
-.AddMvc()
-.AddApiExplorer(options =>
-{
-    options.GroupNameFormat = "'v'VVV";
-    options.SubstituteApiVersionInUrl = true;
-});
-```
+- `status` to `state`;
+- `total` from a number to an object containing amount and currency;
+- validation or state-transition behavior in incompatible ways
 
-V1 controller:
+may justify a new version because the client must now reason about a materially different representation.
 
-```csharp
-[ApiController]
-[ApiVersion(1.0)]
-[Route("api/v{version:apiVersion}/orders")]
-public sealed class OrdersV1Controller : ControllerBase
-{
-    [HttpGet("{id:int}")]
-    public ActionResult<OrderV1Response> GetById(int id)
-    {
-        return Ok(new OrderV1Response(id, "Paid", 99.99m));
-    }
-}
+The important point is that version boundaries should correspond to real contract differences, not to arbitrary release numbers.
 
-public sealed record OrderV1Response(
-    int Id,
-    string Status,
-    decimal Total);
-```
+## Deprecation And Sunset
 
-V2 controller:
+Versioning without deprecation discipline produces API sprawl. Once a new version exists, the old one needs a managed retirement path:
 
-```csharp
-[ApiController]
-[ApiVersion(2.0)]
-[Route("api/v{version:apiVersion}/orders")]
-public sealed class OrdersV2Controller : ControllerBase
-{
-    [HttpGet("{id:int}")]
-    public ActionResult<OrderV2Response> GetById(int id)
-    {
-        return Ok(new OrderV2Response(
-            id,
-            new MoneyResponse(99.99m, "USD"),
-            "paid"));
-    }
-}
+1. announce deprecation;
+2. publish a migration guide;
+3. measure client usage;
+4. support both versions for a defined period;
+5. retire the old version on a communicated sunset date.
 
-public sealed record OrderV2Response(
-    int Id,
-    MoneyResponse Total,
-    string State);
+Headers such as `Deprecation`, `Sunset`, and documentation links can make that lifecycle visible to clients rather than leaving the transition entirely to out-of-band communication.
 
-public sealed record MoneyResponse(decimal Amount, string Currency);
-```
+## Migration Guidance As Part Of The Contract
 
-This is a breaking change because `Total` changed from a number to an object and `Status` changed to `State`.
+When an API changes meaningfully, clients need more than a version number. They need a narrative:
 
-## Backward-Compatible Evolution Example
+- what changed;
+- what remains compatible;
+- what client code must do differently;
+- what the sunset date is;
+- whether old and new versions can coexist temporarily.
 
-V1 response:
+This is one reason versioning is partly a documentation problem and not only a routing problem. A technically correct multi-version API can still fail in practice if clients cannot understand how to migrate safely.
 
-```json
-{
-  "id": 1001,
-  "status": "Paid",
-  "total": 99.99
-}
-```
+## Tooling In ASP.NET Core
 
-Usually safe addition:
+ASP.NET Core supports structured versioning approaches through packages such as `Asp.Versioning.Mvc` and `Asp.Versioning.Mvc.ApiExplorer`. Those tools are useful because they keep version selection, routing, and documentation aligned.
 
-```json
-{
-  "id": 1001,
-  "status": "Paid",
-  "total": 99.99,
-  "createdAt": "2026-05-03T10:00:00Z"
-}
-```
+The tooling matters, but the architectural lesson matters more: versioning should be explicit, observable, and tied to documentation generation so that each supported contract surface remains understandable.
 
-Clients that ignore unknown fields keep working.
+## Design Consequences
 
-Risky change:
-
-```json
-{
-  "id": 1001,
-  "state": "paid",
-  "total": {
-    "amount": 99.99,
-    "currency": "USD"
-  }
-}
-```
-
-That should usually be a new version.
-
-## Breaking Changes
-
-Breaking:
-
-- remove field;
-- rename field;
-- change field type;
-- change requiredness;
-- change semantic meaning;
-- remove endpoint;
-- change status code contract;
-- change enum values unexpectedly.
-
-Usually non-breaking:
-
-- add optional response field;
-- add optional request field;
-- add new endpoint.
-
-## Deprecation
-
-Good deprecation process:
-
-1. announce version deprecation;
-2. provide migration guide;
-3. monitor usage;
-4. support both versions temporarily;
-5. remove old version after agreed date.
-
-Deprecation headers:
-
-```csharp
-public sealed class DeprecationHeaderMiddleware
-{
-    private readonly RequestDelegate _next;
-
-    public DeprecationHeaderMiddleware(RequestDelegate next)
-    {
-        _next = next;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
-    {
-        if (context.Request.Path.StartsWithSegments("/api/v1"))
-        {
-            context.Response.Headers["Deprecation"] = "true";
-            context.Response.Headers["Sunset"] = "Wed, 31 Dec 2026 23:59:59 GMT";
-            context.Response.Headers["Link"] =
-                "<https://docs.example.com/api/v2-migration>; rel=\"deprecation\"";
-        }
-
-        await _next(context);
-    }
-}
-```
-
-Migration guide outline:
-
-```text
-V1 -> V2 migration
-
-Changed:
-- `status` renamed to `state`.
-- `total` is now `{ amount, currency }`.
-
-Required client changes:
-- read `state` instead of `status`;
-- read `total.amount` and `total.currency`;
-- update tests for new response shape.
-
-Timeline:
-- V1 deprecated: 2026-06-01
-- V1 sunset: 2026-12-31
-```
-
-## Review Questions
-
-### How do you version APIs?
-
-> It depends on clients. For public APIs, I often prefer explicit URL or header versioning with OpenAPI docs. I avoid breaking changes when possible and only create a new version when compatibility cannot be maintained.
-
-### What is a breaking change?
-
-> A breaking change is any change that can cause existing clients to fail or behave incorrectly without code changes.
-
-### How do you avoid versioning too often?
-
-> Design extensible contracts, add optional fields, avoid changing semantics, and use backward-compatible evolution where possible.
-
-## Common Mistakes
-
-- No versioning for public APIs.
-- Breaking mobile clients.
-- Versioning every tiny change.
-- No deprecation policy.
-- No usage monitoring.
-- Inconsistent docs across versions.
-
-## Practice Task
-
-Design:
-
-1. v1 order response;
-2. backward-compatible v1 addition;
-3. breaking v2 change;
-4. migration guide;
-5. deprecation header.
+Versioning is a consequence of contract longevity. The healthier the API is at backward-compatible evolution, the less often a new version is needed. When a new version is necessary, it should represent a clear contract divergence, come with a migration path, and fit into a managed deprecation lifecycle rather than becoming a permanent parallel universe.

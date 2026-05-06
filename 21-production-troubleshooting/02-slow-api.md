@@ -4,14 +4,6 @@
 
 Slow API troubleshooting is about locating where time is spent and proving the bottleneck with evidence.
 
-Chinese notes:
-
-- `latency`: 延迟.
-- `p95`: 95 分位延迟.
-- `dependency`: 依赖服务.
-- `bottleneck`: 瓶颈.
-- `saturation`: 饱和.
-
 Do not start by rewriting code. Start by finding the slow segment.
 
 ## First Questions
@@ -181,8 +173,6 @@ WHERE CreatedAt >= '2026-01-01'
 ```
 
 Chinese note:
-
-- `SARGable`: 可利用索引查找的查询条件.
 
 ## EF Core Query Shape
 
@@ -518,37 +508,6 @@ Depending on cause:
 - use pagination or reduce payload.
 
 Do not increase timeout blindly. Longer timeout can make saturation worse.
-
-## Knowledge Checks
-
-### How do you locate where a slow API spends time?
-
-Use metrics for latency and error rate, then traces to break the request into spans such as middleware, SQL, Redis, external HTTP calls, serialization, and response writing.
-
-### Why is p95 more useful than average latency?
-
-Average latency can hide slow requests. p95 shows the experience of slower users and often reveals tail latency problems.
-
-### Why can increasing timeout make things worse?
-
-Longer timeouts keep requests, connections, and threads occupied for longer. Under load, this can increase queueing and reduce throughput.
-
-### Why should slow SQL be investigated with actual plans?
-
-The actual execution plan shows what SQL Server really did, including scans, seeks, joins, row counts, and expensive operators.
-
-## Common Mistakes
-
-- Guessing without metrics.
-- Looking only at average latency.
-- Increasing timeout blindly.
-- Ignoring recent changes.
-- Checking only application code and not database.
-- Missing N+1 queries.
-- Ignoring connection pool exhaustion.
-- Ignoring lock waits.
-- No trace or correlation ID.
-- Making multiple changes at once.
 
 ## Practice Task
 

@@ -4,15 +4,6 @@
 
 CI/CD turns a code change into a verified, repeatable release.
 
-Chinese notes:
-
-- `CI`: Continuous Integration, 持续集成.
-- `CD`: Continuous Delivery or Continuous Deployment, 持续交付或持续部署.
-- `pipeline`: 流水线.
-- `artifact`: 构建产物.
-- `promotion`: 环境晋级, for example from test to staging to production.
-- `smoke test`: 冒烟测试, a small set of checks that confirms the deployed system basically works.
-
 The most important principle is:
 
 > Build once, test the same artifact, deploy the same artifact.
@@ -276,9 +267,6 @@ Not every system needs containers. App Service and IIS deployments often use pub
 
 Artifacts make deployment auditable:
 
-- which commit produced it;
-- which tests ran before it;
-- which environment received it;
 - who approved the promotion.
 
 ## Environment Configuration
@@ -378,8 +366,6 @@ Release 3:
 ```
 
 Chinese note:
-
-- `expand-contract`: 先扩展再收缩, 用多次发布降低数据库变更风险.
 
 ## Deployment Strategies
 
@@ -540,8 +526,6 @@ GitHub Actions job
 
 Chinese note:
 
-- `OIDC`: OpenID Connect, 常用于 CI/CD 到云平台的短期身份认证.
-
 This reduces the risk of leaked permanent credentials.
 
 ## Common Pipeline Failures
@@ -554,41 +538,6 @@ This reduces the risk of leaked permanent credentials.
 | Rollback fails | Database changed incompatibly | Expand-contract migrations |
 | Production uses untested code | Rebuilt during deploy | Build once, promote artifact |
 | Secrets appear in logs | Echoing env vars or verbose tools | Mask secrets and reduce logging |
-
-## Knowledge Checks
-
-### What should a good CI pipeline verify?
-
-It should restore dependencies, build the backend and frontend, run unit/integration/frontend tests, check formatting or linting, scan dependencies when possible, and produce a deployable artifact or image.
-
-### Why is "build once, deploy many times" important?
-
-Because the artifact tested in CI should be the same artifact deployed to staging and production. If each environment rebuilds separately, dependency resolution or build-time configuration can change the output.
-
-### Why are database rollbacks hard?
-
-Schema and data changes may not be reversible. Dropping a column, transforming data, or changing message formats can make an old application version incompatible. Safer systems use backward-compatible migrations and feature flags.
-
-### What makes a smoke test useful?
-
-It is fast, stable, and checks the most important deployed paths: health endpoint, version endpoint, authentication basics, and one or two core API calls.
-
-### When would canary deployment be useful?
-
-Canary deployment is useful when a change has performance or correctness risk and the system has enough traffic and observability to compare the new version against the old version.
-
-## Common Mistakes
-
-- Deploying artifacts that were not tested.
-- Rebuilding separately for each environment.
-- Treating frontend build variables as secrets.
-- Running destructive migrations automatically with no review.
-- No smoke tests after deployment.
-- No clear rollback or roll-forward plan.
-- Giving CI production credentials for all branches.
-- Ignoring cached static assets and CDN behavior.
-- Not recording which version is running in each environment.
-- No monitoring after deployment.
 
 ## Practice Task
 

@@ -2,43 +2,21 @@
 
 ## Core Idea
 
-Authentication identifies who the caller is.
+Authentication establishes who the caller is. Authorization decides what that authenticated caller is allowed to do. In ASP.NET Core, these are distinct but closely connected parts of the request pipeline, and many security bugs come from confusing one for the other or from oversimplifying where each decision should happen.
 
-Authorization decides what the caller is allowed to do.
+This chapter treats security as an application boundary concern rather than a collection of attributes to memorize. The goal is to understand how identity enters the system, how access decisions are evaluated, and where static policy checks stop being enough.
 
-Chinese notes:
+## Identity In The Request Pipeline
 
-- `authentication`: 认证.
-- `authorization`: 授权.
-- `claims`: 声明.
-- `policy`: 策略.
-- `scheme`: 认证方案.
-- `principal`: 用户主体.
-- `tenant`: 租户.
-
-A Key takeaway:
-
-> Authentication builds `HttpContext.User`. Authorization uses `HttpContext.User` plus policies, roles, claims, or resource rules to decide whether access is allowed.
-
-Frontend checks are not security. They only improve user experience. The backend is the real security boundary.
-
-## Request Flow
-
-Typical API request flow:
+In a typical API pipeline, routing selects an endpoint, authentication attempts to establish the caller's identity, and authorization evaluates whether that caller may access the selected endpoint.
 
 ```text
 HTTP request
   -> routing
   -> authentication middleware
-       validates token/cookie/API key
-       sets HttpContext.User
   -> authorization middleware
-       checks endpoint metadata such as [Authorize]
-       evaluates roles, claims, policies, requirements
-  -> controller / Minimal API endpoint
+  -> endpoint execution
 ```
-
-Order matters:
 
 ```csharp
 app.UseRouting();
@@ -49,21 +27,26 @@ app.UseAuthorization();
 app.MapControllers();
 ```
 
-If `UseAuthorization` runs before `UseAuthentication`, authorization may see an anonymous user and reject requests incorrectly.
+That order matters because authorization depends on two things that must already exist:
+
+- an authenticated or anonymous `HttpContext.User`;
+- endpoint metadata such as `[Authorize]`, policies, or scheme requirements.
+
+If authorization runs before authentication, the system often evaluates the request as anonymous. If routing has not yet selected an endpoint, endpoint-specific authorization metadata is unavailable.
 
 ## Authentication Schemes
 
-An authentication scheme tells ASP.NET Core how to authenticate a request.
+An authentication scheme tells ASP.NET Core how to interpret and validate credentials for a request.
 
-Common schemes:
+Common schemes include:
 
 - JWT bearer tokens for APIs;
-- cookies for browser-based server-rendered apps;
-- OpenID Connect for interactive login;
-- API keys for internal integrations;
-- multiple schemes in the same application.
+- cookies for browser-oriented server-side applications;
+- OpenID Connect for interactive external sign-in flows;
+- API keys for certain internal integrations;
+- multiple schemes within the same application.
 
-JWT example:
+JWT bearer authentication is common in APIs:
 
 ```csharp
 builder.Services
@@ -86,32 +69,13 @@ builder.Services
 builder.Services.AddAuthorization();
 ```
 
-What JWT bearer authentication does:
+What matters here is not the registration syntax alone, but the trust model. The token is not accepted because it looks like JSON or contains plausible claims. It is accepted only if the configured authentication handler can validate it according to the expected issuer, audience, signature, and lifetime rules.
 
-1. Reads the `Authorization: Bearer <token>` header.
-2. Validates the token format.
-3. Validates the signature.
-4. Validates issuer (`iss`).
-5. Validates audience (`aud`).
-6. Validates expiration (`exp`) and not-before (`nbf`).
-7. Creates a `ClaimsPrincipal`.
-8. Assigns it to `HttpContext.User`.
+## `ClaimsPrincipal` And Identity Data
 
-Important warning:
+Once authentication succeeds, ASP.NET Core assigns a `ClaimsPrincipal` to `HttpContext.User`.
 
-> A JWT is not trusted just because it is valid JSON. It must be cryptographically validated.
-
-## ClaimsPrincipal
-
-After authentication succeeds, ASP.NET Core sets:
-
-```csharp
-HttpContext.User
-```
-
-It is a `ClaimsPrincipal`. A principal contains one or more identities. Each identity contains claims.
-
-Example claims:
+That principal may contain claims such as:
 
 ```text
 sub: 9f31b2
@@ -121,7 +85,7 @@ permission: orders.manage
 tenant_id: tenant-123
 ```
 
-Reading claims:
+Code can then read those claims:
 
 ```csharp
 using System.Security.Claims;
@@ -134,13 +98,11 @@ var tenantId = User.FindFirstValue("tenant_id");
 var permissions = User.FindAll("permission").Select(c => c.Value).ToHashSet();
 ```
 
-Important:
+Claims are useful because they allow access decisions to be expressed without querying storage on every request. They are not, however, a perfect substitute for live authorization data. Claims can become stale, token size can grow, and some decisions depend on current server-side state rather than on static token content.
 
-> Claims are statements from the identity provider. They are not always fresh. Do not put large, sensitive, or frequently changing authorization data only inside tokens.
+## Roles And Their Limits
 
-## Role-Based Authorization
-
-Role checks are simple:
+Role-based authorization is simple and often useful for coarse-grained access control.
 
 ```csharp
 [Authorize(Roles = "Admin")]
@@ -151,14 +113,14 @@ public async Task<IActionResult> DeleteUser(int id)
 }
 ```
 
-Use roles for coarse-grained permissions:
+Roles work well for broad groupings such as:
 
-- `Admin`;
-- `Manager`;
-- `Support`;
-- `ReadOnly`.
+- `Admin`
+- `Manager`
+- `Support`
+- `ReadOnly`
 
-Do not use roles for every fine-grained business rule. Role explosion becomes hard to maintain:
+They become less effective when a system tries to encode every fine-grained business rule as another role. Role explosion is a common result:
 
 ```text
 OrderAdmin
@@ -168,13 +130,11 @@ OrderEURefundApprover
 OrderUSRefundApprover
 ```
 
-Better:
-
-> Use roles for broad grouping and policies/permissions for fine-grained access.
+At that point, roles stop being broad identity groupings and start becoming a brittle permission system disguised as one. ASP.NET Core's policy system exists partly to avoid that collapse.
 
 ## Policy-Based Authorization
 
-Policy-based authorization defines named rules.
+Policy-based authorization lets the application define named access rules in a more expressive and centralized way.
 
 ```csharp
 builder.Services.AddAuthorization(options =>
@@ -187,8 +147,6 @@ builder.Services.AddAuthorization(options =>
 });
 ```
 
-Usage:
-
 ```csharp
 [Authorize(Policy = "CanManageOrders")]
 [HttpPut("{id:int}")]
@@ -198,16 +156,11 @@ public async Task<IActionResult> UpdateOrder(int id, UpdateOrderRequest request)
 }
 ```
 
-Why policies are review-friendly:
+Policies improve maintainability because they separate endpoint declarations from the details of the rule being enforced. They also scale more naturally when several endpoints depend on the same access model.
 
-- they centralize access rules;
-- they are more expressive than roles;
-- they are testable;
-- they support custom requirements and handlers.
+## Custom Requirements And Handlers
 
-## Custom Requirement And Handler
-
-Requirement:
+When authorization logic goes beyond simple claim checks, ASP.NET Core supports custom requirements and handlers.
 
 ```csharp
 public sealed class MinimumAgeRequirement : IAuthorizationRequirement
@@ -220,8 +173,6 @@ public sealed class MinimumAgeRequirement : IAuthorizationRequirement
     }
 }
 ```
-
-Handler:
 
 ```csharp
 public sealed class MinimumAgeHandler
@@ -256,8 +207,6 @@ public sealed class MinimumAgeHandler
 }
 ```
 
-Registration:
-
 ```csharp
 builder.Services.AddSingleton<IAuthorizationHandler, MinimumAgeHandler>();
 
@@ -270,32 +219,18 @@ builder.Services.AddAuthorization(options =>
 });
 ```
 
-Usage:
-
-```csharp
-[Authorize(Policy = "AtLeast18")]
-public IActionResult AdultsOnly()
-{
-    return Ok();
-}
-```
-
-Important detail:
-
-> Authorization handlers can call `context.Succeed(requirement)`. If no handler succeeds for required requirements, authorization fails.
+This model is valuable because it keeps authorization logic as first-class policy logic rather than scattering complex access decisions across controller methods.
 
 ## Resource-Based Authorization
 
-Use resource-based authorization when the decision depends on the specific resource.
+Static endpoint metadata is not always enough. Many real access decisions depend on the specific resource being requested.
 
-Examples:
+Examples include:
 
-- user can view only their own order;
-- manager can approve only orders in their region;
-- tenant admin can manage users only within their tenant;
-- owner can edit a document unless it is locked.
-
-Example resource:
+- a user may view only their own order;
+- a tenant administrator may manage users only in their tenant;
+- a manager may approve only orders in their region;
+- a document may be editable only if the caller owns it and it is not locked.
 
 ```csharp
 public sealed class Order
@@ -306,8 +241,6 @@ public sealed class Order
     public OrderStatus Status { get; init; }
 }
 ```
-
-Handler:
 
 ```csharp
 public sealed class SameTenantOrderRequirement : IAuthorizationRequirement
@@ -336,22 +269,6 @@ public sealed class SameTenantOrderHandler
 }
 ```
 
-Policy:
-
-```csharp
-builder.Services.AddSingleton<IAuthorizationHandler, SameTenantOrderHandler>();
-
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("SameTenantOrder", policy =>
-    {
-        policy.Requirements.Add(new SameTenantOrderRequirement());
-    });
-});
-```
-
-Controller:
-
 ```csharp
 [Authorize]
 [HttpGet("{id:int}")]
@@ -378,55 +295,21 @@ public async Task<IActionResult> GetOrder(int id)
 }
 ```
 
-Why resource-based authorization matters:
+This pattern is essential because a role or claim may show that the caller belongs to a broad category, while resource-based authorization determines whether the caller may access this particular resource.
 
-> `[Authorize(Roles = "Customer")]` can prove the user is a customer, but it cannot prove this user owns this specific order.
+## `401` Versus `403`
 
-## 401 vs 403
+One of the most important HTTP distinctions in security handling is the difference between `401 Unauthorized` and `403 Forbidden`.
 
-`401 Unauthorized` means the caller is not authenticated.
+`401` means the request is not authenticated successfully. Typical causes include missing credentials, invalid signatures, expired tokens, or wrong issuer or audience.
 
-Examples:
+`403` means the caller is authenticated but still not permitted to perform the action.
 
-- missing token;
-- invalid token;
-- expired token;
-- invalid signature;
-- wrong issuer or audience.
+This distinction matters because it communicates a different remediation path to the client. A `401` response asks the client to authenticate. A `403` response says that authentication succeeded but access is still denied.
 
-`403 Forbidden` means the caller is authenticated but not allowed.
+## Multiple Schemes And Mixed Surfaces
 
-Examples:
-
-- authenticated user lacks required role;
-- authenticated user lacks permission claim;
-- authenticated user tries to access another tenant's resource;
-- authenticated user tries an action not allowed by resource state.
-
-In controllers:
-
-```csharp
-if (User.Identity?.IsAuthenticated != true)
-{
-    return Unauthorized();
-}
-
-return Forbid();
-```
-
-Strong Practical explanation:
-
-> 401 asks the client to authenticate. 403 says authentication succeeded, but authorization failed.
-
-## Multiple Authentication Schemes
-
-A real app may support multiple schemes:
-
-- JWT for public APIs;
-- cookies for admin UI;
-- API key for internal services.
-
-Example:
+Real applications sometimes expose more than one kind of surface. A system may serve JWT-protected APIs, cookie-protected admin pages, and internal API-key-protected integrations all at once.
 
 ```csharp
 builder.Services
@@ -439,7 +322,7 @@ builder.Services
     .AddCookie("AdminCookie");
 ```
 
-Choose a scheme on an endpoint:
+Endpoints can then require particular schemes explicitly:
 
 ```csharp
 [Authorize(AuthenticationSchemes = "Bearer")]
@@ -449,75 +332,15 @@ public IActionResult ApiOnly()
 }
 ```
 
-Policy with scheme:
+The presence of multiple schemes is another reason to treat authentication and authorization as explicit architectural concerns rather than as invisible defaults.
 
-```csharp
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("ApiUser", policy =>
-    {
-        policy.AuthenticationSchemes.Add("Bearer");
-        policy.RequireAuthenticatedUser();
-    });
-});
-```
+## JWT Trust, Claim Mapping, And Staleness
 
-## JWT Security Details
+JWT-based systems deserve a few specific cautions.
 
-### What should you validate in a JWT?
+Validation should include signature checking, issuer validation, audience validation, lifetime validation, and appropriate signing-key expectations. Without those checks, a token is merely untrusted client input.
 
-Validate:
-
-- signature;
-- issuer;
-- audience;
-- expiration;
-- not-before time;
-- signing key;
-- algorithm expectations.
-
-### Can the frontend decode a JWT?
-
-Yes, but decoding is not validation.
-
-The frontend can decode token claims for display logic. The backend must validate the token cryptographically.
-
-### Should you store permissions in JWT?
-
-It depends.
-
-Benefits:
-
-- fast authorization checks;
-- fewer database calls;
-- works well for stable permissions.
-
-Risks:
-
-- token may contain stale permissions until it expires;
-- large tokens increase request size;
-- sensitive information may leak if stored in readable claims.
-
-Better answer:
-
-> I put stable identity and coarse permission data in tokens. For sensitive or frequently changing authorization decisions, I query server-side data or use short token lifetimes and refresh strategies.
-
-### What is claim mapping?
-
-Different identity providers use different claim names.
-
-Examples:
-
-```text
-sub
-nameid
-roles
-role
-permissions
-scope
-```
-
-In .NET, role and name claim types can be configured:
+Claim mapping also matters because identity providers do not all name claims the same way. If the provider emits `role`, `roles`, `sub`, or custom permission claims under different names, ASP.NET Core may need explicit configuration to interpret them correctly.
 
 ```csharp
 options.TokenValidationParameters = new TokenValidationParameters
@@ -527,24 +350,19 @@ options.TokenValidationParameters = new TokenValidationParameters
 };
 ```
 
-Common issue:
+Finally, claims in tokens are only as fresh as the token itself. Stable identity and coarse authorization data often fit tokens well. Highly sensitive or frequently changing authorization decisions often still require server-side state, shorter token lifetimes, or refresh mechanisms.
 
-> The token contains a role claim, but `[Authorize(Roles = "Admin")]` does not work because the role claim type does not match ASP.NET Core's expected role claim type.
+## API Keys And Internal Integrations
 
-## API Key Authentication Sketch
+API keys can still be appropriate for some internal or machine-oriented integrations, but they should be treated as credentials, not as a lightweight shortcut that avoids security design.
 
-For internal integrations, an API key may be acceptable if secured properly.
+A production-ready API-key system usually requires:
 
-Simple endpoint filter or middleware can check a header, but a production-quality solution should:
-
-- store only hashed API keys;
-- rotate keys;
-- scope keys to permissions;
-- log key usage;
-- avoid putting keys in query strings;
-- use HTTPS only.
-
-Example middleware sketch:
+- HTTPS-only transport;
+- hashed storage of keys rather than plaintext persistence;
+- rotation capability;
+- scoped permissions;
+- auditability and usage logging.
 
 ```csharp
 public sealed class ApiKeyMiddleware
@@ -571,106 +389,10 @@ public sealed class ApiKeyMiddleware
 }
 ```
 
-## Review Questions
+Even this simple example illustrates the broader principle that API keys belong inside the same explicit authentication and authorization boundary as any other credential type.
 
-### Authentication vs authorization?
+## Security Boundary Discipline
 
-Authentication verifies identity. Authorization checks access rights after identity is known.
+One final principle ties the chapter together: frontend checks are not the security boundary. They may improve user experience, but they do not enforce anything once a client can call the API directly.
 
-### What does `UseAuthentication` do?
-
-It runs the configured authentication handlers, validates credentials such as JWTs or cookies, and sets `HttpContext.User` when authentication succeeds.
-
-### What does `UseAuthorization` do?
-
-It reads endpoint authorization metadata such as `[Authorize]`, evaluates policies, roles, claims, and requirements, and allows or rejects the request.
-
-### What is policy-based authorization?
-
-Policy-based authorization defines named access rules made of requirements. Handlers evaluate those requirements. It is more flexible than simple role checks.
-
-### When do you use resource-based authorization?
-
-Use it when access depends on a specific object loaded from storage, such as order owner, tenant, department, or workflow state.
-
-### Why is frontend authorization not enough?
-
-Because users can call APIs directly with tools like curl, Postman, browser dev tools, or custom scripts. The backend must enforce authorization.
-
-### How do you handle multi-tenant authorization?
-
-Store tenant identity in trusted server-side data or validated claims, filter queries by tenant, and still check resource ownership before returning or modifying data. Never trust tenant IDs sent from the frontend without validation.
-
-## Common Mistakes
-
-### Mistake: `UseAuthorization` before `UseAuthentication`
-
-Why it is wrong:
-
-> Authorization needs an authenticated principal. If authentication has not run, the user may appear anonymous.
-
-Better answer:
-
-> Run `UseAuthentication()` before `UseAuthorization()`.
-
-### Mistake: Trusting frontend permission checks
-
-Why it is wrong:
-
-> Frontend code is controlled by the user. Hidden buttons do not stop direct API calls.
-
-Better answer:
-
-> Enforce all authorization on the backend. Use frontend checks only for UX.
-
-### Mistake: Only using roles for resource-level rules
-
-Why it is wrong:
-
-> A role can say a user is a customer, but it cannot say the user owns order `123`.
-
-Better answer:
-
-> Use resource-based authorization for ownership, tenant, department, or state-dependent access.
-
-### Mistake: Returning wrong status codes
-
-Why it is wrong:
-
-> `401` and `403` communicate different problems to clients and security tools.
-
-Better answer:
-
-> Return `401` when authentication is missing or invalid. Return `403` when the authenticated user lacks permission.
-
-### Mistake: Not validating token issuer or audience
-
-Why it is wrong:
-
-> A token issued for another API or from another issuer may be accepted incorrectly.
-
-Better answer:
-
-> Validate issuer, audience, lifetime, signature, and signing key.
-
-### Mistake: Putting sensitive data in claims
-
-Why it is wrong:
-
-> JWT payloads are usually base64url-encoded, not encrypted. Clients can read them.
-
-Better answer:
-
-> Keep tokens small and avoid sensitive data. Store sensitive information server-side.
-
-## Practice Task
-
-Implement:
-
-1. JWT bearer authentication;
-2. role-based admin endpoint;
-3. permission-based policy;
-4. custom requirement and handler;
-5. resource-based order ownership check;
-6. correct `401` vs `403` behavior;
-7. a short explanation of why frontend checks are not a security boundary.
+The real boundary is always the server-side pipeline that validates credentials, constructs identity, evaluates policy, and verifies access against both endpoint rules and resource state. Multi-tenant systems especially must keep tenant scope, ownership checks, and resource authorization on the server, regardless of what the frontend UI suggests the user should or should not be able to do.

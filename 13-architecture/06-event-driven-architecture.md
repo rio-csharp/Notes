@@ -4,13 +4,6 @@
 
 Event-driven architecture uses events to communicate that something happened.
 
-Chinese notes:
-
-- `event`: 事件.
-- `producer`: 生产者.
-- `consumer`: 消费者.
-- `eventual consistency`: 最终一致性.
-
 Example events:
 
 ```text
@@ -380,29 +373,6 @@ Version 2 adds `currency`:
 ```
 
 Avoid removing or renaming fields without a migration period.
-
-## Knowledge Checks
-
-### What is event-driven architecture?
-
-It is an architecture where components communicate by publishing and consuming events that represent facts that happened in the system.
-
-### What are the trade-offs?
-
-It decouples components and improves async scalability, but introduces eventual consistency, duplicate delivery, ordering challenges, and harder debugging.
-
-### Domain event vs integration event?
-
-Domain events are internal business events. Integration events are external contracts published to other systems.
-
-## Common Mistakes
-
-- Treating events as synchronous commands.
-- No idempotent consumers.
-- No schema versioning.
-- No dead-letter strategy.
-- Publishing event outside transaction without outbox.
-- Events too large or too vague.
 
 ## Practice Task
 

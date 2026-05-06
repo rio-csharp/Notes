@@ -1,335 +1,108 @@
-# API Idempotency
+# Idempotency, Retries, And Duplicate-Safe Operations
 
 ## Core Idea
 
-Idempotency（幂等性）means repeated requests have the same effect as one request.
+Networks fail, clients retry, proxies repeat requests, and users submit forms twice. Idempotency is the discipline that keeps those ordinary failures from producing duplicate business effects. It is therefore not a niche payment concern. It is a core reliability property for APIs that create or trigger important state transitions.
 
-This is critical for:
+This chapter focuses on how APIs remain safe under repeated delivery and why that safety must be designed rather than assumed.
 
-- payments;
-- order creation;
-- refunds;
-- webhooks;
-- message consumers;
-- retry-safe APIs.
+## HTTP Idempotency And Business Idempotency
 
-## HTTP Method Idempotency
+Some HTTP methods are naturally idempotent by semantics, such as `PUT` and `DELETE`, at least when implemented correctly. `POST` is not idempotent by default because repeated submission often creates repeated side effects.
 
-Generally:
+That distinction matters, but it is only part of the story. Business idempotency asks a stronger question: if the same intent is delivered again, will the system accidentally perform it twice?
 
-- `GET`: idempotent and safe;
-- `PUT`: idempotent;
-- `DELETE`: idempotent by effect;
-- `POST`: not idempotent by default.
+For operations such as:
 
-POST can be made idempotent using an idempotency key.
+- payment creation;
+- order submission;
+- refund requests;
+- webhook processing;
+- message consumption;
 
-## Idempotency Key
+the answer must often be no, even when the transport is retry-prone.
 
-Request:
+## Idempotency Keys
+
+One common design is the idempotency key:
 
 ```http
 POST /api/orders
 Idempotency-Key: create-order-user-123-cart-456
 ```
 
-Server stores:
-
-- key;
-- request hash;
-- response;
-- status;
-- expiration.
-
-## Table Design
-
-```sql
-CREATE TABLE IdempotencyKeys
-(
-    KeyValue NVARCHAR(200) PRIMARY KEY,
-    RequestHash NVARCHAR(256) NOT NULL,
-    ResponseJson NVARCHAR(MAX) NULL,
-    StatusCode INT NULL,
-    CreatedAt DATETIMEOFFSET NOT NULL,
-    ExpiresAt DATETIMEOFFSET NOT NULL
-);
-```
-
-More complete SQL Server design:
-
-```sql
-CREATE TABLE IdempotencyKeys
-(
-    KeyValue NVARCHAR(200) NOT NULL,
-    RequestHash NVARCHAR(128) NOT NULL,
-    Status NVARCHAR(30) NOT NULL,
-    StatusCode INT NULL,
-    ResponseJson NVARCHAR(MAX) NULL,
-    ResourceType NVARCHAR(100) NULL,
-    ResourceId NVARCHAR(100) NULL,
-    CreatedAt DATETIME2 NOT NULL,
-    ExpiresAt DATETIME2 NOT NULL,
-    CONSTRAINT PK_IdempotencyKeys PRIMARY KEY (KeyValue)
-);
-
-CREATE INDEX IX_IdempotencyKeys_ExpiresAt
-ON IdempotencyKeys (ExpiresAt);
-```
-
-## Flow
-
-```text
-1. Client sends request with idempotency key.
-2. Server checks whether key exists.
-3. If same key and same request hash exists, return stored response.
-4. If same key but different request hash, return 409 Conflict.
-5. If key does not exist, process request and store response.
-```
-
-## Example
-
-```csharp
-public async Task<OrderDto> CreateOrderAsync(
-    CreateOrderRequest request,
-    string idempotencyKey,
-    CancellationToken ct)
-{
-    var requestHash = _hasher.Hash(request);
-
-    var existing = await _dbContext.IdempotencyKeys
-        .FirstOrDefaultAsync(k => k.KeyValue == idempotencyKey, ct);
-
-    if (existing is not null)
-    {
-        if (existing.RequestHash != requestHash)
-        {
-            throw new ConflictException("Idempotency key reused with different request.");
-        }
-
-        return JsonSerializer.Deserialize<OrderDto>(existing.ResponseJson!)!;
-    }
-
-    var order = new Order(request.CustomerId);
-    _dbContext.Orders.Add(order);
-
-    await _dbContext.SaveChangesAsync(ct);
-
-    var response = new OrderDto(order.Id, order.Status.ToString());
-
-    _dbContext.IdempotencyKeys.Add(new IdempotencyKey
-    {
-        KeyValue = idempotencyKey,
-        RequestHash = requestHash,
-        ResponseJson = JsonSerializer.Serialize(response),
-        StatusCode = StatusCodes.Status201Created,
-        CreatedAt = DateTimeOffset.UtcNow,
-        ExpiresAt = DateTimeOffset.UtcNow.AddHours(24)
-    });
-
-    await _dbContext.SaveChangesAsync(ct);
-
-    return response;
-}
-```
-
-Note:
-
-In real implementation, the order insert and idempotency record should be protected against races with a transaction or unique constraint handling. The simplified example above shows the idea, but the complete version below is safer.
-
-## Complete ASP.NET Core Example
-
-Header requirement:
-
-```csharp
-public static class IdempotencyHeaders
-{
-    public const string HeaderName = "Idempotency-Key";
-}
-```
-
-Entity:
-
-```csharp
-public sealed class IdempotencyKey
-{
-    public string KeyValue { get; set; } = "";
-    public string RequestHash { get; set; } = "";
-    public int? StatusCode { get; set; }
-    public string? ResponseJson { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset ExpiresAt { get; set; }
-}
-```
-
-Request hash:
-
-```csharp
-public static class RequestHasher
-{
-    public static string Hash<T>(T value)
-    {
-        var json = JsonSerializer.Serialize(value);
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
-        return Convert.ToHexString(bytes);
-    }
-}
-```
-
-Controller:
-
-```csharp
-[HttpPost]
-public async Task<IActionResult> Create(
-    CreateOrderRequest request,
-    [FromHeader(Name = IdempotencyHeaders.HeaderName)] string? idempotencyKey,
-    CancellationToken ct)
-{
-    if (string.IsNullOrWhiteSpace(idempotencyKey))
-    {
-        return BadRequest("Idempotency-Key header is required.");
-    }
-
-    var result = await _orders.CreateOrderAsync(request, idempotencyKey, ct);
-
-    return StatusCode(result.StatusCode, result.Response);
-}
-```
-
-Result wrapper:
-
-```csharp
-public sealed record IdempotentResult<T>(int StatusCode, T Response);
-```
-
-Safer service flow:
-
-```csharp
-public async Task<IdempotentResult<OrderDto>> CreateOrderAsync(
-    CreateOrderRequest request,
-    string idempotencyKey,
-    CancellationToken ct)
-{
-    var requestHash = RequestHasher.Hash(request);
-
-    await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
-
-    var existing = await _dbContext.IdempotencyKeys
-        .SingleOrDefaultAsync(x => x.KeyValue == idempotencyKey, ct);
+The server stores:
 
-    if (existing is not null)
-    {
-        if (existing.RequestHash != requestHash)
-        {
-            throw new ConflictException("Idempotency key was reused with a different request.");
-        }
-
-        var existingResponse = JsonSerializer.Deserialize<OrderDto>(existing.ResponseJson!)!;
-        return new IdempotentResult<OrderDto>(existing.StatusCode ?? 200, existingResponse);
-    }
+- the key;
+- a hash of the request intent;
+- the resulting status code;
+- the serialized response or resource reference;
+- an expiration window.
 
-    var order = new Order(request.CustomerId);
-    _dbContext.Orders.Add(order);
+If the same key arrives again with the same request identity, the server returns the original result rather than performing the operation twice. If the same key is reused with a meaningfully different request, the server should treat that as a contract conflict rather than as a retry.
 
-    await _dbContext.SaveChangesAsync(ct);
+## Storage And Race Safety
 
-    var response = new OrderDto(order.Id, order.Status.ToString());
+Idempotency design is only reliable if the storage boundary is race-safe. That usually means a unique constraint on the key and a transactional design that keeps the business write and the idempotency record aligned.
 
-    _dbContext.IdempotencyKeys.Add(new IdempotencyKey
-    {
-        KeyValue = idempotencyKey,
-        RequestHash = requestHash,
-        StatusCode = StatusCodes.Status201Created,
-        ResponseJson = JsonSerializer.Serialize(response),
-        CreatedAt = DateTimeOffset.UtcNow,
-        ExpiresAt = DateTimeOffset.UtcNow.AddHours(24)
-    });
+The naive implementation pattern is:
 
-    await _dbContext.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
+1. check whether the key exists;
+2. if not, perform the operation;
+3. insert the key record.
 
-    return new IdempotentResult<OrderDto>(StatusCodes.Status201Created, response);
-}
-```
+That pattern is vulnerable to concurrent races unless the write path is protected properly.
 
-Important production notes:
+The stronger pattern is:
 
-- the primary key or unique constraint on `KeyValue` handles concurrent duplicate requests;
-- if two identical requests race, one may fail with a unique constraint violation and should reload the stored response;
-- store enough response data to replay the same result;
-- expire old keys with a cleanup job;
-- do not use only in-memory storage for horizontally scaled APIs.
+- use a unique key in storage;
+- keep the business effect and the idempotency record within one atomic boundary when possible;
+- handle concurrent duplicate insertion safely by reloading the stored result.
 
-## Webhook Idempotency
+## Request Identity And Conflict Detection
 
-Webhook providers often retry events.
+The idempotency key alone is not enough. The server should also know whether the repeated request is semantically the same request.
 
-```sql
-CREATE TABLE ProcessedWebhookEvents
-(
-    Provider NVARCHAR(100) NOT NULL,
-    EventId NVARCHAR(200) NOT NULL,
-    ProcessedAt DATETIME2 NOT NULL,
-    CONSTRAINT PK_ProcessedWebhookEvents PRIMARY KEY (Provider, EventId)
-);
-```
+That is why implementations often store a request hash. If the same key is reused with a different payload, the system should not silently replay the prior response or create a second resource. It should surface a conflict because the caller is no longer asking to repeat the same intent.
 
-Processing idea:
+This is a subtle but important contract principle: retries should be repeatable, not ambiguous.
 
-```csharp
-public async Task HandleWebhookAsync(WebhookEvent webhook, CancellationToken ct)
-{
-    var alreadyProcessed = await _dbContext.ProcessedWebhookEvents
-        .AnyAsync(x => x.Provider == webhook.Provider && x.EventId == webhook.EventId, ct);
+## Response Replay
 
-    if (alreadyProcessed)
-    {
-        return;
-    }
+A good idempotency implementation often stores enough result information to replay the original response or reconstruct it reliably. This is valuable because the client experience should remain consistent under retry.
 
-    await ApplyWebhookBusinessChangeAsync(webhook, ct);
+If the first attempt returned `201 Created`, the retry should normally return the same effective outcome rather than a different ad hoc success shape.
 
-    _dbContext.ProcessedWebhookEvents.Add(new ProcessedWebhookEvent
-    {
-        Provider = webhook.Provider,
-        EventId = webhook.EventId,
-        ProcessedAt = DateTimeOffset.UtcNow
-    });
+That consistency makes idempotency visible to the client as a stable contract rather than as a server-side hidden optimization.
 
-    await _dbContext.SaveChangesAsync(ct);
-}
-```
+## Webhooks And Message Consumers
 
-For high concurrency, use a unique constraint and handle duplicate insert errors safely.
+Idempotency is not limited to synchronous HTTP clients. Webhooks and message consumers often receive duplicate delivery by design. In those cases, duplicate protection usually depends on an externally supplied event identifier or message identifier recorded in durable storage.
 
-## Review Questions
+The same principles apply:
 
-### Why is idempotency important?
+- deduplicate by stable identity;
+- make processing safe under repeat delivery;
+- rely on durable uniqueness rather than in-memory assumptions;
+- keep the side effect and the "processed" record aligned as closely as possible.
 
-> Networks fail and clients retry. Without idempotency, retries can create duplicate orders, duplicate payments, or duplicate refunds.
+This is why idempotency belongs in a broader reliability chapter rather than in a payment-only appendix.
 
-### How do you implement idempotency for POST?
+## Expiration And Operational Limits
 
-> Require an idempotency key, store request hash and response with a unique constraint, return the previous response for duplicate retries, and reject same key with different payload.
+Idempotency records should not remain forever without policy. They need retention rules, cleanup strategy, and clear scope.
 
-### Is idempotency only an API concern?
+Questions that matter include:
 
-> No. Message consumers and webhook handlers also need idempotency because duplicate delivery is common.
+- how long clients are allowed to retry;
+- whether idempotency scope is global or tenant-local;
+- how large stored replay payloads may become;
+- what happens when records expire and the client retries later.
 
-## Common Mistakes
+These are operational design choices as much as API design choices.
 
-- No unique constraint.
-- Same key allowed with different payload.
-- Key never expires.
-- Idempotency implemented only in memory.
-- Not making payment/refund APIs idempotent.
-- Returning duplicate side effects on retry.
+## Design Consequences
 
-## Practice Task
+Idempotency is what makes important operations safe under normal network unreliability. The contract should distinguish repeated intent from conflicting intent, the storage layer should enforce uniqueness safely, and the system should replay prior outcomes consistently enough that clients can retry without fear of duplicate business effects.
 
-Implement idempotency for:
-
-1. create order;
-2. create payment;
-3. refund payment;
-4. webhook event processing;
-5. message consumer.
+When that discipline is missing, retries stop being a reliability feature and become a data corruption risk.

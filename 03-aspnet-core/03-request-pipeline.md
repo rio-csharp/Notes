@@ -2,24 +2,13 @@
 
 ## Core Idea
 
-The ASP.NET Core request pipeline is a chain of middleware components that handle every HTTP request.
+The ASP.NET Core request pipeline is the execution model through which every HTTP request passes. It is built from middleware components that can inspect the request, alter the request or response, invoke the next component, or end the request early by producing the response themselves.
 
-Each middleware can:
+This pipeline model is one of the most important ideas in ASP.NET Core because many framework behaviors that appear separate at first glance are actually consequences of ordered pipeline execution. Error handling, static files, routing, CORS, authentication, authorization, and endpoint execution all depend on where they sit in that chain.
 
-- inspect the request;
-- modify the request;
-- call the next middleware;
-- short-circuit the pipeline;
-- modify the response;
-- handle exceptions.
+## Building The Pipeline
 
-Chinese note:
-
-- `middleware` means 中间件.
-- `pipeline` means 请求处理管道.
-- `short-circuit` means 短路，不再继续往后执行.
-
-## Typical Pipeline
+At startup, middleware is registered in sequence:
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
@@ -42,63 +31,36 @@ app.MapControllers();
 app.Run();
 ```
 
-Ordering matters.
+That code does not process a request immediately. It builds a request delegate graph that will later run for each incoming request. Conceptually, the pipeline behaves like nested delegates:
 
-For example:
-
-- `UseRouting` should happen before endpoint execution.
-- `UseAuthentication` should run before `UseAuthorization`.
-- exception handling should be early.
-- CORS must be placed correctly for endpoint routing.
-
-More production-like order:
-
-```csharp
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler();
-    app.UseHsts();
-}
-
-app.UseHttpsRedirection();
-app.UseRouting();
-app.UseCors("Frontend");
-app.UseAuthentication();
-app.UseAuthorization();
-
-app.MapHealthChecks("/health");
-app.MapControllers();
+```text
+MiddlewareA(
+  MiddlewareB(
+    MiddlewareC(
+      Endpoint)))
 ```
 
-Why this order:
+This explains why each middleware can run code both before and after the next component.
 
-- exception handling should wrap most downstream work;
-- HTTPS redirection happens before normal endpoint processing;
-- routing chooses endpoint metadata;
-- CORS needs to run before endpoint response;
-- authentication builds `HttpContext.User`;
-- authorization reads user plus endpoint metadata;
-- endpoints execute last.
+## The Request And Response Flow
 
-## Middleware Flow
-
-Conceptually:
+The easiest way to picture the pipeline is as a forward request path and a returning response path.
 
 ```text
 Request
-  -> Exception middleware
+  -> exception handling
   -> HTTPS redirection
-  -> Static files
-  -> Routing
+  -> static files
+  -> routing
   -> CORS
-  -> Authentication
-  -> Authorization
-  -> Endpoint
+  -> authentication
+  -> authorization
+  -> endpoint execution
 Response
-  <- back through middleware chain
+  <- back through the same middleware chain
 ```
 
-Middleware can execute logic before and after `next()`.
+Middleware can therefore wrap downstream work:
 
 ```csharp
 app.Use(async (context, next) =>
@@ -117,317 +79,44 @@ app.Use(async (context, next) =>
 });
 ```
 
-Timing detail:
+Code before `await next()` runs on the request path. Code after it runs on the response path. That wrapper model is why timing, correlation, scoped logging, and response header enrichment fit so naturally into middleware.
 
-```text
-Code before await next():
-  runs on request path before later middleware/endpoint
+## Ordering Is Behavior
 
-Code after await next():
-  runs on response path after later middleware/endpoint
-```
+Pipeline order is not cosmetic. It determines what state later components can rely on.
 
-This is why request timing middleware often measures around `await next()`.
-
-## Under The Hood: How The Pipeline Is Built
-
-`app.Use(...)` does not immediately handle a request. It registers middleware into a pipeline builder.
-
-At startup, ASP.NET Core composes middleware into one request delegate.
-
-Conceptually:
-
-```text
-Use(MiddlewareA)
-Use(MiddlewareB)
-Use(MiddlewareC)
-
-Build:
-  RequestDelegate = A(B(C(endpoint)))
-```
-
-Each middleware receives:
-
-- `HttpContext`;
-- a `next` delegate representing the rest of the pipeline.
-
-This is why middleware works like nested calls:
-
-```text
-A before
-  B before
-    C before
-      Endpoint
-    C after
-  B after
-A after
-```
-
-Example:
+A production-oriented ordering often looks like this:
 
 ```csharp
-app.Use(async (context, next) =>
+if (!app.Environment.IsDevelopment())
 {
-    Console.WriteLine("A before");
-    await next();
-    Console.WriteLine("A after");
-});
+    app.UseExceptionHandler();
+    app.UseHsts();
+}
 
-app.Use(async (context, next) =>
-{
-    Console.WriteLine("B before");
-    await next();
-    Console.WriteLine("B after");
-});
-```
-
-Output:
-
-```text
-A before
-B before
-B after
-A after
-```
-
-unless an endpoint or middleware writes and short-circuits.
-
-Short-circuit output example:
-
-```csharp
-app.Use(async (context, next) =>
-{
-    Console.WriteLine("A before");
-
-    context.Response.StatusCode = 403;
-    await context.Response.WriteAsync("Forbidden");
-
-    Console.WriteLine("A after");
-});
-
-app.Use(async (context, next) =>
-{
-    Console.WriteLine("B before");
-    await next();
-    Console.WriteLine("B after");
-});
-```
-
-`B` never runs because the first middleware does not call `next`.
-
-## Under The Hood: Kestrel, HttpContext, And Features
-
-Kestrel is ASP.NET Core's cross-platform web server.
-
-High-level flow:
-
-```text
-TCP connection
-  -> Kestrel parses HTTP
-  -> creates/populates HttpContext
-  -> runs ASP.NET Core pipeline
-  -> writes response
-```
-
-`HttpContext` is a high-level wrapper over request features.
-
-Internally, ASP.NET Core uses feature interfaces for lower-level capabilities, for example:
-
-- request body;
-- response body;
-- connection information;
-- endpoint metadata;
-- WebSocket support.
-
-You usually do not work with features directly, but understanding them helps in advanced scenarios.
-
-Practical explanation:
-
-> Kestrel receives the HTTP request, ASP.NET Core creates an `HttpContext`, and the composed middleware delegate processes that context. Middleware can read or modify the context, call the next delegate, or short-circuit the pipeline.
-
-`HttpContext` contains:
-
-- `Request`;
-- `Response`;
-- `User`;
-- `Items`;
-- `RequestServices`;
-- `Connection`;
-- `TraceIdentifier`;
-- selected `Endpoint` after routing.
-
-Example:
-
-```csharp
-app.Use(async (context, next) =>
-{
-    context.Items["StartTime"] = TimeProvider.System.GetUtcNow();
-    await next();
-});
-```
-
-Use `HttpContext.Items` for per-request data shared inside the pipeline. Do not use static fields for per-request data.
-
-## Endpoint Routing Internals
-
-Modern ASP.NET Core separates route matching and endpoint execution.
-
-```csharp
+app.UseHttpsRedirection();
 app.UseRouting();
+app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapHealthChecks("/health");
 app.MapControllers();
 ```
 
-Conceptually:
+Each placement carries a reason:
 
-```text
-UseRouting:
-  match request path/method to endpoint
-  attach endpoint metadata to HttpContext
+- exception handling should wrap most downstream work;
+- HTTPS redirection should happen before ordinary processing;
+- routing must run before endpoint-aware components;
+- authentication must build the user before authorization evaluates it;
+- endpoint execution belongs near the end.
 
-UseAuthentication:
-  build HttpContext.User
+Because the request pipeline is ordered execution rather than declarative configuration, misplaced middleware often causes subtle bugs that look like security, routing, or framework problems when the real issue is ordering.
 
-UseAuthorization:
-  read endpoint metadata
-  check policies/roles/requirements
+## Short-Circuiting
 
-Endpoint execution:
-  call controller/minimal API handler
-```
-
-This is why order matters.
-
-Authorization needs endpoint metadata. Authentication needs to run before authorization so a user identity exists.
-
-Endpoint metadata example:
-
-```csharp
-[Authorize(Policy = "OrdersRead")]
-[HttpGet("api/orders")]
-public IActionResult List()
-{
-    return Ok();
-}
-```
-
-Routing attaches endpoint metadata. Authorization later reads the `[Authorize]` metadata and checks the policy.
-
-## Request Scope And DI
-
-For each HTTP request, ASP.NET Core creates a DI scope.
-
-Services registered as scoped are reused within the request:
-
-```text
-Request 1 scope
-  AppDbContext instance A
-  OrderService instance A
-
-Request 2 scope
-  AppDbContext instance B
-  OrderService instance B
-```
-
-This connects the request pipeline with Dependency Injection:
-
-- middleware can receive singleton dependencies through constructor injection;
-- scoped dependencies can be requested through `InvokeAsync` parameters in middleware;
-- controllers are created by DI inside the request scope.
-
-Middleware nuance:
-
-```csharp
-public sealed class BadMiddleware
-{
-    private readonly AppDbContext _dbContext; // bad if middleware is singleton-like
-
-    public BadMiddleware(RequestDelegate next, AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
-}
-```
-
-Better:
-
-```csharp
-public sealed class GoodMiddleware
-{
-    private readonly RequestDelegate _next;
-
-    public GoodMiddleware(RequestDelegate next)
-    {
-        _next = next;
-    }
-
-    public async Task InvokeAsync(HttpContext context, AppDbContext dbContext)
-    {
-        await _next(context);
-    }
-}
-```
-
-Reason:
-
-> Middleware instances are often created once, so scoped services should usually be injected into `InvokeAsync`, not captured in the constructor.
-
-Alternative:
-
-```csharp
-public async Task InvokeAsync(HttpContext context)
-{
-    var dbContext = context.RequestServices.GetRequiredService<AppDbContext>();
-    await _next(context);
-}
-```
-
-This works, but `InvokeAsync` parameter injection is cleaner when possible.
-
-## Custom Middleware Class
-
-```csharp
-public sealed class CorrelationIdMiddleware
-{
-    private const string HeaderName = "X-Correlation-ID";
-    private readonly RequestDelegate _next;
-    private readonly ILogger<CorrelationIdMiddleware> _logger;
-
-    public CorrelationIdMiddleware(
-        RequestDelegate next,
-        ILogger<CorrelationIdMiddleware> logger)
-    {
-        _next = next;
-        _logger = logger;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
-    {
-        var correlationId = context.Request.Headers.TryGetValue(HeaderName, out var value)
-            ? value.ToString()
-            : Guid.NewGuid().ToString("N");
-
-        context.Response.Headers[HeaderName] = correlationId;
-
-        using (_logger.BeginScope(new Dictionary<string, object>
-        {
-            ["CorrelationId"] = correlationId
-        }))
-        {
-            await _next(context);
-        }
-    }
-}
-```
-
-Registration:
-
-```csharp
-app.UseMiddleware<CorrelationIdMiddleware>();
-```
-
-## Short-circuit Example
+Middleware is allowed to stop the pipeline early by not calling the next delegate.
 
 ```csharp
 app.Use(async (context, next) =>
@@ -446,212 +135,125 @@ app.Use(async (context, next) =>
 });
 ```
 
-This middleware stops the request before it reaches controllers.
+This is called short-circuiting. It is not an edge case. Many important framework behaviors rely on it:
 
-Other common short-circuit examples:
+- static file middleware can serve a file directly;
+- authentication middleware can challenge;
+- authorization middleware can forbid;
+- health-check endpoints can return immediately;
+- maintenance or rate-limiting middleware can reject early.
 
-- static file served without controller;
-- rate limiter returns `429`;
-- auth middleware challenges with `401`;
-- authorization middleware forbids with `403`;
-- health check endpoint returns immediately;
-- custom maintenance middleware returns `503`.
+Understanding short-circuiting helps explain why not every request reaches controllers or Minimal API handlers.
 
-## Exception Handling
+## `HttpContext` As Request State
 
-Modern ASP.NET Core commonly uses `ProblemDetails`.
+Kestrel accepts the HTTP request and ASP.NET Core creates an `HttpContext` to represent that request inside the application.
+
+`HttpContext` exposes the high-level state that middleware and endpoints interact with:
+
+- `Request`
+- `Response`
+- `User`
+- `Items`
+- `RequestServices`
+- `Connection`
+- `TraceIdentifier`
+- selected `Endpoint` after routing
 
 ```csharp
-builder.Services.AddProblemDetails();
-
-var app = builder.Build();
-
-app.UseExceptionHandler();
-app.UseStatusCodePages();
+app.Use(async (context, next) =>
+{
+    context.Items["StartTime"] = TimeProvider.System.GetUtcNow();
+    await next();
+});
 ```
 
-Custom exception handler:
+`HttpContext.Items` is especially useful for per-request data that should flow through the pipeline without resorting to static state or global caches. Because the context is request-scoped, it is the natural place for transient request metadata.
+
+## Routing And Endpoint Selection
+
+Modern ASP.NET Core separates endpoint matching from endpoint execution.
 
 ```csharp
-public sealed class GlobalExceptionHandler : IExceptionHandler
-{
-    private readonly ILogger<GlobalExceptionHandler> _logger;
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+```
 
-    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
+At a high level, the process looks like this:
+
+```text
+UseRouting:
+  match request to an endpoint
+  attach endpoint metadata to HttpContext
+
+UseAuthentication:
+  build HttpContext.User
+
+UseAuthorization:
+  evaluate endpoint metadata and user identity
+
+Endpoint execution:
+  invoke controller or Minimal API handler
+```
+
+This separation is important because authorization often depends on metadata attached to the selected endpoint, such as `[Authorize]`, required policies, or other routing-attached behavior. If routing has not yet selected an endpoint, that metadata does not exist. If authentication has not yet built the user principal, authorization cannot evaluate it correctly.
+
+## Dependency Injection Scope Per Request
+
+ASP.NET Core creates a dependency injection scope for each HTTP request. Scoped services therefore live for the duration of that request and are reused within it.
+
+```text
+Request 1
+  AppDbContext instance A
+  OrderService instance A
+
+Request 2
+  AppDbContext instance B
+  OrderService instance B
+```
+
+This request scope connects the pipeline to the dependency system. Controllers are created inside it. Minimal API parameters can resolve services from it. Middleware can also access scoped services, but the lifetime model matters.
+
+```csharp
+public sealed class GoodMiddleware
+{
+    private readonly RequestDelegate _next;
+
+    public GoodMiddleware(RequestDelegate next)
     {
-        _logger = logger;
+        _next = next;
     }
 
-    public async ValueTask<bool> TryHandleAsync(
-        HttpContext httpContext,
-        Exception exception,
-        CancellationToken cancellationToken)
+    public async Task InvokeAsync(HttpContext context, AppDbContext dbContext)
     {
-        _logger.LogError(exception, "Unhandled exception");
-
-        var problem = new ProblemDetails
-        {
-            Status = StatusCodes.Status500InternalServerError,
-            Title = "An unexpected error occurred",
-            Detail = "Please contact support with the trace id.",
-            Instance = httpContext.Request.Path
-        };
-
-        problem.Extensions["traceId"] = httpContext.TraceIdentifier;
-
-        httpContext.Response.StatusCode = problem.Status.Value;
-        await httpContext.Response.WriteAsJsonAsync(problem, cancellationToken);
-
-        return true;
+        await _next(context);
     }
 }
 ```
 
-Registration:
+This pattern is preferable to capturing scoped services in the middleware constructor, because middleware instances are generally long-lived while scoped services are request-specific.
+
+## Exception Handling In The Pipeline
+
+Exception middleware only catches exceptions thrown by components that run after it.
 
 ```csharp
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+var app = builder.Build();
+
+app.UseExceptionHandler();
 ```
 
-Important:
+That placement is one reason exception handling belongs early in the pipeline. If the exception-handling middleware is registered too late, failures in earlier middleware or startup-path behavior may bypass it entirely.
 
-> Exception handling middleware can only catch exceptions thrown by later middleware. If it is registered too late, earlier failures will not be handled by it.
+This also helps explain why global exception middleware and MVC exception filters are not interchangeable. Middleware protects a broad slice of the HTTP pipeline. Filters only operate once MVC execution has already begun.
 
-## Authentication And Authorization Order
+## The Pipeline As The Platform Spine
 
-Correct:
+Most of the rest of ASP.NET Core can be understood as specialized behavior layered into this request pipeline. Middleware controls the broad HTTP flow. Routing chooses an endpoint. Authentication and authorization shape who may continue. Model binding and controller or Minimal API execution happen later as endpoint-specific behavior.
 
-```csharp
-app.UseAuthentication();
-app.UseAuthorization();
-```
-
-Why:
-
-- Authentication identifies who the user is.
-- Authorization checks what the user can access.
-
-If authorization runs first, it has no authenticated user to evaluate.
-
-## Middleware vs Filter
-
-Use middleware for cross-cutting concerns at HTTP pipeline level:
-
-- logging;
-- exception handling;
-- correlation ID;
-- security headers;
-- request timing.
-
-Use filters for MVC/controller-specific concerns:
-
-- action validation;
-- controller-level authorization;
-- result transformation;
-- exception handling around controller actions.
-
-Decision examples:
-
-| Concern | Better Fit | Why |
-| --- | --- | --- |
-| correlation ID | middleware | applies to all HTTP requests |
-| security headers | middleware | response-level concern |
-| model validation | filter / `[ApiController]` | MVC action concern |
-| action timing for controllers only | filter | needs action context |
-| global exception safety | middleware | catches broad pipeline failures |
-| response shaping for MVC result | filter | works with action result |
-
-## Review Questions
-
-### What is middleware?
-
-> Middleware is a component in the ASP.NET Core request pipeline. It receives an `HttpContext`, can run logic before and after the next middleware, and can short-circuit the request.
-
-### Why does middleware order matter?
-
-> Because each middleware sees the request in sequence. Some middleware depends on previous middleware. For example, authorization depends on authentication, and endpoint execution depends on routing.
-
-### What is the difference between middleware and filters?
-
-> Middleware works at the HTTP pipeline level and applies broadly. Filters are part of MVC and run around controller action execution. Middleware is better for global HTTP concerns; filters are better for controller/action concerns.
-
-### What does it mean that the response has started?
-
-> It means headers or body bytes have already been sent to the client. After that, you usually cannot safely change status code or headers.
-
-### How do scoped services work in middleware?
-
-> Middleware constructor dependencies are usually long-lived. Scoped services should be resolved per request, commonly through `InvokeAsync` parameters or `context.RequestServices`.
-
-## Common Mistakes
-
-### Mistake: Registering `UseAuthorization` before `UseAuthentication`.
-
-Why it is wrong:
-
-> Authorization needs an authenticated `HttpContext.User`. If authentication has not run, authorization may see an anonymous user.
-
-Better answer:
-
-> Run `UseAuthentication()` before `UseAuthorization()`.
-
-### Mistake: Placing exception handling too late.
-
-Why it is wrong:
-
-> It only catches exceptions from middleware registered after it.
-
-Better answer:
-
-> Put global exception handling near the beginning of the pipeline.
-
-### Mistake: Forgetting to call `await next()`.
-
-Why it is wrong:
-
-> The middleware short-circuits the pipeline, so later middleware and endpoints never run.
-
-Better answer:
-
-> Call `await next()` unless the middleware intentionally returns a response.
-
-### Mistake: Calling `next()` more than once.
-
-Why it is wrong:
-
-> The downstream pipeline is generally designed to run once. Calling it twice can duplicate writes, side effects, or throw response errors.
-
-Better answer:
-
-> Call `next()` once, or short-circuit intentionally.
-
-### Mistake: Writing to the response after it has already started.
-
-Why it is wrong:
-
-> Headers and status code may already be sent, so changing them can fail or produce corrupt responses.
-
-Better answer:
-
-> Check `context.Response.HasStarted` and design response-writing middleware carefully.
-
-### Mistake: Logging sensitive request data.
-
-Why it is wrong:
-
-> Logs may expose tokens, passwords, personal data, or payment information.
-
-Better answer:
-
-> Log structured metadata and redact sensitive values.
-
-## Practice Task
-
-Build three middleware components:
-
-1. correlation ID middleware;
-2. request timing middleware;
-3. security headers middleware.
-
-Then add a controller and verify the response contains the correlation ID and security headers.
+For that reason, the request pipeline is not just one feature among many. It is the platform spine on which the other HTTP-facing features depend.

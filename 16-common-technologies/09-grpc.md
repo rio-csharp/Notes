@@ -4,14 +4,6 @@
 
 gRPC is a high-performance RPC framework using HTTP/2 and Protocol Buffers.
 
-Chinese notes:
-
-- `RPC`: Remote Procedure Call, 远程过程调用.
-- `Protocol Buffers`: protobuf, 二进制序列化协议.
-- `contract-first`: 契约优先.
-- `deadline`: 截止时间/超时.
-- `streaming`: 流式传输.
-
 ## When gRPC Fits
 
 Use gRPC for:
@@ -271,30 +263,6 @@ REST:
 - browser-friendly;
 - easier public API adoption;
 - aligns with HTTP caching and resource semantics.
-
-## Common Mistakes
-
-- Using gRPC for public browser APIs without considering compatibility.
-- Breaking proto field numbers.
-- No deadline/timeout.
-- No versioning strategy.
-- Ignoring observability.
-- Sending huge messages instead of paging or streaming.
-- Mapping every domain exception to `Internal`.
-
-## Knowledge Checks
-
-### When would you use gRPC?
-
-Use gRPC for internal service-to-service communication where performance, strong contracts, and streaming matter.
-
-### gRPC vs REST?
-
-REST is simpler and browser-friendly for public APIs. gRPC is efficient and strongly typed, often better for internal service communication.
-
-### What is protobuf?
-
-Protocol Buffers is a compact binary serialization format and interface definition language used by gRPC.
 
 ## Practice Task
 

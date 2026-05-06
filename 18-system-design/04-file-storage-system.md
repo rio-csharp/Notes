@@ -4,13 +4,6 @@
 
 Design a file upload and storage system for documents, images, and exports.
 
-Chinese notes:
-
-- `object storage`: 对象存储.
-- `pre-signed URL`: 预签名 URL.
-- `metadata`: 元数据.
-- `virus scanning`: 病毒扫描.
-
 ## Requirements
 
 Functional:
@@ -279,30 +272,6 @@ API authorizes user
 ```
 
 Streaming gives more control but increases API bandwidth cost.
-
-## Knowledge Checks
-
-### How would you upload large files?
-
-> I would avoid routing large file bytes through the API when possible. I would use pre-signed URLs and direct upload to object storage, then confirm metadata and process the file asynchronously.
-
-### How do you secure downloads?
-
-> Check authorization in API, then return a short-lived pre-signed download URL or stream the file if policy requires it.
-
-### How do you handle virus scanning?
-
-> Mark file as uploaded but not available, enqueue scan job, scan in worker, then mark available or rejected.
-
-## Common Mistakes
-
-- Loading whole file into memory.
-- Public buckets/containers.
-- No file type validation.
-- No virus scanning for risky uploads.
-- No tenant ID on metadata.
-- No cleanup for abandoned uploads.
-- No lifecycle policy for old files.
 
 ## Practice Task
 

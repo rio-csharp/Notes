@@ -2,53 +2,38 @@
 
 ## Core Idea
 
-Captive dependency happens when a long-lived service captures a shorter-lived service.
+Captive dependency is the lifetime mismatch that occurs when a longer-lived service captures a shorter-lived dependency and then continues to use it beyond the boundary that shorter-lived dependency was meant to obey. In ASP.NET Core, the most common example is a singleton depending on a scoped service.
 
-Chinese notes:
+This topic deserves its own treatment because it is one of the clearest ways dependency injection moves from configuration syntax into correctness failures. A registration can compile, a constructor can look innocent, and yet the application can still end up reusing request-specific state across requests or holding onto objects after their intended scope has ended.
 
-- `captive dependency`: 生命周期捕获.
-- `scope`: 作用域.
-- `root provider`: 根容器.
-- `request-specific state`: 请求级状态.
+## Lifetime Mismatch As A Design Bug
 
-Most common:
+The danger begins with the lifetime hierarchy itself.
 
 ```text
-Singleton depends on Scoped
-```
+singleton
+  lives for the application lifetime
 
-Key takeaway:
+scoped
+  usually lives for one HTTP request or one explicit scope
 
-> Captive dependency is dangerous because the longer-lived object can keep using a dependency after its intended lifetime, causing stale data, cross-request leaks, thread-safety issues, or disposed object errors.
-
-## Why It Happens
-
-DI lifetimes form ownership boundaries.
-
-```text
-Singleton
-  lives for the whole application
-
-Scoped
-  usually lives for one HTTP request
-
-Transient
+transient
   usually lives for one resolution
 ```
 
-If a singleton constructor receives a scoped service, the singleton stores that scoped instance in a field.
+If a singleton stores a scoped service in a field, the scoped instance is now effectively being asked to behave as if it belonged to the application lifetime rather than to one request or short-lived scope. That is the essence of a captive dependency.
 
-```text
-Application starts
-  -> Singleton AuditService is created
-  -> It receives CurrentUser from one scope
-  -> AuditService lives forever
-  -> CurrentUser was supposed to live for one request
-```
+The failure is not merely theoretical. The longer-lived service may now:
 
-That is the captive dependency.
+- read stale request data;
+- leak one request's context into another;
+- use a non-thread-safe dependency concurrently;
+- outlive the dependency's disposal boundary;
+- behave unpredictably depending on when resolution first occurred.
 
-## Bad Example: Singleton Captures Current User
+## Request Context Captured By A Singleton
+
+A common example is a singleton that captures something derived from `HttpContext`.
 
 ```csharp
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
@@ -88,13 +73,11 @@ public sealed class AuditService
 }
 ```
 
-Problem:
+The core problem is not just the interface type. It is that request-shaped behavior has been captured by an application-wide singleton. The service now depends on state whose meaning changes per request, but the object's own lifetime does not.
 
-> `AuditService` is singleton, so it may hold onto request-related behavior forever. The current user should be evaluated per request, not captured by an app-wide service.
+## `DbContext` As A Captive Dependency
 
-Depending on validation settings, ASP.NET Core may catch this during startup or first resolution.
-
-## Bad Example: Singleton Captures DbContext
+`DbContext` is another classic example because its scope assumptions are strong.
 
 ```csharp
 builder.Services.AddDbContext<AppDbContext>();
@@ -111,22 +94,13 @@ public sealed class ReportCache
 }
 ```
 
-Why it is dangerous:
+This is dangerous because `DbContext` is scoped, tracks entity state, and is not thread-safe. A singleton that captures it may use it long after the original scope should have ended, may observe stale tracked entities, and may expose the same instance to concurrent activity it was never designed to handle.
 
-- `DbContext` is scoped;
-- `DbContext` tracks entity instances;
-- `DbContext` is not thread-safe;
-- singleton may use it concurrently;
-- it may hold stale tracked data;
-- it may be disposed with a scope while the singleton still references it.
+This example is useful because it shows that captive dependency is not only about request identity. It is also about operational boundaries such as units of work and disposal ownership.
 
-Practical explanation:
+## Changing The Lifetime To Match The Dependency
 
-> A singleton should not capture `DbContext`. If I need database work in a singleton-like background service, I create a scope per unit of work.
-
-## Correct Approach 1: Make The Service Scoped
-
-If the service needs request-specific dependencies, make it scoped.
+The most direct fix is often to change the longer-lived service so that it shares the same boundary as the dependency it really needs.
 
 ```csharp
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
@@ -159,13 +133,11 @@ public sealed class AuditService
 }
 ```
 
-Why it works:
+Now the service and its dependencies share the same request-bound scope. This is often the cleanest fix because it preserves the original dependency relationship while restoring correct lifetime alignment.
 
-> `AuditService`, `CurrentUser`, and `DbContext` now share the same request scope.
+## Passing Data Instead Of Capturing A Scoped Service
 
-## Correct Approach 2: Pass Data Instead Of Service
-
-If the singleton only needs a value, pass the value into the method.
+Sometimes the longer-lived service does not actually need the shorter-lived service. It only needs a value derived from it. In those cases, the healthier design is often to pass the value into the method rather than storing the service.
 
 ```csharp
 builder.Services.AddSingleton<AuditMessageFormatter>();
@@ -178,8 +150,6 @@ public sealed class AuditMessageFormatter
     }
 }
 ```
-
-Usage from a scoped service:
 
 ```csharp
 public sealed class OrderService
@@ -201,15 +171,13 @@ public sealed class OrderService
 }
 ```
 
-Why it works:
+Here the singleton stays stateless and the request-specific value remains local to the request-bound caller. This is often a better design than stretching service lifetime downward just to preserve a field reference.
 
-> The singleton is stateless and receives request-specific data as method arguments.
+## Explicit Scope Creation For Long-Lived Infrastructure
 
-## Correct Approach 3: Use IServiceScopeFactory For Background Work
+Long-lived infrastructure components still sometimes need access to scoped services. Background services are the most common example.
 
-Background services are long-lived, but they often need scoped services.
-
-Use `IServiceScopeFactory`.
+In that situation, the usual answer is not to inject the scoped service directly. It is to create a scope per unit of work.
 
 ```csharp
 public sealed class AuditWorker : BackgroundService
@@ -258,13 +226,31 @@ public sealed class AuditWorker : BackgroundService
 }
 ```
 
-Why it works:
+This pattern works because the long-lived worker does not store a scoped service permanently. It creates a fresh scope for each batch of work and allows the scoped dependency to live within the right boundary.
 
-> The worker is long-lived, but each batch gets its own short-lived DI scope.
+## The Root Provider As Another Lifetime Trap
 
-## ValidateScopes
+Captive dependency is closely related to another common mistake: resolving scoped services directly from the root provider.
 
-Enable scope validation in development:
+```csharp
+var dbContext = app.Services.GetRequiredService<AppDbContext>();
+```
+
+`app.Services` is the root provider, so resolving a scoped service there stretches it beyond the request or operation boundary it was meant to inhabit.
+
+The safer pattern is to create an explicit scope:
+
+```csharp
+using var scope = app.Services.CreateScope();
+var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+await dbContext.Database.MigrateAsync();
+```
+
+This keeps scope ownership visible and aligns resolution with intended disposal.
+
+## Validation And What It Can Catch
+
+Development-time validation can catch some lifetime mismatches early.
 
 ```csharp
 builder.Host.UseDefaultServiceProvider(options =>
@@ -274,48 +260,13 @@ builder.Host.UseDefaultServiceProvider(options =>
 });
 ```
 
-`ValidateScopes` helps catch:
+`ValidateScopes` is especially useful for detecting cases where scoped services are captured by singletons or resolved from the root provider in invalid ways.
 
-- scoped service resolved from root provider;
-- scoped service injected into singleton;
-- some lifetime mismatch issues.
+Even so, validation is only a safety net. Some lifetime problems are conceptually wrong even if they are not immediately rejected by the container. Good lifetime design still depends on understanding scope boundaries rather than relying on tooling alone.
 
-Important:
+## A Clean Lifetime Composition Example
 
-> Validation helps, but it is not a replacement for understanding lifetimes. Some lifetime problems are logical, not mechanically detectable.
-
-## Root Provider Problem
-
-Bad:
-
-```csharp
-var dbContext = app.Services.GetRequiredService<AppDbContext>();
-```
-
-Why it is wrong:
-
-> `app.Services` is the root provider. Resolving scoped services from the root provider can make them live too long and bypass request scope boundaries.
-
-Better:
-
-```csharp
-using var scope = app.Services.CreateScope();
-var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-```
-
-Common use case:
-
-```csharp
-using var scope = app.Services.CreateScope();
-var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-await dbContext.Database.MigrateAsync();
-```
-
-## Complete ASP.NET Core Example
-
-This example shows a clean lifetime design for request audit logging.
-
-Registration:
+The following example illustrates a lifetime arrangement that avoids captive dependency while preserving separation of responsibility.
 
 ```csharp
 builder.Services.AddHttpContextAccessor();
@@ -327,8 +278,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default"));
 });
 ```
-
-Current user is request-specific:
 
 ```csharp
 public interface ICurrentUser
@@ -354,8 +303,6 @@ public sealed class CurrentUser : ICurrentUser
 }
 ```
 
-The formatter is singleton because it is stateless:
-
 ```csharp
 public sealed class AuditMessageFormatter
 {
@@ -365,8 +312,6 @@ public sealed class AuditMessageFormatter
     }
 }
 ```
-
-The writer is scoped because it uses request-specific state and `DbContext`:
 
 ```csharp
 public sealed class AuditWriter
@@ -406,121 +351,4 @@ public sealed class AuditWriter
 }
 ```
 
-Controller usage:
-
-```csharp
-[ApiController]
-[Route("api/orders")]
-public sealed class OrdersController : ControllerBase
-{
-    private readonly AuditWriter _auditWriter;
-
-    public OrdersController(AuditWriter auditWriter)
-    {
-        _auditWriter = auditWriter;
-    }
-
-    [HttpPost("{id:int}/approve")]
-    public async Task<IActionResult> Approve(int id, CancellationToken ct)
-    {
-        await _auditWriter.WriteAsync($"approved-order:{id}", ct);
-        return NoContent();
-    }
-}
-```
-
-Why the lifetimes are correct:
-
-- `CurrentUser` is scoped because it reads request state;
-- `AuditWriter` is scoped because it combines request state and `DbContext`;
-- `AuditMessageFormatter` is singleton because it is stateless and receives request data as parameters;
-- no singleton stores `HttpContext`, `ICurrentUser`, or `DbContext`.
-
-## Review Questions
-
-### What is captive dependency?
-
-Captive dependency happens when a service with a longer lifetime depends on a service with a shorter lifetime, such as singleton depending on scoped. It can cause stale state, thread-safety issues, disposed object usage, and data leaks.
-
-### Why is singleton depending on scoped dangerous?
-
-The singleton may store the scoped instance and reuse it after the scope has ended. If the scoped service contains request data or is not thread-safe, the behavior becomes incorrect and unsafe.
-
-### How do you fix singleton needing scoped service?
-
-First reconsider the design. Possible fixes are:
-
-- make the singleton scoped if it is request-specific;
-- pass required data into methods;
-- create a scope with `IServiceScopeFactory` for background/infrastructure work;
-- split responsibilities so the singleton remains stateless.
-
-### Is using `IServiceScopeFactory` always the best fix?
-
-No. It is appropriate for background services and infrastructure code. In normal request flow, making the service scoped or passing data explicitly is often cleaner.
-
-### What is scope validation?
-
-Scope validation is a development-time DI check that can detect some invalid lifetime relationships, such as scoped services captured by singletons.
-
-## Common Mistakes
-
-### Mistake: Singleton depending on `DbContext`
-
-Why it is wrong:
-
-> `DbContext` is scoped, stateful, and not thread-safe.
-
-Better answer:
-
-> Use scoped services in request flow, or create a scope per background unit of work.
-
-### Mistake: Singleton storing current user
-
-Why it is wrong:
-
-> Current user is request-specific. A singleton is shared by all requests.
-
-Better answer:
-
-> Read current user in a scoped service or pass the user ID into singleton methods.
-
-### Mistake: BackgroundService injecting scoped repositories directly
-
-Why it is wrong:
-
-> `BackgroundService` is long-lived. Scoped repositories should be created and disposed per batch or unit of work.
-
-Better answer:
-
-> Inject `IServiceScopeFactory` and create a scope inside the worker loop.
-
-### Mistake: Disabling scope validation instead of fixing design
-
-Why it is wrong:
-
-> It hides a real lifetime bug that may appear under production traffic.
-
-Better answer:
-
-> Keep validation enabled in development and fix the dependency graph.
-
-### Mistake: Using `IServiceProvider` to hide the problem
-
-Why it is wrong:
-
-> The dependency is still there, but now it is hidden and harder to test.
-
-Better answer:
-
-> Use explicit constructor dependencies and correct the lifetime boundary.
-
-## Practice Task
-
-Create three versions of an audit service:
-
-1. a bad singleton that injects `ICurrentUser`;
-2. a corrected scoped version;
-3. a stateless singleton formatter that receives `userId` as a method parameter.
-
-Then explain which version you would use in an ASP.NET Core API and why.
+This arrangement works because request-shaped services stay scoped, while the singleton collaborator remains stateless and accepts request-derived data only as parameters.

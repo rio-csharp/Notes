@@ -2,30 +2,18 @@
 
 ## Core Idea
 
-C# normally compiles to Intermediate Language (IL), not directly to machine code. At runtime, the CLR compiles IL to native machine code using JIT.
-
-Chinese notes:
-
-- `IL`: Intermediate Language, 中间语言.
-- `JIT`: Just-In-Time, 即时编译.
-- `AOT`: Ahead-of-Time, 预先编译.
+C# normally compiles to Intermediate Language (IL), not directly to machine code. The question in this chapter is not the basic execution path, which the previous chapter already established, but how .NET can shift compilation work between build time, publish time, and runtime.
 
 ## IL
 
 IL is CPU-independent intermediate code.
 
-Benefits:
+Its value comes from several properties:
 
 - language interoperability;
 - runtime optimization;
 - metadata support;
 - platform flexibility.
-
-Example flow:
-
-```text
-C# -> IL -> JIT -> native machine code
-```
 
 Example C#:
 
@@ -63,7 +51,7 @@ Metadata describes:
 - referenced assemblies;
 - generic type information.
 
-Example:
+For example:
 
 ```csharp
 [Obsolete("Use AddNew instead.")]
@@ -79,7 +67,7 @@ The attribute is stored as metadata. Tools and frameworks can inspect it later.
 
 JIT compiles methods when needed.
 
-Benefits:
+Its value comes from several properties:
 
 - optimized for current CPU;
 - can optimize hot methods;
@@ -101,7 +89,7 @@ Process starts
   -> generated code is gone
 ```
 
-This is why a cold start can be slower than later requests.
+This is why a cold start can be slower than later requests. The rest of the chapter asks how much of that first-use cost can be moved earlier.
 
 Example benchmark shape:
 
@@ -139,7 +127,7 @@ Tiered compilation allows the runtime to:
 
 This improves startup and long-running performance.
 
-Mental model:
+The easiest mental model is:
 
 ```text
 Tier 0:
@@ -165,12 +153,12 @@ Publish:
 dotnet publish -c Release -p:PublishReadyToRun=true
 ```
 
-Pros:
+Operational advantages:
 
 - faster startup;
 - less JIT work.
 
-Cons:
+Operational limitations:
 
 - larger binaries;
 - still may need JIT for some methods;
@@ -187,17 +175,19 @@ Practical use:
 
 > ReadyToRun is often useful when startup time matters but you still want normal .NET compatibility.
 
+A realistic operational example is a medium-sized ASP.NET Core service in a container platform. If cold pods are taking too long to become ready, ReadyToRun may reduce some first-request JIT cost without forcing the team to give up reflection-heavy libraries or ordinary hosting patterns. It is not a universal win, but it is often one of the first publishing changes worth testing.
+
 ## Native AOT
 
 Native AOT compiles the app ahead of time to a native executable.
 
-Pros:
+Operational advantages:
 
 - very fast startup;
 - smaller runtime footprint;
 - useful for serverless, CLI, small services.
 
-Cons:
+Operational limitations:
 
 - reflection limitations;
 - dynamic code generation limitations;
@@ -215,6 +205,22 @@ AOT-friendly code tends to be:
 - less reflection-heavy;
 - source-generator-friendly;
 - less dependent on runtime type discovery.
+
+For example, code shaped like this is more AOT-friendly:
+
+```csharp
+builder.Services.AddScoped<IOrderHandler, OrderHandler>();
+```
+
+while code shaped like this is more runtime-dynamic and therefore harder for trimming or AOT tooling to reason about:
+
+```csharp
+var typeName = configuration["HandlerType"];
+var type = Type.GetType(typeName!);
+var handler = Activator.CreateInstance(type!);
+```
+
+The second pattern is not automatically wrong. It simply shifts the design toward runtime discovery and away from publish-time predictability.
 
 ## Trimming
 
@@ -246,9 +252,7 @@ More predictable pattern:
 builder.Services.AddScoped<IOrderHandler, OrderHandler>();
 ```
 
-Key takeaway:
-
-> JIT gives the most runtime flexibility. ReadyToRun moves some compilation earlier. Trimming and Native AOT move more decisions to publish time, which improves startup and size but requires more explicit code.
+JIT gives the most runtime flexibility. ReadyToRun moves some compilation earlier. Trimming and Native AOT move more decisions to publish time, which can improve startup and footprint but requires more explicit code and a more predictable dependency model.
 
 Reflection-sensitive example:
 
@@ -290,76 +294,25 @@ Decision table:
 
 ## Practical Scenario
 
-Scenario:
+Consider the following scenario:
 
 ```text
 Our serverless .NET function cold start is too slow. What can we do?
 ```
 
-Detailed explanation:
-
 > I would first measure cold start and separate platform startup, app initialization, dependency loading, and first request JIT. Then I would reduce startup work, avoid heavy reflection, trim dependencies, consider ReadyToRun or Native AOT if compatible, and verify with realistic deployment measurements.
 
-## Review Questions
+This trade-off exists because C# usually does not compile straight to machine code. It first becomes IL, and then the CLR JIT-compiles that IL into native machine code at runtime. ReadyToRun and Native AOT move more of that compilation work to publish time.
 
-### Does C# compile to machine code?
+Native AOT is most useful when fast startup, smaller runtime footprint, and simple deployment are especially valuable, such as in CLI tools, serverless functions, or small focused services. It becomes harder to adopt when the application or its dependencies rely heavily on reflection, dynamic loading, or runtime code generation.
 
-> Usually C# first compiles to IL. Then the CLR JIT-compiles IL into native machine code at runtime. There are also AOT options like ReadyToRun and Native AOT.
+JIT normally does not compile every method at startup. Methods are usually compiled when they are first executed, which reduces startup work but means first use can pay a compilation cost.
 
-### When would you use Native AOT?
+JIT-generated native code is scoped to the running process. Once the process exits, that generated code is gone. ReadyToRun and Native AOT exist specifically to move more of that work earlier so cold-start behavior becomes more predictable. The real engineering decision is therefore not "JIT versus AOT" in the abstract, but which compilation strategy fits the application's startup sensitivity, dynamism requirements, and operational constraints.
 
-> I would consider it for fast-startup services, CLI tools, serverless functions, or small services where reflection-heavy libraries are controlled.
+That is why these publishing choices should be measured in the context of the actual workload:
 
-### Why can Native AOT break some libraries?
-
-> Libraries that depend heavily on reflection, dynamic loading, or runtime code generation may need extra configuration or may not work well with Native AOT.
-
-### Does JIT compile every method at startup?
-
-> Usually no. JIT compiles methods when they are first executed. This reduces startup work but means first use of a method may pay compilation cost.
-
-### Does JIT code survive process restart?
-
-> Normally no. JIT-generated native code is stored for the current process. When the process exits, that generated code is gone. ReadyToRun and Native AOT are ways to move some compilation work earlier.
-
-## Common Mistakes
-
-### Mistake: Saying JIT means interpreted.
-
-Why it is wrong:
-
-> JIT compiles IL into native machine code at runtime. Interpreted code is executed by an interpreter without producing normal native method code in the same way.
-
-Better answer:
-
-> JIT means runtime compilation, not interpretation.
-
-### Mistake: Assuming Native AOT is always better.
-
-Why it is wrong:
-
-> Native AOT can improve startup and reduce runtime dependency, but it can limit reflection, dynamic loading, and runtime code generation. It can also require more publish-time configuration.
-
-Better answer:
-
-> Native AOT is excellent for some workloads, but you choose it based on startup, memory, deployment, library compatibility, and dynamic feature needs.
-
-### Mistake: Ignoring reflection limitations.
-
-Why it is wrong:
-
-> AOT and trimming may remove metadata that reflection-based code expects. Reflection-heavy libraries may fail unless metadata is preserved or source generation is used.
-
-Better answer:
-
-> For AOT, prefer source-generation-friendly libraries and explicitly preserve required metadata.
-
-### Mistake: Not measuring startup vs throughput trade-offs.
-
-Why it is wrong:
-
-> ReadyToRun or AOT can improve startup but may not always improve steady-state throughput. JIT can optimize hot methods at runtime with tiered compilation.
-
-Better answer:
-
-> Measure startup, p95 latency, memory, binary size, and throughput before deciding.
+- short-lived CLI tools care heavily about startup;
+- serverless functions care about cold start and package size;
+- long-running APIs may care more about compatibility and steady-state throughput than about a small first-request penalty;
+- plugin-heavy or reflection-heavy systems may not be good Native AOT candidates without architectural change.

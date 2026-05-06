@@ -12,14 +12,6 @@ It is commonly used for:
 - analytics ingestion;
 - integration between services.
 
-Chinese notes:
-
-- `topic`: 主题.
-- `partition`: 分区.
-- `consumer group`: 消费者组.
-- `offset`: 偏移量.
-- `event streaming`: 事件流.
-
 ## Core Concepts
 
 ### Broker
@@ -91,8 +83,6 @@ offset 102 -> OrderCreated C
 Consumer group billing-service committed offset: 100
 Next message to process: 101
 ```
-
-Duplicate consumption（重复消费） usually happens because business processing and offset commit are separate operations.
 
 Common timeline:
 
@@ -170,8 +160,6 @@ Risk:
 For important business workflows, prefer manual commit after successful processing.
 
 ## Rebalance And Duplicate Processing
-
-A rebalance（再均衡） happens when partition ownership changes in a consumer group.
 
 Causes:
 
@@ -271,8 +259,6 @@ Message may be lost but not processed twice.
 Message will not be lost if committed correctly, but may be processed more than once.
 
 Most common in business systems.
-
-Requires idempotent consumer（幂等消费者）.
 
 ### Exactly once
 
@@ -476,45 +462,6 @@ RabbitMQ:
 Engineering perspective:
 
 > I choose Kafka when I need durable event streams, replay, high throughput, and event-driven integration. I choose RabbitMQ or Azure Service Bus when I need command-style queues, routing, delayed messages, and simpler business workflow messaging.
-
-## Knowledge Checks
-
-### What is a Kafka partition?
-
-> A partition is an ordered append-only log inside a topic. It provides parallelism and ordering guarantees within that partition.
-
-### What is a consumer group?
-
-> A consumer group is a set of consumers that share processing of topic partitions. Each partition is consumed by only one consumer in the group at a time.
-
-### How do you handle duplicate messages?
-
-> Design consumers to be idempotent, using unique event IDs, processed message tables, database constraints, or natural idempotent operations.
-
-### Why can Kafka consume the same message twice?
-
-> Because processing and offset commit are separate. If processing succeeds but the consumer crashes, rebalances, or fails to commit the offset, Kafka can redeliver from the last committed offset. The consumer must be idempotent.
-
-### What if a Kafka consumer cannot process a message successfully?
-
-> First classify the failure: bad data, transient dependency issue, poison message, slow processing, rebalance, or commit issue. Use bounded retries, retry topics, DLT, logging, alerting, and a safe replay path.
-
-### How do you handle failures?
-
-> Use retries with backoff, retry topics, dead-letter topics, logging, monitoring consumer lag, and idempotent processing.
-
-## Common Mistakes
-
-- Assuming Kafka guarantees global ordering.
-- Committing offset before processing succeeds.
-- No idempotency.
-- No dead-letter strategy.
-- Infinite retry blocking one partition.
-- Ignoring consumer rebalance behavior.
-- Treating offset commit as the same thing as business success.
-- Too many partitions without operational reason.
-- Sending huge messages.
-- Treating Kafka like a synchronous request/response system.
 
 ## Practice Task
 

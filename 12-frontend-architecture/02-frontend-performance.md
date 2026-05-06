@@ -10,16 +10,6 @@ Good performance work has three steps:
 2. Identify the largest bottleneck.
 3. Change one thing and measure again.
 
-Chinese notes:
-
-- `bundle size`: 打包体积.
-- `hydration`: 水合.
-- `Core Web Vitals`: Google 的核心网页指标.
-- `layout shift`: 布局偏移.
-- `long task`: 长任务.
-- `main thread`: 主线程.
-- `render-blocking`: 阻塞渲染.
-
 ## Mental Model
 
 When a user opens a frontend page, the browser usually does this:
@@ -1081,21 +1071,6 @@ Use this order:
 7. Optimize API payloads and caching.
 8. Re-measure on a slower device or throttled network.
 
-## Common Mistakes
-
-- Optimizing without measurement.
-- Testing only on localhost.
-- Testing only on a powerful laptop.
-- Loading admin and reporting code on the first page.
-- Sending huge API payloads to the browser.
-- Rendering thousands of rows without virtualization.
-- Using `useMemo` and `memo` everywhere without profiling.
-- Forgetting image dimensions.
-- Lazy-loading the LCP image.
-- Creating request waterfalls accidentally.
-- Keeping old feature flags and dead code in the bundle.
-- Ignoring accessibility while virtualizing lists.
-
 ## Practice Task
 
 Take a React app and perform a small performance pass:
@@ -1111,25 +1086,3 @@ Take a React app and perform a small performance pass:
 8. Reduce one unnecessary re-render found by React Profiler.
 9. Document before and after metrics.
 ```
-
-## Knowledge Checks
-
-### Why should performance work start with measurement?
-
-Because the slowest visible problem is often not the one developers guess. Measurement shows whether the bottleneck is network, JavaScript execution, rendering, images, API design, or server response time.
-
-### What is the difference between LCP, CLS, and INP?
-
-LCP measures when important content appears. CLS measures visual stability. INP measures interaction responsiveness.
-
-### When should you use virtualization?
-
-Use virtualization when rendering a large list or table creates too much DOM and rendering work. It is especially useful for logs, tables, search results, and audit history.
-
-### Why can global state hurt performance?
-
-If global state updates notify too many components, large parts of the app may re-render for a small change. State should be scoped to the smallest reasonable boundary.
-
-### Why can lazy loading hurt performance?
-
-Lazy loading can hurt when it delays content the user needs immediately, such as the LCP image or essential first-page UI. It is best for non-critical routes, heavy optional components, and rarely used features.

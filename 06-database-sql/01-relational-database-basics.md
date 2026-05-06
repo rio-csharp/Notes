@@ -1,40 +1,29 @@
-# Relational Database Basics
+# Relational Databases And Data Integrity
 
 ## Core Idea
 
-A relational database stores data in tables and uses relationships, constraints, and SQL to manage and query data.
+A relational database stores data in tables, but its real value is not table storage by itself. Its value lies in how keys, constraints, and declarative queries allow data to remain consistent while multiple applications and users read and modify it over time. A relational system is therefore not just a persistence container. It is an integrity system.
 
-Chinese notes:
+This opening chapter establishes the relational model at the level needed for the rest of the database section. The focus is not on memorizing terminology. It is on understanding why primary keys, foreign keys, uniqueness rules, defaults, and checks matter even when an application already contains validation logic.
 
-- `relational database`: 关系型数据库.
-- `table`: 表.
-- `row`: 行.
-- `column`: 列.
-- `constraint`: 约束.
+## Tables, Rows, And Columns
 
-## Table, Row, Column
-
-Table:
+Relational databases organize data into tables composed of rows and columns.
 
 ```text
 Orders
+  Id
+  CustomerId
+  Status
+  Total
+  CreatedAt
 ```
 
-Columns:
+That representation looks simple, but its engineering strength comes from the fact that rows of one table can be connected to rows of another through keys and constraints rather than through ad hoc application conventions.
 
-```text
-Id, CustomerId, Status, Total, CreatedAt
-```
+## Primary Keys
 
-Rows:
-
-```text
-1, 100, Paid, 99.99, 2026-04-28
-```
-
-## Primary Key
-
-Primary key uniquely identifies each row.
+A primary key uniquely identifies a row within its table.
 
 ```sql
 CREATE TABLE Customers
@@ -44,9 +33,11 @@ CREATE TABLE Customers
 );
 ```
 
-## Foreign Key
+This sounds elementary, but key choice has consequences. The key becomes part of how other tables reference the row, how indexes are built, how updates are targeted, and how application code reasons about identity. A primary key is therefore both a relational constraint and a design decision.
 
-Foreign key links one table to another.
+## Foreign Keys
+
+A foreign key expresses that rows in one table must correspond to rows in another.
 
 ```sql
 CREATE TABLE Orders
@@ -58,9 +49,13 @@ CREATE TABLE Orders
 );
 ```
 
-## Constraints
+This constraint does more than support joins. It prevents the database from accepting an order that refers to a customer row that does not exist. That is one of the fundamental advantages of relational design: referential integrity does not depend entirely on application correctness.
 
-Common constraints:
+## Constraints As Database-Level Invariants
+
+Relational databases use constraints to protect data invariants at the storage boundary.
+
+Common constraint types include:
 
 - primary key;
 - foreign key;
@@ -68,8 +63,6 @@ Common constraints:
 - check;
 - default;
 - not null.
-
-Example:
 
 ```sql
 CREATE TABLE Products
@@ -81,9 +74,11 @@ CREATE TABLE Products
 );
 ```
 
-## Complete Mini Schema
+This matters because application validation is not enough on its own. Services change, background jobs appear, bulk scripts get written, and bugs happen. Constraints provide a final line of defense when invalid data attempts to cross the database boundary.
 
-The following schema is small enough to learn from, but realistic enough to practice relationships and constraints.
+## A Small Relational Schema
+
+The following example is small enough to study directly, but rich enough to show how keys and constraints work together:
 
 ```sql
 CREATE TABLE Customers
@@ -136,56 +131,40 @@ CREATE TABLE OrderItems
 );
 ```
 
-Seed data:
+This schema already demonstrates several design principles:
+
+- surrogate keys identify rows efficiently;
+- unique constraints protect natural identifiers such as email and SKU;
+- check constraints reject invalid numeric values;
+- foreign keys keep relationships valid;
+- snapshot columns preserve business history instead of blindly mirroring current product state.
+
+That last point is especially important. Relational modeling is not only about removing duplication. It is also about preserving the right historical meaning.
+
+## Nullability And Required Data
+
+Nullability is one of the simplest but most important schema decisions. A `NOT NULL` column states that the database must always receive a value. A nullable column states that the absence of a value is meaningful or unavoidable.
+
+Those choices should reflect business truth rather than developer convenience. Allowing `NULL` too freely weakens invariants. Forcing `NOT NULL` everywhere can create fake placeholder values that are even more misleading than nulls.
+
+## Defaults And Consistent Writes
+
+Default constraints make the database responsible for supplying values when callers omit them.
 
 ```sql
-INSERT INTO Customers (Email, Name)
-VALUES
-    ('alice@example.com', 'Alice'),
-    ('bob@example.com', 'Bob');
-
-INSERT INTO Products (Sku, Name, Price)
-VALUES
-    ('KB-001', 'Keyboard', 50.00),
-    ('MS-001', 'Mouse', 25.00);
-
-INSERT INTO Orders (CustomerId, Status, Total)
-VALUES
-    (1, 'Paid', 100.00),
-    (1, 'Draft', 25.00);
-
-INSERT INTO OrderItems (OrderId, ProductId, ProductNameSnapshot, UnitPriceSnapshot, Quantity)
-VALUES
-    (1, 1, 'Keyboard', 50.00, 2),
-    (2, 2, 'Mouse', 25.00, 1);
+CreatedAt DATETIME2 NOT NULL
+    CONSTRAINT DF_Orders_CreatedAt DEFAULT SYSUTCDATETIME()
 ```
 
-Basic query:
+Defaults are useful because they reduce drift between different write paths. If multiple services, jobs, or migration scripts insert rows, a database-level default produces more consistent behavior than requiring every caller to remember the same rule.
 
-```sql
-SELECT
-    o.Id AS OrderId,
-    c.Email,
-    o.Status,
-    o.Total,
-    o.CreatedAt
-FROM Orders o
-INNER JOIN Customers c ON c.Id = o.CustomerId
-ORDER BY o.CreatedAt DESC;
-```
+The trade-off is that defaults should remain understandable. Too much hidden write behavior in the database can make application behavior harder to reason about.
 
-What this schema demonstrates:
+## Views And Stored Procedures
 
-- primary keys identify rows;
-- foreign keys protect relationships;
-- unique constraints protect natural uniqueness;
-- check constraints reject invalid values;
-- default constraints give consistent values when callers omit fields;
-- snapshot columns preserve order history even if product names or prices change later.
+Relational systems also expose programmable boundaries such as views and stored procedures.
 
-## Views
-
-A view is a saved query.
+A view is a saved query:
 
 ```sql
 CREATE VIEW ActiveCustomers AS
@@ -194,15 +173,7 @@ FROM Customers
 WHERE IsActive = 1;
 ```
 
-Use views for:
-
-- simplifying complex queries;
-- reporting;
-- security boundaries.
-
-## Stored Procedures
-
-Stored procedure is database-side executable SQL.
+A stored procedure is executable database-side logic:
 
 ```sql
 CREATE PROCEDURE GetOrdersByCustomer
@@ -215,24 +186,10 @@ BEGIN
 END
 ```
 
-## Review Questions
+These constructs are useful, but they should be understood as optional relational tools rather than as the center of the relational model. The foundation remains keys, constraints, and queryable tables.
 
-### What is a relational database?
+## Design Consequences
 
-> A relational database stores data in tables and uses keys, constraints, and SQL to model relationships and query data.
+Relational databases are strongest when integrity is enforced in the schema instead of being treated as an application hope. Primary keys define identity, foreign keys protect relationships, unique constraints guard natural business rules, and checks reject invalid states at the storage boundary.
 
-### Primary key vs foreign key?
-
-> Primary key uniquely identifies a row in its table. Foreign key references a primary or unique key in another table and enforces relationship integrity.
-
-### Why use constraints?
-
-> Constraints protect data integrity at the database level, even if application code has bugs.
-
-## Common Mistakes
-
-- No foreign keys in relational design.
-- Using strings as primary keys without reason.
-- Allowing invalid data that only application code prevents.
-- No unique constraint for natural unique values like email.
-- Treating database as just a file store.
+Once that mindset is in place, later topics such as joins, indexing, transactions, and query tuning become easier to reason about because they are all operating on a model whose structure already expresses real constraints rather than loosely organized data.

@@ -12,17 +12,6 @@ They are useful when:
 - state transitions must be controlled;
 - direct dependencies between many components become hard to manage.
 
-Chinese notes:
-
-- `behavioral pattern`: 行为型模式.
-- `strategy`: 策略.
-- `observer`: 观察者.
-- `command`: 命令.
-- `mediator`: 中介者.
-- `chain of responsibility`: 职责链.
-- `state`: 状态模式.
-- `template method`: 模板方法.
-
 ## Strategy
 
 Strategy selects an algorithm or behavior at runtime.
@@ -516,17 +505,3 @@ Does the request need validation/logging/transaction pipeline behavior?
 Are state transitions scattered across the codebase?
 Would a simple method or switch be clearer?
 ```
-
-## Knowledge Checks
-
-### Strategy vs switch statement?
-
-Strategy is useful when behaviors vary and grow independently. A small switch can be fine when the logic is simple and stable.
-
-### What pattern is ASP.NET Core middleware?
-
-It resembles Chain of Responsibility. Each middleware can handle work and decide whether to pass the request to the next component.
-
-### How does CQRS use Command pattern?
-
-Commands represent requested state changes, such as `CreateOrder` or `ApproveOrder`, and handlers execute them.

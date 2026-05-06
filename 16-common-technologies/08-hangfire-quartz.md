@@ -4,14 +4,6 @@
 
 Hangfire and Quartz.NET are libraries for background jobs and scheduling in .NET.
 
-Chinese notes:
-
-- `background job`: 后台任务.
-- `scheduler`: 调度器.
-- `cron`: 定时表达式.
-- `idempotency`: 幂等性.
-- `recurring job`: 周期任务.
-
 ## When Background Jobs Are Useful
 
 Move work to a background job when:
@@ -318,31 +310,6 @@ Track:
 - stuck processing jobs;
 - dead-letter/final failure count.
 
-## Common Mistakes
-
-- Non-idempotent jobs.
-- Long-running jobs without cancellation.
-- No retry limit.
-- No monitoring.
-- Doing heavy work inside HTTP requests.
-- No failure review process.
-- Assuming scheduler prevents all duplicates.
-- No progress checkpoint for long jobs.
-
-## Knowledge Checks
-
-### When use Hangfire?
-
-Use Hangfire when you need persistent background jobs, retries, delayed jobs, recurring jobs, and a dashboard.
-
-### When use Quartz?
-
-Use Quartz when scheduling requirements are complex, such as cron schedules, calendars, or clustered scheduling.
-
-### How do you avoid duplicate job execution?
-
-Make jobs idempotent, use locks or row claiming when needed, and rely on unique constraints or status transitions for correctness.
-
 ## Practice Task
 
 Design:
@@ -353,4 +320,3 @@ Design:
 4. retry policy;
 5. idempotency key;
 6. job monitoring.
-

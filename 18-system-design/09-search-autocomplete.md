@@ -4,12 +4,6 @@
 
 Design a search autocomplete system.
 
-Chinese notes:
-
-- `autocomplete`: 自动补全.
-- `prefix`: 前缀.
-- `ranking`: 排名.
-
 ## Requirements
 
 Functional:
@@ -162,26 +156,3 @@ Use:
 - bot detection;
 - max result limit;
 - input length limit.
-
-## Knowledge Checks
-
-### How would you build autocomplete?
-
-For small scale, a trie or database prefix query may work. For production, use precomputed suggestions in Redis or Elasticsearch completion features, with ranking based on popularity and click data.
-
-### How do you reduce frontend requests?
-
-Debounce input, ignore very short queries, cancel obsolete requests, and cache recent suggestions.
-
-### How do you rank suggestions?
-
-Use frequency, click-through, conversion, freshness, and business rules.
-
-## Common Mistakes
-
-- Query database on every keystroke without debounce.
-- No minimum query length.
-- No ranking strategy.
-- No cache.
-- No abuse/rate limiting.
-- Ignoring language/tokenization.

@@ -4,12 +4,6 @@
 
 HTML defines the structure and meaning of web content.
 
-Chinese notes:
-
-- `semantic HTML`: 语义化 HTML.
-- `element`: 元素.
-- `attribute`: 属性.
-
 Good HTML improves accessibility, SEO, browser behavior, testing, and maintainability.
 
 ## Basic Document
@@ -236,8 +230,6 @@ More accessible table:
 
 Use `caption` when the table needs a clear title. Use `scope` so screen readers can connect cells to headers.
 
-## Review Questions
-
 ### What is semantic HTML?
 
 > Semantic HTML uses elements according to their meaning, such as `button` for actions and `nav` for navigation. It improves accessibility, SEO, and maintainability.
@@ -249,15 +241,6 @@ Use `caption` when the table needs a clear title. Use `scope` so screen readers 
 ### Why set image width and height?
 
 > It helps the browser reserve layout space and reduce layout shift.
-
-## Common Mistakes
-
-- Using `div` for everything.
-- Clickable divs without keyboard support.
-- Missing form labels.
-- Bad heading hierarchy.
-- Missing alt text.
-- Tables built with divs for real tabular data.
 
 ## Practice Task
 

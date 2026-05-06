@@ -4,12 +4,6 @@
 
 A linked list stores nodes where each node points to the next node.
 
-Chinese notes:
-
-- `linked list`: 链表.
-- `node`: 节点.
-- `pointer`: 指针/引用.
-
 Unlike an array, linked list nodes are not stored contiguously. Each node has a value and a reference to the next node.
 
 Trade-offs:
@@ -279,28 +273,6 @@ public ListNode? AddTwoNumbers(ListNode? l1, ListNode? l2)
     return dummy.Next;
 }
 ```
-
-## Knowledge Checks
-
-### Why use dummy node?
-
-A dummy node simplifies edge cases when building or modifying a list, especially when the head may change.
-
-### When use fast/slow pointers?
-
-Use fast/slow pointers for middle node, cycle detection, and problems involving two speeds or distance gaps.
-
-### Why is linked list index access `O(n)`?
-
-Because the list must be traversed node by node from the head until the target index is reached.
-
-## Common Mistakes
-
-- Losing `next` pointer before rewiring.
-- Null reference errors.
-- Infinite loop in cycle.
-- Not handling empty list.
-- Confusing node value equality with node reference equality.
 
 ## Practice Problems
 

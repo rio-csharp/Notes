@@ -4,13 +4,6 @@
 
 Design a chat system that supports one-to-one and group messaging.
 
-Chinese notes:
-
-- `real-time`: 实时.
-- `presence`: 在线状态.
-- `fan-out`: 扇出.
-- `message ordering`: 消息顺序.
-
 ## Requirements
 
 Functional:
@@ -231,30 +224,6 @@ Multiple servers need:
 - sticky sessions, or
 - SignalR backplane, or
 - managed service such as Azure SignalR Service.
-
-## Knowledge Checks
-
-### How do you guarantee message delivery?
-
-Persist the message before acknowledging success, use client-side acknowledgement, retry on failure, and let clients sync missed messages after reconnecting.
-
-### How do you scale WebSocket connections?
-
-Use multiple gateway instances, a backplane or managed SignalR service, connection tracking, and separate real-time delivery from durable message storage.
-
-### How do you handle offline users?
-
-Store messages durably, track unread state, and deliver missed messages when they reconnect. Push notifications can be sent separately.
-
-## Common Mistakes
-
-- Broadcasting before saving.
-- No reconnect strategy.
-- No message IDs.
-- No pagination for history.
-- Storing presence permanently without TTL.
-- Assuming timestamps alone guarantee ordering.
-- No abuse/rate limiting.
 
 ## Practice Task
 

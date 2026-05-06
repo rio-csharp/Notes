@@ -2,82 +2,134 @@
 
 ## Core Idea
 
-Collections store groups of values. Choosing the right collection affects correctness and performance.
+Collections are one of the places where language design meets algorithmic reality. Two code samples can look equally simple at the call site while having very different behavior in memory, lookup cost, mutation cost, and concurrency characteristics.
 
-Chinese notes:
+This chapter is not only about naming the standard collection types. It is about choosing them deliberately. The right collection can make invariants clearer and algorithms cheaper. The wrong one can quietly introduce linear scans, accidental duplicates, unstable mutation semantics, or thread-safety problems.
 
-- `collection`: 集合.
-- `hash table`: 哈希表.
-- `enumeration`: 枚举遍历.
+## Choosing A Collection By Access Pattern
 
-## Common Collections
+The most useful way to think about collections is not by memorizing type names, but by asking what the code needs to do most often.
 
-Quick selection guide:
-
-| Need | Good Choice | Why |
+| Need | Good Choice | Reason |
 | --- | --- | --- |
-| Fixed-size indexed data | `T[]` | simple and fast |
-| Ordered dynamic list | `List<T>` | append and index access are efficient |
-| Lookup by key | `Dictionary<TKey,TValue>` | average `O(1)` lookup |
-| Unique values / membership check | `HashSet<T>` | average `O(1)` membership |
-| FIFO processing | `Queue<T>` | enqueue/dequeue workflow |
-| LIFO processing | `Stack<T>` | undo/backtracking workflow |
-| Multi-threaded dictionary access | `ConcurrentDictionary<TKey,TValue>` | thread-safe dictionary operations |
+| Fixed-size indexed data | `T[]` | minimal overhead and direct indexing |
+| Ordered resizable sequence | `List<T>` | efficient append and index access |
+| Key-based lookup | `Dictionary<TKey, TValue>` | average constant-time lookup |
+| Uniqueness or membership checks | `HashSet<T>` | average constant-time membership |
+| FIFO workflow | `Queue<T>` | natural enqueue/dequeue semantics |
+| LIFO workflow | `Stack<T>` | natural push/pop semantics |
+| Concurrent key-value access | `ConcurrentDictionary<TKey, TValue>` | thread-safe dictionary operations |
 
-### Array
+This framing matters because collection choice is really a statement about dominant operations. The best collection for appending is not always the best collection for repeated membership checks. The best collection for preserving order may be the wrong one for enforcing uniqueness.
 
-Fixed size.
+## Arrays And Lists
+
+Arrays and `List<T>` are often confused because both support indexed access, but they represent different design intentions.
+
+An array is fixed-size:
 
 ```csharp
 var numbers = new int[3];
 ```
 
-Fast indexed access.
-
-Example:
+It is useful when the size is known in advance, when an API specifically expects an array, or when minimal abstraction and predictable layout matter.
 
 ```csharp
 var scores = new[] { 90, 85, 100 };
-Console.WriteLine(scores[0]); // 90
+Console.WriteLine(scores[0]);
 ```
 
-Use arrays when size is fixed or when APIs require arrays. For most business lists, `List<T>` is more convenient.
-
-### List<T>
-
-Dynamic array.
-
-```csharp
-var users = new List<User>();
-users.Add(new User());
-```
-
-Good default for ordered lists.
-
-Example:
+`List<T>` adds growth and richer collection operations:
 
 ```csharp
 var orders = new List<Order>();
 orders.Add(new Order(1));
 orders.Add(new Order(2));
+```
 
+```csharp
 foreach (var order in orders)
 {
     Console.WriteLine(order.Id);
 }
 ```
 
-### Dictionary<TKey, TValue>
+For most business application code, `List<T>` is the default ordered collection because it provides flexible sizing with efficient append and direct indexing. Arrays remain valuable when the collection is truly fixed or when interop and lower-level APIs make the shape meaningful.
 
-Key-value lookup.
+## The Shape Of `List<T>`
 
-```csharp
-var usersById = new Dictionary<int, User>();
+`List<T>` is conceptually backed by an internal array plus a count of how many slots are currently in use.
+
+```text
+List<int>
+  _items: [10, 20, 30, _, _, _]
+  _size: 3
 ```
 
-Average lookup: `O(1)`.
+This design explains most of its performance characteristics.
 
-Example:
+Appending at the end is usually cheap because the next free slot is already available:
+
+```csharp
+var numbers = new List<int>();
+numbers.Add(10);
+numbers.Add(20);
+numbers.Add(30);
+```
+
+Index access is also cheap because the list can calculate the array position directly:
+
+```csharp
+var second = numbers[1];
+```
+
+When the internal array runs out of space, however, the list must allocate a larger array and copy existing elements. That is why append is amortized `O(1)` rather than always strictly `O(1)`.
+
+`Count` and `Capacity` capture this distinction:
+
+```csharp
+var list = new List<int>(capacity: 100);
+
+Console.WriteLine(list.Count);    // 0
+Console.WriteLine(list.Capacity); // at least 100
+```
+
+`Count` is how many business values are present. `Capacity` is how much storage is currently reserved. Pre-sizing can reduce reallocations when the approximate size is known.
+
+The same array-backed design also explains why insertion and removal in the middle are more expensive:
+
+```csharp
+list.Insert(0, newItem);
+list.RemoveAt(0);
+```
+
+These operations shift existing elements, so their cost grows with the size of the affected tail of the list. A `List<T>` is therefore a strong default for append-heavy ordered data, but not always the right structure for frequent front-insert or front-remove workflows.
+
+## Enumeration And Structural Mutation
+
+Many developers discover only after the fact that mutating a list while enumerating it is usually invalid.
+
+```csharp
+foreach (var user in users)
+{
+    if (!user.IsActive)
+    {
+        users.Remove(user);
+    }
+}
+```
+
+This throws because the list's enumerator expects the underlying structure to remain stable during enumeration. Safer alternatives include collecting items to remove separately or using purpose-built operations such as:
+
+```csharp
+users.RemoveAll(user => !user.IsActive);
+```
+
+The larger lesson is that iteration and mutation are not always independent concerns. Collection APIs often encode assumptions about when the structure may change.
+
+## Dictionaries And Key-Based Access
+
+`Dictionary<TKey, TValue>` exists for a different problem: retrieving a value efficiently by key.
 
 ```csharp
 var usersById = users.ToDictionary(user => user.Id);
@@ -88,282 +140,19 @@ if (usersById.TryGetValue(42, out var user))
 }
 ```
 
-Use `TryGetValue` when the key may not exist. Indexer access throws if the key is missing.
-
-### HashSet<T>
-
-Unique values.
+This is often much better than repeatedly scanning a list:
 
 ```csharp
-var ids = new HashSet<int>();
+var user = users.FirstOrDefault(u => u.Id == id);
 ```
 
-Good for membership checks.
+For repeated lookup, the difference between linear search and average constant-time lookup can dominate overall performance.
 
-Example:
+The important design point is that a dictionary does not merely store pairs. It asserts that key-based lookup is a first-class operation in the model.
 
-```csharp
-var allowedStatuses = new HashSet<string>
-{
-    "Draft",
-    "Submitted",
-    "Approved"
-};
+## The Shape Of `Dictionary<TKey, TValue>`
 
-if (!allowedStatuses.Contains(inputStatus))
-{
-    throw new ValidationException("Invalid status.");
-}
-```
-
-### Queue<T>
-
-First-in-first-out.
-
-```csharp
-var queue = new Queue<Job>();
-```
-
-### Stack<T>
-
-Last-in-first-out.
-
-```csharp
-var stack = new Stack<int>();
-```
-
-Practical examples:
-
-```csharp
-var jobs = new Queue<string>();
-jobs.Enqueue("send-email");
-jobs.Enqueue("generate-report");
-Console.WriteLine(jobs.Dequeue()); // send-email
-```
-
-```csharp
-var undo = new Stack<string>();
-undo.Push("typed A");
-undo.Push("typed B");
-Console.WriteLine(undo.Pop()); // typed B
-```
-
-## IEnumerable vs ICollection vs IList
-
-`IEnumerable<T>`:
-
-- can be enumerated;
-- minimal abstraction;
-- may be lazy.
-
-`ICollection<T>`:
-
-- count;
-- add/remove;
-- collection operations.
-
-`IList<T>`:
-
-- index-based access;
-- ordered list operations.
-
-Use the least powerful interface needed.
-
-Example API design:
-
-```csharp
-public void PrintUsers(IEnumerable<User> users)
-{
-    foreach (var user in users)
-    {
-        Console.WriteLine(user.Name);
-    }
-}
-```
-
-This method only needs enumeration, so `IEnumerable<User>` is enough.
-
-If the method needs count:
-
-```csharp
-public void ValidateUsers(ICollection<User> users)
-{
-    if (users.Count == 0)
-    {
-        throw new ValidationException("At least one user is required.");
-    }
-}
-```
-
-If the method needs indexing:
-
-```csharp
-public User GetFirst(IList<User> users)
-{
-    return users[0];
-}
-```
-
-## Concurrent Collections
-
-Examples:
-
-- `ConcurrentDictionary<TKey, TValue>`;
-- `ConcurrentQueue<T>`;
-- `ConcurrentBag<T>`.
-
-Use when multiple threads access collection concurrently.
-
-Important:
-
-> Concurrent collections protect collection operations. They do not automatically make the objects inside the collection immutable or thread-safe.
-
-## Under The Hood: List<T>
-
-`List<T>` is a dynamic array（动态数组）.
-
-Internally, it is conceptually built around:
-
-- an internal array, commonly described as `_items`;
-- a count, commonly described as `_size`;
-- a version number, commonly described as `_version`, used to detect modification during enumeration.
-
-Conceptual model:
-
-```text
-List<int>
-  _items: [10, 20, 30, _, _, _]
-  _size: 3
-```
-
-When you call:
-
-```csharp
-var numbers = new List<int>();
-numbers.Add(10);
-numbers.Add(20);
-numbers.Add(30);
-```
-
-the list stores values in an array. Index access is fast because `numbers[1]` can directly calculate the position in the array.
-
-### Capacity vs Count
-
-`Count` is how many items are actually in the list.
-
-`Capacity` is how many items the internal array can currently hold before it must grow.
-
-```csharp
-var list = new List<int>(capacity: 100);
-
-Console.WriteLine(list.Count);    // 0
-Console.WriteLine(list.Capacity); // at least 100
-```
-
-Why this matters:
-
-- setting capacity can reduce reallocations when you know the approximate size;
-- `Count` is business data size;
-- `Capacity` is internal storage size.
-
-### How List<T> Grows
-
-When the internal array is full, `List<T>` allocates a larger array and copies existing elements.
-
-Conceptual flow:
-
-```text
-Add item
-  -> if _size < _items.Length
-       store item directly
-  -> else
-       allocate bigger array
-       copy old items
-       store new item
-```
-
-This is why:
-
-- single `Add` is usually `O(1)`;
-- sometimes `Add` becomes `O(n)` because resizing copies all existing elements;
-- over many adds, the average cost is still amortized `O(1)`（均摊 O(1)）.
-
-### Insert and Remove Cost
-
-Adding at the end is cheap most of the time.
-
-Inserting in the middle is expensive:
-
-```csharp
-list.Insert(0, newItem);
-```
-
-The list must shift elements to the right.
-
-Removing from the middle is also expensive:
-
-```csharp
-list.RemoveAt(0);
-```
-
-The list must shift elements to the left.
-
-Time complexity:
-
-| Operation | Average Cost | Why |
-|---|---:|---|
-| `list[index]` | `O(1)` | direct array access |
-| `Add` at end | amortized `O(1)` | occasional resize |
-| `Insert` at front/middle | `O(n)` | shifts elements |
-| `RemoveAt` front/middle | `O(n)` | shifts elements |
-| `Contains` | `O(n)` | linear search |
-
-### Why Modifying During foreach Throws
-
-`List<T>` enumerator records the list version when enumeration starts.
-
-If the list changes during enumeration, `_version` changes. The enumerator detects that and throws.
-
-Bad:
-
-```csharp
-foreach (var user in users)
-{
-    if (!user.IsActive)
-    {
-        users.Remove(user); // InvalidOperationException
-    }
-}
-```
-
-Better:
-
-```csharp
-users.RemoveAll(user => !user.IsActive);
-```
-
-Engineering perspective:
-
-> `List<T>` is backed by an array. It gives fast index access and efficient append, but inserting or removing in the middle requires shifting elements. When capacity is exceeded, it allocates a larger array and copies existing items, so `Add` is amortized `O(1)`, not always strictly `O(1)`.
-
-## Under The Hood: Dictionary<TKey, TValue>
-
-`Dictionary<TKey, TValue>` is a hash table（哈希表）.
-
-It is designed for fast lookup by key:
-
-```csharp
-var user = usersById[userId];
-```
-
-Conceptually, it uses:
-
-- buckets（桶）: where lookup starts;
-- entries（条目）: where keys, values, hash codes, and collision links are stored;
-- an equality comparer: usually `EqualityComparer<TKey>.Default`;
-- a free list: reusable slots after removals.
-
-Conceptual model:
+Dictionaries use hashing. At a high level, they compute a hash code from the key, map that hash code to a bucket, and then compare keys within that bucket to find the actual entry.
 
 ```text
 buckets
@@ -377,58 +166,21 @@ entries
   [2] hash=309 key=77 value=Cara  next=1
 ```
 
-Implementation details can change between .NET versions, but this mental model is the important learning model.
-
-### Lookup Flow
-
-When you call:
-
-```csharp
-usersById.TryGetValue(id, out var user);
-```
-
-the dictionary roughly does:
+The exact implementation can change across runtime versions, but the conceptual model is stable:
 
 ```text
-1. compute hash code from key
-2. map hash code to a bucket
-3. check entries linked from that bucket
-4. compare hash code and key equality
-5. return value if key matches
+compute hash
+locate bucket
+walk entries for that bucket
+compare actual keys
+return matching value
 ```
 
-Pseudo-code:
+This explains several practical rules. Good hash distribution matters. Equality and hash code must agree. Collisions are normal and handled by the data structure, but pathological collision patterns can damage performance.
 
-```csharp
-int hash = comparer.GetHashCode(key);
-int bucketIndex = hash % buckets.Length;
+## Equality, Hash Codes, And Stable Keys
 
-for (int entryIndex = buckets[bucketIndex]; entryIndex >= 0; entryIndex = entries[entryIndex].Next)
-{
-    if (entries[entryIndex].HashCode == hash &&
-        comparer.Equals(entries[entryIndex].Key, key))
-    {
-        return entries[entryIndex].Value;
-    }
-}
-```
-
-The real implementation is more optimized, but the idea is the same.
-
-### Collision
-
-A collision happens when different keys map to the same bucket.
-
-Example:
-
-```text
-Key A -> bucket 5
-Key B -> bucket 5
-```
-
-The dictionary must compare actual keys, not only hash codes.
-
-This is why `Equals` and `GetHashCode` must agree:
+Dictionary correctness depends on the meaning of key equality.
 
 ```csharp
 public sealed class UserKey
@@ -450,39 +202,9 @@ public sealed class UserKey
 }
 ```
 
-Rule:
+If two keys are equal, they must produce the same hash code. The reverse is not required: two unequal keys may still share a hash code and force a collision check.
 
-> If two objects are equal, they must return the same hash code.
-
-The reverse is not required:
-
-> Two objects can have the same hash code and still not be equal.
-
-### Why Dictionary Is Usually O(1)
-
-Dictionary lookup is average `O(1)` because a good hash function spreads keys across buckets.
-
-Worst case can degrade toward `O(n)` if many keys collide.
-
-In normal application code, with good hash codes and enough capacity, lookup is effectively constant time.
-
-### Resize Cost
-
-When the dictionary grows, it may allocate larger internal arrays and redistribute entries.
-
-This is expensive compared with a normal lookup.
-
-If you know the expected size, initialize capacity:
-
-```csharp
-var usersById = new Dictionary<int, User>(capacity: users.Count);
-```
-
-### Mutable Keys Are Dangerous
-
-Do not mutate a key after inserting it into a dictionary.
-
-Bad:
+Stable key identity is equally important. Mutating a key after insertion can make the dictionary unable to find the entry correctly:
 
 ```csharp
 var key = new UserKey { TenantId = "t1", UserId = "u1" };
@@ -490,49 +212,30 @@ var map = new Dictionary<UserKey, string>();
 
 map[key] = "Alice";
 
-key.UserId = "u2"; // dangerous if key participates in hash/equality
+key.UserId = "u2";
 ```
 
-The dictionary placed the key based on the old hash code. After mutation, lookup may fail.
+That is why immutable primitives, records, and dedicated value-object identifiers are often safer dictionary keys than mutable entities.
 
-Better:
+## Hash Sets And Uniqueness
 
-```csharp
-public sealed record UserKey(string TenantId, string UserId);
-```
-
-### Dictionary vs List Lookup
-
-If you repeatedly search by ID:
+`HashSet<T>` uses the same broad hashing principles as a dictionary, but it focuses on membership and uniqueness rather than key-value association.
 
 ```csharp
-users.FirstOrDefault(u => u.Id == id);
-```
-
-that is `O(n)` each time.
-
-For repeated lookup, build a dictionary:
-
-```csharp
-var usersById = users.ToDictionary(u => u.Id);
-
-if (usersById.TryGetValue(id, out var user))
+var allowedStatuses = new HashSet<string>
 {
-    // O(1) average lookup
+    "Draft",
+    "Submitted",
+    "Approved"
+};
+
+if (!allowedStatuses.Contains(inputStatus))
+{
+    throw new ValidationException("Invalid status.");
 }
 ```
 
-Engineering perspective:
-
-> `Dictionary<TKey,TValue>` uses hashing. It computes a hash code for the key, maps it to a bucket, then checks entries in that bucket using equality. Average lookup is `O(1)` when hash distribution is good, but collisions, bad `GetHashCode`, mutable keys, or frequent resizing can hurt performance.
-
-## Under The Hood: HashSet<T>
-
-`HashSet<T>` is like a dictionary without values.
-
-It stores unique values and uses hashing to check membership.
-
-Conceptually:
+It is also ideal for deduplication and efficient membership checks:
 
 ```csharp
 var seen = new HashSet<int>();
@@ -543,55 +246,76 @@ if (seen.Add(orderId))
 }
 ```
 
-`Add` returns:
+When code repeatedly calls `List<T>.Contains` on large data, that is often a sign that the structure should really be a set. Choosing `HashSet<T>` communicates the invariant more clearly and usually improves performance at the same time.
 
-- `true` if the value was not already present;
-- `false` if it already existed.
+## Queues And Stacks As Behavioral Collections
 
-Good use cases:
+`Queue<T>` and `Stack<T>` are useful because they represent workflow semantics directly, not merely storage shape.
 
-- deduplication;
-- membership checks;
-- set operations like union, intersection, except.
+A queue is first in, first out:
 
-Avoid:
-
-- using `List<T>.Contains` repeatedly for large data;
-- using mutable objects as hash set values unless equality is stable.
-
-## Under The Hood: Queue<T> and Stack<T>
-
-`Queue<T>` is FIFO: first in, first out.
-
-It is commonly implemented with a circular array（循环数组） concept:
-
-```text
-head -> item to dequeue next
-tail -> position to enqueue next
+```csharp
+var jobs = new Queue<string>();
+jobs.Enqueue("send-email");
+jobs.Enqueue("generate-report");
+Console.WriteLine(jobs.Dequeue()); // send-email
 ```
 
-This avoids shifting all elements on every dequeue.
+A stack is last in, first out:
 
-`Stack<T>` is LIFO: last in, first out.
-
-It can use an array and a top index:
-
-```text
-Push -> store at top, increment top
-Pop  -> decrement top, return item
+```csharp
+var undo = new Stack<string>();
+undo.Push("typed A");
+undo.Push("typed B");
+Console.WriteLine(undo.Pop()); // typed B
 ```
 
-Key point:
+These types are clearer than trying to simulate the same behavior with a list. They also align better with the underlying operations. Removing from the front of a plain list repeatedly is typically expensive because it shifts elements. Queue and stack abstractions exist partly to avoid those accidental algorithmic costs.
 
-> Queue and stack operations are usually `O(1)`. If you used a plain list and removed from the front repeatedly, it would be `O(n)` because elements shift.
+## Collection Interfaces And API Boundaries
 
-## Under The Hood: ConcurrentDictionary<TKey, TValue>
+Concrete collections matter, but collection interfaces matter just as much at API boundaries because they define what the caller is allowed to assume.
 
-`Dictionary<TKey,TValue>` is not safe for concurrent writes.
+`IEnumerable<T>` means the data can be enumerated:
 
-Use `ConcurrentDictionary<TKey,TValue>` when multiple threads may read and write.
+```csharp
+public void PrintUsers(IEnumerable<User> users)
+{
+    foreach (var user in users)
+    {
+        Console.WriteLine(user.Name);
+    }
+}
+```
 
-Common methods:
+`ICollection<T>` adds mutation-oriented collection semantics and count:
+
+```csharp
+public void ValidateUsers(ICollection<User> users)
+{
+    if (users.Count == 0)
+    {
+        throw new ValidationException("At least one user is required.");
+    }
+}
+```
+
+`IList<T>` adds indexed ordered access:
+
+```csharp
+public User GetFirst(IList<User> users)
+{
+    return users[0];
+}
+```
+
+The design principle is to accept the weakest abstraction that still expresses what the method truly needs. That reduces coupling to unnecessary capabilities and makes the contract more honest.
+
+## Concurrent And Immutable Collections
+
+Once multiple threads may access the same collection, ordinary collection types are often no longer sufficient.
+
+`ConcurrentDictionary<TKey, TValue>` provides thread-safe dictionary operations:
 
 ```csharp
 var cache = new ConcurrentDictionary<int, User>();
@@ -604,45 +328,24 @@ cache.AddOrUpdate(
     (id, existing) => existing with { LastSeenAt = DateTimeOffset.UtcNow });
 ```
 
-Important nuance:
+This protects dictionary-level operations, but it does not magically make the stored objects immutable or safe for arbitrary concurrent mutation. Thread-safe containers and thread-safe payloads are related but distinct concerns.
 
-- operations are thread-safe at the dictionary level;
-- the objects stored inside may still be mutable and not thread-safe;
-- factory delegates may be invoked more than once under races, so avoid side effects inside factories when possible.
-
-## Immutable Collections
-
-Immutable collections do not change after creation.
-
-Useful for:
-
-- thread safety;
-- functional style;
-- predictable state.
-
-Example:
+Immutable collections solve a different problem:
 
 ```csharp
 using System.Collections.Immutable;
 
 var original = ImmutableArray.Create("Draft", "Submitted");
 var updated = original.Add("Approved");
-
-Console.WriteLine(original.Length); // 2
-Console.WriteLine(updated.Length);  // 3
 ```
 
-This is useful when you want safe sharing without locks.
+These types trade mutation convenience for easier reasoning, safer sharing, and more predictable concurrency behavior. They are especially useful when data should be passed across threads or retained as snapshots rather than edited in place.
 
-## Collection Choice In Real APIs
+## Collection Choice As Algorithm Design
 
-Example problem:
+Collection choice often changes the effective algorithm even when the business requirement stays the same.
 
-```text
-Given 10,000 orders and 2,000 selected order IDs, return selected orders.
-```
-
-Slow shape:
+Consider the task "given 10,000 orders and 2,000 selected IDs, return the matching orders."
 
 ```csharp
 var selected = orders
@@ -650,9 +353,7 @@ var selected = orders
     .ToList();
 ```
 
-If `selectedIds` is a `List<int>`, each `Contains` can scan the list.
-
-Better:
+If `selectedIds` is a list, membership checking may be repeated linear search. A more appropriate structure changes the cost profile:
 
 ```csharp
 var selectedIdSet = selectedIds.ToHashSet();
@@ -662,80 +363,4 @@ var selected = orders
     .ToList();
 ```
 
-Key point:
-
-> Collection choice can change an algorithm from repeated linear search to average constant-time lookup.
-
-## Review Questions
-
-### List vs array?
-
-> Array has fixed size and direct indexed access. `List<T>` is a dynamic array that can grow and is easier for most application code.
-
-### Dictionary vs HashSet?
-
-> `Dictionary` maps keys to values. `HashSet` stores unique values and is used for membership checks.
-
-### IEnumerable vs IQueryable?
-
-> `IEnumerable` represents in-memory enumeration or deferred sequence logic. `IQueryable` represents a query expression that can be translated by a provider such as EF Core into SQL.
-
-### Why should keys in a dictionary be immutable?
-
-> Dictionary lookup depends on hash code and equality. If a key changes after insertion, the dictionary may look in the wrong bucket and fail to find the entry.
-
-### How do you choose between `List<T>` and `HashSet<T>`?
-
-> Use `List<T>` when order and index access matter. Use `HashSet<T>` when uniqueness or repeated membership checks matter.
-
-## Common Mistakes
-
-### Mistake: Using `List.Contains` for repeated lookups instead of `HashSet`.
-
-Why it is wrong:
-
-> `List.Contains` is usually O(n). Repeating it inside loops can turn a simple operation into O(n*m). `HashSet` lookup is usually O(1).
-
-Better answer:
-
-> Convert lookup data to `HashSet<T>` when you repeatedly test membership.
-
-### Mistake: Modifying collection while enumerating.
-
-Why it is wrong:
-
-> Most collection enumerators are invalidated when the collection changes, which can throw exceptions or produce incorrect iteration behavior.
-
-Better answer:
-
-> Collect changes separately, iterate over a copy, or use safe collection APIs.
-
-### Mistake: Exposing mutable lists publicly.
-
-Why it is wrong:
-
-> Callers can add/remove items without validation, breaking invariants.
-
-Better answer:
-
-> Expose `IReadOnlyList<T>` or read-only views and provide methods that enforce rules.
-
-### Mistake: Using non-thread-safe collections across threads.
-
-Why it is wrong:
-
-> `List<T>` and `Dictionary<TKey,TValue>` are not safe for concurrent writes. Race conditions can corrupt state or throw exceptions.
-
-Better answer:
-
-> Use locks, immutable snapshots, channels, or concurrent collections depending on the access pattern.
-
-### Mistake: Calling `ToList()` too early.
-
-Why it is wrong:
-
-> It materializes the sequence immediately. In EF Core, this can move filtering/projection from SQL to memory and load too much data.
-
-Better answer:
-
-> Compose queries first, then materialize at the boundary.
+Nothing about the business rule changed. Only the representation changed. This is why collections belong in design discussions rather than being treated as incidental implementation detail.

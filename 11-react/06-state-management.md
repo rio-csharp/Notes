@@ -4,13 +4,6 @@
 
 State management is about deciding where data should live and how it should change.
 
-Chinese notes:
-
-- `local state`: 局部状态.
-- `global state`: 全局状态.
-- `server state`: 服务端状态.
-- `URL state`: URL 状态.
-
 ## Types Of State
 
 ### Local UI State
@@ -307,8 +300,6 @@ This separates:
 - local UI state inside small components;
 - global user/permission state in context or a store.
 
-## Review Questions
-
 ### Context vs Redux?
 
 > Context shares values through component tree but is not a full state management solution. Redux provides structured state updates, middleware, devtools, and predictable patterns for complex global state.
@@ -320,14 +311,6 @@ This separates:
 ### What state belongs in URL?
 
 > State that should be shareable or restorable, such as filters, pagination, search, and selected tabs.
-
-## Common Mistakes
-
-- Global state for everything.
-- Server state in Redux without cache strategy.
-- Context provider value recreated every render.
-- Filters not stored in URL.
-- Duplicated state in multiple places.
 
 ## Practice Task
 

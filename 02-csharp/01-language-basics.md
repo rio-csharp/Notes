@@ -2,34 +2,13 @@
 
 ## Core Idea
 
-C# is a strongly typed, object-oriented, multi-paradigm language used heavily in .NET backend development.
+C# is a statically typed language with object-oriented roots and broad support for procedural, functional, and asynchronous styles. In day-to-day .NET development, however, most code is built from a smaller set of recurring language constructs: types, members, initialization rules, visibility boundaries, and a handful of features that shape how APIs are designed and maintained.
 
-Chinese notes:
+This chapter establishes that working vocabulary. It does not attempt to survey the entire language. Later chapters cover the deeper parts of the type system, generics, asynchronous control flow, and concurrency in their own right. The goal here is to build a reliable mental model for the constructs that appear constantly in application code.
 
-- `strongly typed`: 强类型.
-- `property`: 属性.
-- `method`: 方法.
-- `constructor`: 构造函数.
+## Types, State, And Behavior
 
-## Class
-
-```csharp
-public sealed class User
-{
-    public int Id { get; private set; }
-    public string Name { get; private set; }
-
-    public User(int id, string name)
-    {
-        Id = id;
-        Name = name;
-    }
-}
-```
-
-A class usually represents a concept with state and behavior.
-
-Example with behavior:
+The first important habit in C# is to treat types as design tools rather than mere containers for data. A type defines what state may exist, how that state may change, and which operations make sense for callers.
 
 ```csharp
 public sealed class User
@@ -40,6 +19,11 @@ public sealed class User
 
     public User(int id, string email)
     {
+        if (id <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(id));
+        }
+
         if (string.IsNullOrWhiteSpace(email))
         {
             throw new ArgumentException("Email is required.", nameof(email));
@@ -67,33 +51,18 @@ public sealed class User
 }
 ```
 
-Why this matters:
+This class is useful not because it stores three values, but because it defines a small and coherent model. A caller cannot create a user without an identifier and email, cannot assign an arbitrary invalid email later, and cannot mutate `IsActive` directly. That combination of state and behavior is the normal shape of robust C# code.
 
-> Classes are not only data containers. They can protect valid state and expose meaningful behavior.
+## Fields And Properties
 
-## Property vs Field
-
-Field:
+Fields and properties both relate to state, but they play different roles.
 
 ```csharp
-private string _name;
+private string _name = "";
+public string Name { get; private set; } = "";
 ```
 
-Property:
-
-```csharp
-public string Name { get; private set; }
-```
-
-Properties can control access and support framework binding/serialization better.
-
-Field example:
-
-```csharp
-private int _retryCount;
-```
-
-Property with validation:
+A field is direct storage inside the type. A property is part of the type's public or internal surface and can enforce access rules, validation, computed values, or framework-friendly binding semantics.
 
 ```csharp
 private string _email = "";
@@ -105,7 +74,7 @@ public string Email
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new ArgumentException("Email is required.");
+            throw new ArgumentException("Email is required.", nameof(value));
         }
 
         _email = value;
@@ -113,43 +82,17 @@ public string Email
 }
 ```
 
-Auto-property:
+Properties are usually the correct boundary for observable state because they preserve freedom of implementation. A simple auto-property can later grow into a validated or computed property without forcing callers to change how they interact with the type.
 
 ```csharp
 public string Name { get; private set; } = "";
 ```
 
-Clear wording:
+Exposed mutable fields remove that flexibility and also bypass the conventions expected by serializers, mappers, data-binding systems, and many frameworks in the .NET ecosystem. A private field backed by a property remains the normal default when the type wants to control its own invariants.
 
-> A field is storage. A property is an access boundary. A property can expose state safely, hide implementation, support validation, and work better with frameworks.
+## Construction And Valid State
 
-## Constructor
-
-```csharp
-public Order(int customerId)
-{
-    CustomerId = customerId;
-    Status = OrderStatus.Draft;
-}
-```
-
-Use constructors to enforce required state.
-
-Bad constructor:
-
-```csharp
-public sealed class Order
-{
-    public int CustomerId { get; set; }
-    public string Status { get; set; } = "";
-}
-```
-
-Problem:
-
-> This allows invalid orders such as `CustomerId = 0` or empty status.
-
-Better:
+Constructors define the minimum state required for an object to exist meaningfully.
 
 ```csharp
 public sealed class Order
@@ -172,11 +115,23 @@ public sealed class Order
 }
 ```
 
-Key point:
+This design is stronger than a type with unrestricted setters because invalid intermediate states become harder to create in the first place. A constructor does not guarantee complete business validity for the lifetime of an object, but it should at least establish the object's essential identity and basic invariants.
 
-> Constructors should help create valid objects. If every property can be set freely after construction, invariants are easy to break.
+There is a useful distinction between domain objects and transport models here. Domain objects often benefit from constructors that enforce validity immediately. Request and response models, by contrast, are often designed around binding and serialization concerns:
 
-## Access Modifiers
+```csharp
+public sealed class CreateUserRequest
+{
+    public required string Email { get; init; }
+    public required string Name { get; init; }
+}
+```
+
+`required` and `init` improve initialization discipline, but they are not substitutes for real validation. They express assignment rules to the compiler. They do not prove that an email address is well-formed or that a business rule has been satisfied.
+
+## Access Modifiers As Design Boundaries
+
+C# access modifiers are not merely visibility keywords. They define who is allowed to depend on which parts of a type.
 
 - `public`
 - `private`
@@ -185,11 +140,7 @@ Key point:
 - `protected internal`
 - `private protected`
 
-Practical advice:
-
-> Keep things as private as possible and public only when needed.
-
-Example:
+In well-structured code, public members form a deliberate contract and private members remain free to change. That is why starting with the narrowest practical access level is usually the safest approach.
 
 ```csharp
 public sealed class Order
@@ -205,24 +156,13 @@ public sealed class Order
 }
 ```
 
-Here `_items` is private because callers should not mutate the collection directly. `Items` is public but read-only from the caller's perspective.
+The list itself remains private because the object should own mutation rules. Callers can observe the items, but they cannot arbitrarily clear or reorder them. This is a small example of a broader principle: visibility choices are part of invariant protection.
 
-Practical rule:
+`internal` is especially important in multi-project solutions. It allows sharing within an assembly while avoiding accidental public surface area. Public APIs tend to become sticky over time, so reducing unnecessary visibility early makes future refactoring easier.
 
-> Start private. Make something public only when another part of the system genuinely needs it.
+## Static Members And Shared State
 
-## Static
-
-```csharp
-public static class DateTimeProvider
-{
-    public static DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
-}
-```
-
-Be careful with static state because it can hurt testability and cause shared-state bugs.
-
-Safe static example:
+Static members belong to the type rather than to an instance.
 
 ```csharp
 public static class OrderStatuses
@@ -232,7 +172,7 @@ public static class OrderStatuses
 }
 ```
 
-Risky static mutable state:
+This is harmless because the type exposes stable shared values. The danger appears when static members carry mutable state:
 
 ```csharp
 public static class CurrentUser
@@ -241,11 +181,7 @@ public static class CurrentUser
 }
 ```
 
-Why risky:
-
-> In a web app, many requests run concurrently. Static mutable state is shared by all requests and users, so one request can accidentally affect another.
-
-Better:
+In a server application, mutable static state is shared across requests, users, and threads. That creates coupling between otherwise unrelated execution paths and often leads to race conditions, test contamination, or incorrect cross-request behavior. When state should vary per request or per operation, instance-based design and dependency injection are usually the better fit.
 
 ```csharp
 public interface ICurrentUser
@@ -254,19 +190,11 @@ public interface ICurrentUser
 }
 ```
 
-Register it as a scoped service in ASP.NET Core so each request gets the correct user context.
+The important rule is not "never use static." It is "use static only when the value is truly process-wide and semantically shared."
 
-## Partial Class
+## Partial Types And Generated Code
 
-```csharp
-public partial class User
-{
-}
-```
-
-Useful for generated code and large framework types, but avoid using partial classes to hide poor organization.
-
-Common use with source generation:
+Partial classes exist primarily to support generated code and framework integration.
 
 ```csharp
 public partial class AppJsonContext
@@ -274,155 +202,53 @@ public partial class AppJsonContext
 }
 ```
 
-Good use:
+This allows one part of a type to be generated while another part is maintained by hand. Source generators, WinForms designers, and similar tools rely on this split so that generated output can be replaced safely without overwriting manual logic.
 
-> Generated code and manually written code can live in separate files without editing generated output.
+Using partial classes to spread one oversized design across many files is usually a sign that the type itself should be broken apart. Partial types preserve compilation structure, but they do not repair conceptual cohesion.
 
-Bad use:
+## Everyday Language Features That Affect Design
 
-> Splitting one messy class into five partial files does not make the design cleaner.
+Many C# features look small in isolation but have outsized effects on readability, correctness, and API shape.
 
-## Common C# Keywords And Features
+### `var`, `object`, And `dynamic`
 
-Small language features matter because they reveal code behavior, not only syntax.
-
-Chinese notes:
-
-- `immutable`: 不可变.
-- `deferred execution`: 延迟执行.
-- `resource disposal`: 资源释放.
-
-### `var` vs `dynamic` vs `object`
-
-`var` is still statically typed. The compiler infers the type.
+`var` preserves static typing and only asks the compiler to infer the local type.
 
 ```csharp
-var name = "Alice"; // string at compile time
+var name = "Alice"; // string
 ```
 
-`object` loses compile-time specific members unless you cast.
+`object` can hold any reference or boxed value, but specific members are unavailable until the value is cast.
 
 ```csharp
 object value = "Alice";
 // value.Length does not compile
 ```
 
-`dynamic` skips compile-time member checking and resolves at runtime.
+`dynamic` defers member resolution until runtime.
 
 ```csharp
 dynamic value = "Alice";
-Console.WriteLine(value.Length); // resolved at runtime
+Console.WriteLine(value.Length);
 ```
 
-Use `dynamic` rarely. It can be useful for interop or dynamic JSON-like scenarios, but it moves errors from compile time to runtime.
-
-Runtime failure example:
-
-```csharp
-dynamic value = "Alice";
-Console.WriteLine(value.DoesNotExist()); // compiles, fails at runtime
-```
-
-Typed alternative:
-
-```csharp
-public sealed record UserDto(string Name);
-
-UserDto user = new("Alice");
-Console.WriteLine(user.Name);
-```
-
-Key point:
-
-> `var` is usually fine because the type is still known by the compiler. `dynamic` should be rare because it gives up compile-time safety.
+That flexibility is sometimes useful for interop or late-bound frameworks, but it weakens one of C#'s main strengths: compile-time feedback. In most application code, `dynamic` should be exceptional rather than routine.
 
 ### `const`, `readonly`, And `static readonly`
 
-`const` is compile-time constant.
+These keywords all describe immutability in different ways.
 
 ```csharp
 public const int MaxRetryCount = 3;
-```
-
-`readonly` is assigned in declaration or constructor.
-
-```csharp
 private readonly IClock _clock;
-```
-
-`static readonly` is runtime-initialized once per type.
-
-```csharp
 public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 ```
 
-Practical explanation:
-
-> I use `const` for true compile-time constants that will not change. I use `readonly` for injected dependencies and instance values assigned during construction. I use `static readonly` for runtime-created values shared by the type.
-
-Important versioning detail:
-
-```csharp
-public const int ApiVersion = 1;
-```
-
-`const` values can be inlined into consuming assemblies at compile time. If a library changes a public `const`, consumers may need recompilation to see the new value.
-
-For public values that may change:
-
-```csharp
-public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
-```
-
-### `init` And `required`
-
-`init` allows setting a property during object initialization but not later.
-
-```csharp
-public sealed class CreateUserRequest
-{
-    public required string Email { get; init; }
-    public required string Name { get; init; }
-}
-```
-
-This is useful for DTOs and immutable request models.
-
-Important:
-
-- `required` is compile-time help;
-- it does not replace runtime validation;
-- APIs still need model validation.
-
-Example:
-
-```csharp
-var request = new CreateUserRequest
-{
-    Email = "alice@example.com",
-    Name = "Alice"
-};
-```
-
-This is good for request/response models because it makes object initialization clear and reduces accidental mutation.
-
-But this still needs validation:
-
-```csharp
-var request = new CreateUserRequest
-{
-    Email = "not-an-email",
-    Name = "Alice"
-};
-```
-
-`required` only says the property must be assigned. It does not prove the value is valid.
+`const` values are compile-time constants and may be inlined into consuming assemblies. That makes them suitable for truly fixed values, but less suitable for public library values that might need to change over time. `readonly` fits instance-level state assigned during construction. `static readonly` fits shared runtime-initialized values.
 
 ### Primary Constructors
 
-Modern C# supports primary constructors for classes and structs.
-
-Example:
+Modern C# allows primary constructors for classes and structs:
 
 ```csharp
 public sealed class OrderService(IOrderRepository repository, ILogger<OrderService> logger)
@@ -435,74 +261,29 @@ public sealed class OrderService(IOrderRepository repository, ILogger<OrderServi
 }
 ```
 
-This can reduce boilerplate for dependency injection.
-
-Use it when:
-
-- dependencies are simple;
-- the class remains easy to read;
-- constructor logic is minimal.
-
-Avoid it when:
-
-- constructor validation or setup is complex;
-- field naming would be clearer;
-- the team prefers explicit constructors for consistency.
-
-Traditional constructor style is still perfectly valid:
-
-```csharp
-public sealed class OrderService
-{
-    private readonly IOrderRepository _repository;
-    private readonly ILogger<OrderService> _logger;
-
-    public OrderService(IOrderRepository repository, ILogger<OrderService> logger)
-    {
-        _repository = repository;
-        _logger = logger;
-    }
-}
-```
+This can reduce ceremony for dependency-heavy service classes. It works best when constructor logic is simple and the resulting type remains easy to scan. Where initialization is complex, explicit constructors often remain clearer.
 
 ### Collection Expressions
 
-Modern C# also supports collection expressions.
+Collection expressions improve clarity for small literal collections:
 
 ```csharp
 int[] numbers = [1, 2, 3];
 List<string> names = ["Alice", "Bob"];
 ```
 
-They are concise, but the underlying collection choice still matters. A `List<T>` is still a dynamic array, a `HashSet<T>` still uses hashing, and an array is still fixed-size.
+They do not change the underlying collection semantics. Choosing between arrays, lists, sets, and dictionaries still requires the same design judgment around mutability, lookup behavior, ordering, and allocation.
 
-### `using` And `IDisposable`
+## Resource Lifetime And Deterministic Cleanup
 
-Use `using` for deterministic disposal of resources.
+Garbage collection manages managed memory, but it does not guarantee prompt release of external resources such as file handles, sockets, database connections, or timers. That is why `IDisposable` and `IAsyncDisposable` remain important language-level patterns.
 
 ```csharp
 using var stream = File.OpenRead("orders.csv");
-```
-
-Async disposal:
-
-```csharp
 await using var connection = new SqlConnection(connectionString);
 ```
 
-Common disposable resources:
-
-- streams;
-- database connections;
-- timers;
-- cancellation token registrations;
-- unmanaged handles.
-
-Common misconception:
-
-> Garbage collection releases managed memory, but it does not immediately release external resources such as file handles or sockets. That is why `IDisposable` still matters in C#.
-
-Equivalent `try/finally` shape:
+The `using` forms are compact syntax over `try/finally` cleanup:
 
 ```csharp
 var stream = File.OpenRead("orders.csv");
@@ -517,11 +298,11 @@ finally
 }
 ```
 
-`using` is the cleaner syntax for this pattern.
+For engineering work, this distinction matters because resource leaks often appear long before memory exhaustion does. An application can remain memory-stable and still fail because it has exhausted connections, file handles, or other external resources.
 
-### Extension Methods
+## Extension Methods And API Shape
 
-Extension methods add method-like syntax without changing the original type.
+Extension methods add method syntax to existing types without modifying their source definitions.
 
 ```csharp
 public static class StringExtensions
@@ -533,20 +314,7 @@ public static class StringExtensions
 }
 ```
 
-Use them for small, reusable operations.
-
-Avoid using extension methods to hide complex dependencies or business workflows.
-
-Good extension method:
-
-```csharp
-public static bool IsValidEmail(this string value)
-{
-    return value.Contains('@');
-}
-```
-
-Questionable extension method:
+They are most useful for lightweight operations that genuinely feel like part of the consumer's language. LINQ is the canonical example. The danger appears when extension methods hide infrastructure, persistence, or heavy side effects behind what looks like a simple instance call.
 
 ```csharp
 public static Task ApproveOrderAsync(this Order order, AppDbContext db)
@@ -555,13 +323,11 @@ public static Task ApproveOrderAsync(this Order order, AppDbContext db)
 }
 ```
 
-Why questionable:
+That style weakens clarity because the call site resembles domain behavior while quietly depending on infrastructure. Extension methods are best when they improve expression without obscuring responsibility.
 
-> It makes a method look like simple object behavior while hiding infrastructure work.
+## Deferred Execution With Iterators
 
-### `yield return`
-
-`yield return` creates an iterator with deferred execution.
+`yield return` creates iterators whose execution is deferred until enumeration.
 
 ```csharp
 public static IEnumerable<int> GetEvenNumbers(IEnumerable<int> numbers)
@@ -576,9 +342,7 @@ public static IEnumerable<int> GetEvenNumbers(IEnumerable<int> numbers)
 }
 ```
 
-The method does not execute fully when called. It executes as the result is enumerated.
-
-Common risk:
+This is powerful because it allows streaming behavior and composition without eagerly allocating full intermediate results. It also changes timing:
 
 ```csharp
 var query = GetEvenNumbers(numbers);
@@ -586,11 +350,13 @@ numbers.Clear();
 var result = query.ToList();
 ```
 
-Because execution is deferred, later changes to the source can affect results.
+Since the iterator runs during enumeration, changes to the source sequence can change the eventual result. The same deferred-execution mindset appears again in LINQ, which is why understanding it early is useful.
 
-### `ref`, `out`, And `in`
+## By-Reference Features And Performance-Oriented Constructs
 
-`out` is used when the method must assign the value.
+Some C# features are common in libraries and performance-sensitive code, even when they are less central in routine business applications.
+
+`out` is widely used for APIs such as `TryParse`:
 
 ```csharp
 if (int.TryParse(input, out var number))
@@ -599,75 +365,16 @@ if (int.TryParse(input, out var number))
 }
 ```
 
-`ref` allows the method to read and modify the caller's variable.
+`ref` allows a method to mutate the caller's variable directly, and `in` passes a value by readonly reference. These features are powerful but more specialized. In normal application APIs, clear return types are usually easier to reason about than heavy by-reference semantics.
 
-`in` passes by readonly reference and is mainly useful for large structs in performance-sensitive code.
-
-Use these carefully. For normal business code, clear return types are usually easier to read.
-
-`ref` example:
-
-```csharp
-public static void Increment(ref int value)
-{
-    value++;
-}
-
-var count = 1;
-Increment(ref count);
-Console.WriteLine(count); // 2
-```
-
-`in` example:
-
-```csharp
-public readonly struct LargeValue
-{
-    public readonly decimal A;
-    public readonly decimal B;
-    public readonly decimal C;
-}
-
-public static decimal Sum(in LargeValue value)
-{
-    return value.A + value.B + value.C;
-}
-```
-
-In normal API/business code, `out` appears often with `TryParse`. `ref` and `in` are more specialized.
-
-### `Span<T>` And `Memory<T>`
-
-`Span<T>` represents a contiguous region of memory without allocation.
+`Span<T>` and `Memory<T>` serve a similar role for memory-oriented work:
 
 ```csharp
 ReadOnlySpan<char> text = "ORDER-123".AsSpan();
 var prefix = text[..5];
 ```
 
-Use cases:
-
-- parsing;
-- high-performance text/binary processing;
-- reducing allocations in hot paths.
-
-Important:
-
-- `Span<T>` is stack-only and cannot be stored in fields of normal classes;
-- `Memory<T>` can be stored and used across async boundaries;
-- most full-stack business code does not need direct `Span<T>`, but engineers should recognize it when reading high-performance code.
-
-Parsing example:
-
-```csharp
-public static string GetOrderPrefix(string orderNumber)
-{
-    ReadOnlySpan<char> span = orderNumber.AsSpan();
-    return span[..5].ToString();
-}
-```
-
-Async boundary rule:
+`Span<T>` enables allocation-conscious parsing and slicing but cannot cross `await` boundaries or live as a normal heap field. `Memory<T>` is the heap-friendly counterpart used when data must survive asynchronous flow.
 
 ```csharp
 public async Task ProcessAsync(Memory<byte> data)
@@ -677,112 +384,4 @@ public async Task ProcessAsync(Memory<byte> data)
 }
 ```
 
-Use `Memory<T>` when data must live across `await`. Use `Span<T>` for synchronous, stack-only high-performance work.
-
-## Review Questions
-
-### What is the difference between field and property?
-
-> A field stores data directly. A property exposes data through accessors and can control access, validation, or computed values.
-
-### Why use private setters?
-
-> Private setters protect object invariants by preventing arbitrary external mutation.
-
-### What does `sealed` mean?
-
-> `sealed` prevents a class from being inherited. It can make intent clearer and avoid unexpected inheritance behavior.
-
-### `var` vs `dynamic`?
-
-> `var` is compile-time type inference, so the variable is still statically typed. `dynamic` bypasses compile-time member checks and resolves calls at runtime, so it is more flexible but less safe.
-
-### Why does `IDisposable` matter if C# has garbage collection?
-
-> Garbage collection manages memory, but external resources such as file handles, sockets, and database connections need deterministic cleanup. `IDisposable` and `using` release those resources promptly.
-
-### What does `yield return` do?
-
-> It creates an iterator and enables deferred execution. The method body runs as the sequence is enumerated, not necessarily when the method is called.
-
-## Common Mistakes
-
-### Mistake: Public setters on domain entities everywhere.
-
-Why it is wrong:
-
-> Any caller can change state without business validation.
-
-Better answer:
-
-> Keep setters private where possible and expose behavior methods that protect invariants.
-
-### Mistake: Static mutable state.
-
-Why it is wrong:
-
-> Static mutable data is shared across requests and threads. It can cause race conditions, data leaks, and difficult tests.
-
-Better answer:
-
-> Use scoped services for request-specific state and immutable static values for constants.
-
-### Mistake: Constructors that allow invalid objects.
-
-Why it is wrong:
-
-> Invalid objects force every caller to remember validation rules later.
-
-Better answer:
-
-> Validate required state in constructors or factory methods.
-
-### Mistake: Too many public methods.
-
-Why it is wrong:
-
-> A large public surface area is harder to maintain and harder to change safely.
-
-Better answer:
-
-> Expose only the operations the rest of the system needs.
-
-### Mistake: Using `dynamic` when generics or typed DTOs would be safer.
-
-Why it is wrong:
-
-> `dynamic` moves errors from compile time to runtime.
-
-Better answer:
-
-> Prefer typed models, interfaces, or generics unless the data is genuinely dynamic.
-
-### Mistake: Forgetting to dispose resources.
-
-Why it is wrong:
-
-> External resources such as streams and database connections may stay open longer than intended.
-
-Better answer:
-
-> Use `using`, `await using`, or DI-managed lifetimes.
-
-### Mistake: Assuming `required` replaces API validation.
-
-Why it is wrong:
-
-> `required` only ensures assignment at compile time. It does not validate format, range, length, or business rules.
-
-Better answer:
-
-> Use `required` for initialization safety and validation for correctness.
-
-### Mistake: Returning deferred sequences after the underlying resource has been disposed.
-
-Why it is wrong:
-
-> The query may execute later, after the database context, stream, or collection is no longer available.
-
-Better answer:
-
-> Materialize results before disposing the resource, or keep the resource alive for the enumeration.
+Most application chapters in this book do not depend heavily on spans, but professional readers should recognize them because modern .NET libraries use them extensively in performance-sensitive APIs.

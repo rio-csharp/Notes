@@ -4,13 +4,6 @@
 
 Forms are one of the most important parts of business applications. Accessibility ensures people can use the application with keyboard, screen readers, and assistive technologies.
 
-Chinese notes:
-
-- `accessibility`: 可访问性.
-- `screen reader`: 屏幕阅读器.
-- `label`: 标签.
-- `focus`: 焦点.
-
 ## Label
 
 Bad:
@@ -237,8 +230,6 @@ Why this works well:
 - native controls provide keyboard behavior;
 - submit uses a real button.
 
-## Review Questions
-
 ### Why is label important?
 
 > Labels help users understand inputs and allow screen readers to announce the field correctly. They also improve click target behavior.
@@ -250,15 +241,6 @@ Why this works well:
 ### How do you make a modal accessible?
 
 > Manage focus, provide title/description, trap focus while open, close with Escape, and restore focus after closing.
-
-## Common Mistakes
-
-- Placeholder used as label.
-- No visible focus state.
-- Divs used as buttons.
-- Icon buttons without accessible names.
-- Error messages not connected to inputs.
-- Modal focus not managed.
 
 ## Practice Task
 

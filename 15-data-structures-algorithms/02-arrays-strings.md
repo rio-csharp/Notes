@@ -4,13 +4,6 @@
 
 Arrays and strings are among the most common foundations for coding practice.
 
-Chinese notes:
-
-- `array`: 数组.
-- `string`: 字符串.
-- `hash map`: 哈希表.
-- `two pointers`: 双指针.
-
 ## Common Patterns
 
 - frequency counting;
@@ -399,29 +392,6 @@ Normalize(nums.AsSpan(1, 2));
 ```
 
 This modifies the slice over the original array.
-
-## Knowledge Checks
-
-### When do you use Dictionary?
-
-Use `Dictionary` when you need fast lookup by key, such as checking complements, counting frequencies, or mapping values to indexes.
-
-### Why are strings tricky?
-
-Strings are immutable in C#. Repeated concatenation can create many allocations. Also Unicode handling can be more complex than simple `char` loops.
-
-### Why is inserting into the middle of an array `O(n)`?
-
-Elements after the insertion point must be shifted to make room.
-
-## Common Mistakes
-
-- Off-by-one errors.
-- Ignoring empty input.
-- Using nested loops when hash map solves it.
-- Repeated string concatenation in loops.
-- Assuming ASCII when input may be Unicode.
-- Forgetting space complexity.
 
 ## Practice Problems
 

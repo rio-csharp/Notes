@@ -4,13 +4,6 @@
 
 Advanced Kafka learning focuses on reliability, ordering, consumer groups, retries, idempotency, and operational trade-offs.
 
-Chinese notes:
-
-- `consumer lag`: 消费延迟.
-- `rebalance`: 再均衡.
-- `dead-letter topic`: 死信主题.
-- `idempotent consumer`: 幂等消费者.
-
 ## Ordering
 
 Kafka guarantees ordering only within a partition.
@@ -92,8 +85,6 @@ Each partition has one leader replica and zero or more follower replicas.
 Producer and consumer traffic normally goes through the leader.
 
 Followers replicate data from the leader.
-
-ISR means in-sync replicas（同步副本集合）.
 
 High-level flow:
 
@@ -459,43 +450,6 @@ Azure Service Bus:
 - duplicate detection;
 - sessions;
 - integrates well with Azure.
-
-## Knowledge Checks
-
-### How do you guarantee exactly-once processing?
-
-> End-to-end exactly-once is difficult when databases and external systems are involved. I usually design for at-least-once delivery and idempotent consumers. Kafka exactly-once helps certain Kafka-to-Kafka workflows, but business side effects still need idempotency.
-
-### How do you handle poison messages?
-
-> Use retry limits, dead-letter topics, error logging, alerting, and tools to inspect/replay or manually resolve failed messages.
-
-### Why did my Kafka consumer process the same message twice?
-
-> Most likely business processing succeeded but the offset was not committed before crash, rebalance, or commit failure. Kafka redelivered from the last committed offset. The correct design is idempotent processing.
-
-### What if the consumer cannot consume successfully?
-
-> I classify the failure first: bad data, transient dependency failure, poison message, rebalance, slow processing, or commit issue. Then I use bounded retry, DLT, idempotency, lag monitoring, and root cause fixes.
-
-### How do you preserve order?
-
-> Use a message key so related events go to the same partition. Accept that ordering is per partition, not global.
-
-### How do you reduce consumer lag?
-
-> Measure processing time, increase consumers up to partition count, optimize downstream calls, batch work, add partitions if needed, and handle poison messages separately.
-
-## Common Mistakes
-
-- Assuming global ordering.
-- No idempotency.
-- Auto-committing offsets before processing.
-- Infinite retries blocking partition.
-- No DLT.
-- Huge messages.
-- No schema/versioning strategy.
-- No consumer lag monitoring.
 
 ## Practice Scenarios
 

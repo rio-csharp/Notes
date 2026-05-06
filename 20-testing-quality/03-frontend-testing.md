@@ -4,11 +4,6 @@
 
 Frontend tests verify user-visible behavior.
 
-Chinese notes:
-
-- `component test`: 组件测试.
-- `mock`: 模拟.
-- `accessibility`: 可访问性.
 - `MSW`: Mock Service Worker, a tool for mocking HTTP requests.
 
 Good frontend tests answer:
@@ -400,35 +395,6 @@ High-value frontend tests:
 - accessible labels and roles;
 - disabled/enabled states;
 - optimistic update rollback.
-
-## Knowledge Checks
-
-### What should frontend tests verify?
-
-They should verify user-visible behavior: what the user sees, what actions are available, and how the UI responds to loading, errors, validation, permissions, and successful operations.
-
-### Why use Testing Library queries by role and label?
-
-They match how users and assistive technologies understand the page. They also encourage accessible HTML.
-
-### Why use MSW instead of mocking fetch everywhere?
-
-MSW mocks the network boundary, so components can keep using real request code. This produces tests closer to real behavior and avoids mocking implementation details.
-
-### When are snapshots useful?
-
-Snapshots are useful for small, stable outputs. They are not a replacement for behavior-focused assertions.
-
-## Common Mistakes
-
-- Testing implementation details.
-- No error-state tests.
-- Overusing snapshots.
-- Mocking too deeply.
-- Using CSS selectors instead of accessible queries.
-- Ignoring async state transitions.
-- Not resetting API handlers between tests.
-- Testing only the success path.
 
 ## Practice Task
 

@@ -1,26 +1,14 @@
-# EF Core Transactions And Concurrency
+# Transactions And Concurrency
 
 ## Core Idea
 
-EF Core supports transactions and concurrency control to keep data correct when multiple operations or users interact with the same data.
+Transactions and concurrency control solve related but different problems. Transactions define which operations succeed or fail together. Concurrency control defines what should happen when multiple actors try to change overlapping data at roughly the same time. Confusing those two concerns leads to designs that are either over-serialized, under-protected, or operationally fragile.
 
-Chinese notes:
+EF Core provides support for both, but the correct design depends on the business operation, the underlying database, and the surrounding application architecture.
 
-- `transaction`: 事务.
-- `concurrency`: 并发.
-- `optimistic concurrency`: 乐观并发.
-- `pessimistic locking`: 悲观锁.
-- `RowVersion`: 行版本.
-- `isolation level`: 隔离级别.
-- `retry strategy`: 重试策略.
+## `SaveChanges` And Transaction Boundaries
 
-Key takeaway:
-
-> Transactions protect atomicity, while concurrency control protects correctness when multiple users or processes update the same data.
-
-## SaveChanges Transaction
-
-For most normal operations, `SaveChanges` runs in a transaction for relational providers when multiple commands must be saved atomically.
+For relational providers, one `SaveChanges` call typically executes within a transaction when multiple commands must succeed atomically.
 
 ```csharp
 order.Status = OrderStatus.Paid;
@@ -28,8 +16,6 @@ payment.Status = PaymentStatus.Captured;
 
 await _dbContext.SaveChangesAsync(ct);
 ```
-
-Both changes succeed or fail together.
 
 Conceptually:
 
@@ -40,9 +26,11 @@ Begin transaction
 Commit
 ```
 
-## Manual Transaction
+This default behavior is often enough for a single, coherent unit of work. Manual transactions are needed when the application must coordinate several save phases or mix EF changes with additional commands inside one atomic boundary.
 
-Use explicit transaction when multiple steps must share one transaction.
+## Explicit Transactions
+
+Explicit transactions become useful when one operation genuinely spans multiple persistence steps:
 
 ```csharp
 await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
@@ -64,16 +52,11 @@ catch
 }
 ```
 
-Use manual transactions for:
+The important question is not whether explicit transactions are available. It is whether the business operation truly requires one broader atomic boundary. Keeping transactions narrower reduces locking time and usually improves operational safety.
 
-- multiple `SaveChanges` in one atomic operation;
-- raw SQL plus EF changes;
-- multiple repositories sharing one `DbContext`;
-- special transaction boundaries.
+## External Calls Do Not Belong Inside Database Transactions
 
-## Avoid External Calls Inside Transactions
-
-Bad:
+One of the most common design mistakes is holding a database transaction open while waiting on a network call:
 
 ```csharp
 await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
@@ -85,38 +68,27 @@ await _dbContext.SaveChangesAsync(ct);
 await transaction.CommitAsync(ct);
 ```
 
-Problems:
+This is risky because it:
 
-- transaction stays open during network call;
-- locks are held longer;
-- provider success but DB failure creates inconsistency;
-- retries may duplicate external side effects;
-- deadlock/blocking risk increases.
+- extends lock duration;
+- couples database correctness to network latency;
+- increases blocking and deadlock probability;
+- can leave the system inconsistent if the external call succeeds but the database write fails.
 
-Better:
+The safer architectural move is often to commit database intent first and let an outbox or asynchronous workflow perform the external side effect afterward.
 
-- use payment intent/callback model;
-- save state first and process external call asynchronously;
-- use outbox;
-- use idempotency keys;
-- use reconciliation jobs.
+## Isolation Levels And Trade-Offs
 
-## Isolation Levels
+Isolation levels control what one transaction can observe of another transaction's changes.
 
-Isolation level controls what one transaction can see from another transaction.
+Common levels include:
 
-Common levels:
+- `Read Committed`
+- `Repeatable Read`
+- `Serializable`
+- `Snapshot`
 
-- `Read Committed`;
-- `Repeatable Read`;
-- `Serializable`;
-- `Snapshot`.
-
-Practical explanation:
-
-> Higher isolation can reduce anomalies but usually increases locking, blocking, or version-store cost. Choose based on correctness requirements, not by defaulting to the strongest level.
-
-Example:
+Higher isolation is not automatically better. It usually trades increased correctness guarantees for more locking, more blocking, or more version-store cost depending on the engine.
 
 ```csharp
 await using var transaction = await _dbContext.Database.BeginTransactionAsync(
@@ -124,13 +96,11 @@ await using var transaction = await _dbContext.Database.BeginTransactionAsync(
     ct);
 ```
 
-Use carefully. Higher isolation can hurt throughput.
+Using a stronger isolation level should be a response to a real anomaly the business cares about, not a substitute for understanding the actual conflict pattern.
 
 ## Optimistic Concurrency
 
-Optimistic concurrency assumes conflicts are rare.
-
-Entity:
+Optimistic concurrency assumes conflicting writes are relatively rare and detects them when saving.
 
 ```csharp
 public sealed class Product
@@ -144,34 +114,19 @@ public sealed class Product
 }
 ```
 
-Fluent configuration:
-
 ```csharp
 modelBuilder.Entity<Product>()
     .Property(p => p.RowVersion)
     .IsRowVersion();
 ```
 
-When EF updates the row, it includes row version in `WHERE`.
+When EF Core updates the row, the concurrency token becomes part of the `WHERE` clause. If another write changed the row first, the update affects zero rows and EF Core throws `DbUpdateConcurrencyException`.
 
-Conceptual SQL:
+This mechanism does not resolve the conflict. It detects that the original assumptions are no longer valid.
 
-```sql
-UPDATE Products
-SET Stock = @p0
-WHERE Id = @p1
-  AND RowVersion = @p2;
-```
+## Conflict Handling
 
-If no row is affected, EF throws:
-
-```text
-DbUpdateConcurrencyException
-```
-
-## Handling Concurrency Conflict
-
-Simple API approach:
+The simplest application response is often to reject the operation cleanly:
 
 ```csharp
 try
@@ -184,77 +139,38 @@ catch (DbUpdateConcurrencyException)
 }
 ```
 
-API response:
+In HTTP APIs, that commonly maps to `409 Conflict`.
 
-```http
-409 Conflict
-```
+More sophisticated flows may load current database values and decide whether to:
 
-More detailed approach:
+- reject and ask the user to reload;
+- merge non-overlapping changes;
+- retry a naturally retryable command;
+- treat the row as deleted if current values no longer exist.
 
-```csharp
-catch (DbUpdateConcurrencyException ex)
-{
-    var entry = ex.Entries.Single();
-    var databaseValues = await entry.GetDatabaseValuesAsync(ct);
+The right response depends on the business rule. The important point is that concurrency detection is a business event, not merely a technical exception.
 
-    if (databaseValues is null)
-    {
-        throw new NotFoundException("The record was deleted by another user.");
-    }
+## Transactions And Concurrency Are Not The Same
 
-    throw new ConflictException("The record was updated by another user. Please reload and retry.");
-}
-```
+This distinction is worth making explicitly.
 
-Conflict resolution strategies:
+A transaction answers questions such as:
 
-- client wins;
-- database wins;
-- merge fields;
-- reject and ask user to reload;
-- retry command if operation is naturally retryable.
+- should these writes commit together;
+- should partial success be impossible;
+- how long should the database lock or version state remain active.
 
-For business systems, rejecting with `409` is often safer than silently overwriting.
+Concurrency control answers questions such as:
 
-## Stock Deduction Example
+- what if two users edit the same row;
+- what if stock changed after the read but before the save;
+- should later writers overwrite earlier ones, merge with them, or fail.
 
-```csharp
-public async Task ReserveStockAsync(int productId, int quantity, CancellationToken ct)
-{
-    var product = await _dbContext.Products
-        .FirstOrDefaultAsync(p => p.Id == productId, ct);
+A system may need one without much of the other. Treating concurrency conflicts as purely transactional problems often pushes designs toward unnecessarily broad locking.
 
-    if (product is null)
-    {
-        throw new NotFoundException("Product not found.");
-    }
+## Set-Based Updates And Race Reduction
 
-    if (product.Stock < quantity)
-    {
-        throw new DomainException("Not enough stock.");
-    }
-
-    product.Stock -= quantity;
-
-    try
-    {
-        await _dbContext.SaveChangesAsync(ct);
-    }
-    catch (DbUpdateConcurrencyException)
-    {
-        throw new ConflictException("Stock changed. Please retry.");
-    }
-}
-```
-
-Important:
-
-> RowVersion detects conflicting updates. It does not automatically decide how to resolve the business conflict.
-
-## Set-based Atomic Update Alternative
-
-For stock reservation, an atomic SQL update can be better.
+Some operations are better expressed as one atomic database statement than as a read-modify-write cycle in application memory.
 
 ```csharp
 var affectedRows = await _dbContext.Products
@@ -265,46 +181,23 @@ var affectedRows = await _dbContext.Products
 
 if (affectedRows == 0)
 {
-    throw new ConflictException("Not enough stock or product was changed.");
+    throw new ConflictException("Not enough stock or product state changed.");
 }
 ```
 
-Why it helps:
-
-- no read-modify-write race in application memory;
-- database checks and updates in one statement;
-- avoids loading the entity.
+This pattern is often superior for inventory-style operations because the database checks the condition and applies the update in one step. That reduces the race window and avoids loading an entity that the operation does not otherwise need.
 
 ## Pessimistic Locking
 
-EF Core does not expose every provider-specific locking feature through LINQ.
+Some scenarios justify preventing concurrent modification up front instead of detecting it afterward. EF Core does not expose every locking behavior directly through LINQ, so pessimistic locking often requires provider-specific SQL.
 
-Sometimes raw SQL is used:
+That approach should be used carefully. It increases blocking, can raise deadlock risk, and usually reduces throughput. It is appropriate only when the cost of conflict is high enough that the system must serialize access more aggressively.
 
-```csharp
-var product = await _dbContext.Products
-    .FromSql($"SELECT * FROM Products WITH (UPDLOCK, ROWLOCK) WHERE Id = {productId}")
-    .SingleAsync(ct);
-```
+Optimistic concurrency is the better default in many business applications because it preserves throughput and pushes conflict resolution to the cases where conflict actually occurs.
 
-SQL Server note:
+## Execution Strategies And Retriable Failures
 
-> `UPDLOCK` can be used to take an update lock while reading, reducing some race conditions but increasing blocking risk.
-
-Use pessimistic locking carefully:
-
-- it can reduce concurrency;
-- it can increase deadlock risk;
-- it is provider-specific;
-- it should be justified by business correctness needs.
-
-## Execution Strategy
-
-Cloud databases can have transient failures.
-
-EF Core execution strategy can retry transient errors.
-
-When using manual transactions with retrying execution strategy, use:
+Cloud-hosted databases may produce transient failures. EF Core execution strategies can retry those operations. When transactions are involved, the retry boundary must include the full transactional unit:
 
 ```csharp
 var strategy = _dbContext.Database.CreateExecutionStrategy();
@@ -323,251 +216,33 @@ await strategy.ExecuteAsync(async () =>
 });
 ```
 
-Why:
+Retrying only one command inside a broader transaction boundary is not enough. The whole logical unit must be safe to rerun.
 
-> The execution strategy needs to retry the whole transactional unit, not only one command inside it.
+## Outbox Pattern As A Transaction Boundary Tool
 
-## Complete Example: Order Payment And Outbox
+The outbox pattern is one of the cleanest ways to combine local atomicity with external side effects.
 
-This example keeps database changes atomic and avoids calling an external payment provider while a database transaction is open.
-
-Entities:
+Within one transaction, the application updates its own state and records an outbox message:
 
 ```csharp
-public sealed class Order
+_dbContext.OutboxMessages.Add(new OutboxMessage
 {
-    public int Id { get; set; }
-    public OrderStatus Status { get; private set; }
-    public decimal Total { get; set; }
-
-    [Timestamp]
-    public byte[] RowVersion { get; set; } = [];
-
-    public void MarkPaymentRequested()
+    Type = "OrderPaymentRequested",
+    Payload = JsonSerializer.Serialize(new
     {
-        if (Status != OrderStatus.Submitted)
-        {
-            throw new DomainException("Only submitted orders can request payment.");
-        }
-
-        Status = OrderStatus.PaymentRequested;
-    }
-}
-
-public sealed class OutboxMessage
-{
-    public long Id { get; set; }
-    public string Type { get; set; } = "";
-    public string Payload { get; set; } = "";
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset? ProcessedAt { get; set; }
-}
+        OrderId = order.Id,
+        order.Total
+    }),
+    CreatedAt = DateTimeOffset.UtcNow
+});
 ```
 
-Command handler:
+After commit, a background worker publishes the external message or calls the external dependency. This design keeps local persistence atomic without forcing the database transaction to span an unreliable network boundary.
 
-```csharp
-public sealed class RequestOrderPaymentHandler
-{
-    private readonly AppDbContext _dbContext;
+The outbox does not remove the need for idempotency on the external side. It does, however, dramatically improve the system's ability to reconcile and retry safely.
 
-    public RequestOrderPaymentHandler(AppDbContext dbContext)
-    {
-        _dbContext = dbContext;
-    }
+## Design Consequences
 
-    public async Task HandleAsync(int orderId, CancellationToken ct)
-    {
-        var strategy = _dbContext.Database.CreateExecutionStrategy();
+Strong EF Core transaction design usually follows a few rules. Keep transactions no wider than the business operation requires. Do not mix external calls into database transaction scope. Prefer optimistic concurrency unless conflict frequency or business criticality justifies stronger coordination. Use set-based updates when the database can enforce the rule more directly than a tracked entity round trip can.
 
-        await strategy.ExecuteAsync(async () =>
-        {
-            await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
-
-            var order = await _dbContext.Orders
-                .SingleOrDefaultAsync(o => o.Id == orderId, ct);
-
-            if (order is null)
-            {
-                throw new NotFoundException("Order not found.");
-            }
-
-            order.MarkPaymentRequested();
-
-            _dbContext.OutboxMessages.Add(new OutboxMessage
-            {
-                Type = "OrderPaymentRequested",
-                Payload = JsonSerializer.Serialize(new
-                {
-                    OrderId = order.Id,
-                    order.Total
-                }),
-                CreatedAt = DateTimeOffset.UtcNow
-            });
-
-            try
-            {
-                await _dbContext.SaveChangesAsync(ct);
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                throw new ConflictException("Order was modified by another operation.");
-            }
-
-            await transaction.CommitAsync(ct);
-        });
-    }
-}
-```
-
-Outbox worker later sends the external request:
-
-```csharp
-public sealed class PaymentOutboxWorker : BackgroundService
-{
-    private readonly IServiceScopeFactory _scopeFactory;
-
-    public PaymentOutboxWorker(IServiceScopeFactory scopeFactory)
-    {
-        _scopeFactory = scopeFactory;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
-
-        while (await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var paymentClient = scope.ServiceProvider.GetRequiredService<IPaymentClient>();
-
-            var messages = await dbContext.OutboxMessages
-                .Where(m => m.ProcessedAt == null && m.Type == "OrderPaymentRequested")
-                .OrderBy(m => m.Id)
-                .Take(20)
-                .ToListAsync(stoppingToken);
-
-            foreach (var message in messages)
-            {
-                await paymentClient.RequestPaymentAsync(message.Payload, stoppingToken);
-                message.ProcessedAt = DateTimeOffset.UtcNow;
-            }
-
-            await dbContext.SaveChangesAsync(stoppingToken);
-        }
-    }
-}
-```
-
-Why this design is safer:
-
-- the order update and outbox insert commit together;
-- the external payment call happens outside the database transaction;
-- the worker can retry unprocessed outbox messages;
-- the payment API should still use idempotency keys to avoid duplicate side effects;
-- concurrency conflicts on the order return a clear conflict instead of silently overwriting state.
-
-## Multiple DbContexts
-
-Using multiple `DbContext` instances in one transaction is possible but more complex.
-
-Options:
-
-- share the same database connection and transaction;
-- use `TransactionScope`;
-- avoid distributed transactions if possible;
-- prefer one context per bounded unit of work when practical.
-
-Engineering perspective:
-
-> I avoid distributed transactions where possible. For cross-service consistency, I prefer outbox, idempotency, and eventual consistency patterns.
-
-## Review Questions
-
-### Does `SaveChanges` use a transaction?
-
-Yes, for most relational providers, `SaveChanges` wraps changes in a transaction when needed. Manual transactions are needed for multiple `SaveChanges` or special transaction boundaries.
-
-### What is optimistic concurrency?
-
-Optimistic concurrency assumes conflicts are rare. It checks a version token during update and fails if another transaction changed the row first.
-
-### Why avoid external calls inside DB transactions?
-
-External calls are slow and unreliable. Holding locks while waiting increases contention and can create inconsistent outcomes if the external call succeeds but the database transaction fails.
-
-### What status code should an API return for concurrency conflict?
-
-Usually `409 Conflict`, because the request conflicts with the current state of the resource.
-
-### What is the difference between transaction and concurrency?
-
-A transaction groups operations atomically. Concurrency control handles conflicts when multiple operations interact with the same data at the same time.
-
-### When would you use pessimistic locking?
-
-When conflicts are frequent or the cost of conflict is too high, and the business requires preventing concurrent changes rather than detecting them after the fact. Use carefully because it increases blocking.
-
-## Common Mistakes
-
-### Mistake: Long transactions
-
-Why it is wrong:
-
-> Long transactions hold locks longer and increase blocking, deadlocks, and timeout risk.
-
-Better answer:
-
-> Keep transactions short and limited to database work that truly must be atomic.
-
-### Mistake: External HTTP calls inside transactions
-
-Why it is wrong:
-
-> Network calls are slow and unreliable, while database locks remain held.
-
-Better answer:
-
-> Use outbox, callbacks, idempotency keys, and reconciliation.
-
-### Mistake: No concurrency handling on important updates
-
-Why it is wrong:
-
-> Users can silently overwrite each other's changes.
-
-Better answer:
-
-> Use RowVersion/concurrency tokens and return `409 Conflict` when appropriate.
-
-### Mistake: Catching concurrency exception and silently overwriting
-
-Why it is wrong:
-
-> It hides data loss and violates user expectations.
-
-Better answer:
-
-> Reload, merge, reject, or retry according to business rules.
-
-### Mistake: Manual transactions without retry strategy in cloud environments
-
-Why it is wrong:
-
-> A transient failure may retry only part of the work incorrectly.
-
-Better answer:
-
-> Use EF Core execution strategy to retry the entire transactional unit.
-
-## Practice Task
-
-Implement:
-
-1. product stock with `RowVersion`;
-2. concurrent stock update test;
-3. `409 Conflict` response;
-4. manual transaction with two `SaveChanges`;
-5. outbox event saved in same transaction;
-6. set-based stock deduction with `ExecuteUpdateAsync`.
+Those choices produce systems that are not only correct, but also far easier to operate under real load and failure conditions.

@@ -4,14 +4,6 @@
 
 A blank screen usually means the browser could not load, execute, or render the JavaScript application.
 
-Chinese notes:
-
-- `blank screen`: 白屏.
-- `chunk load error`: 分包加载错误.
-- `source map`: 源码映射.
-- `runtime error`: 运行时错误.
-- `cache header`: 缓存头.
-
 Frontend production issues need browser evidence. Backend logs may look clean even when every user sees a blank page.
 
 ## First Checks
@@ -513,37 +505,6 @@ Depending on cause:
 - keep old chunks longer;
 - add startup error UI;
 - add error boundary.
-
-## Knowledge Checks
-
-### Why can a frontend blank screen have no backend errors?
-
-Because the failure may happen before API calls are made, such as JavaScript parse errors, missing chunks, CSP blocks, service worker cache issues, or runtime render crashes.
-
-### What causes chunk load errors after deployment?
-
-The browser may hold an old `index.html` that references old chunk filenames, while the server now only has new chunk files. When the user navigates to a lazy-loaded route, the old chunk request returns 404.
-
-### Why should `index.html` and hashed assets have different cache headers?
-
-`index.html` should be revalidated because it points to the current asset files. Hashed assets can be cached for a long time because their filenames change when content changes.
-
-### Why are source maps useful?
-
-They map minified stack traces back to original source code, making production frontend errors much easier to debug.
-
-## Common Mistakes
-
-- Checking only backend logs.
-- No frontend error tracking.
-- No source maps or release mapping.
-- Bad cache headers.
-- No chunk load recovery.
-- Environment config different between build and runtime.
-- No error boundary.
-- Treating every auth error as "redirect to login".
-- Caching `index.html` too aggressively.
-- Ignoring service worker behavior.
 
 ## Practice Task
 

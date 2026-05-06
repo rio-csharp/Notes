@@ -4,14 +4,6 @@
 
 Configuration controls application behavior. Secrets are sensitive configuration values that must be protected.
 
-Chinese notes:
-
-- `configuration`: 配置.
-- `secret`: 密钥.
-- `rotation`: 密钥轮换.
-- `Options pattern`: Options 模式, bind configuration to typed classes.
-- `least privilege`: 最小权限原则.
-
 The main rule:
 
 > Configuration can be environment-specific. Secrets must be protected, scoped, rotated, and never exposed to users.
@@ -536,41 +528,6 @@ Can secrets be rotated?
 Are frontend values non-secret?
 Are environment-specific values documented?
 ```
-
-## Knowledge Checks
-
-### Why should secrets not be committed to Git?
-
-Git history is durable and widely copied. Even if a secret is removed later, it may still exist in old commits, forks, build logs, caches, or developer machines.
-
-### Why use typed options instead of reading configuration strings everywhere?
-
-Typed options centralize binding, validation, defaults, and documentation. They make configuration easier to test and reduce runtime surprises.
-
-### What is the difference between configuration and secrets?
-
-Configuration controls behavior. Secrets are sensitive values that require restricted access, audit, rotation, and careful logging rules.
-
-### Why are frontend environment variables not secret?
-
-React builds static JavaScript that runs in the user's browser. Any value included in that JavaScript can be inspected by users.
-
-### Why is secret rotation easier with dual keys?
-
-Dual keys allow old and new credentials to work during a transition. This avoids downtime when multiple services, deployments, or external providers do not switch at exactly the same time.
-
-## Common Mistakes
-
-- Secrets in `appsettings.json`.
-- Secrets in frontend code.
-- Printing environment variables in CI logs.
-- Same secret reused across development, staging, and production.
-- No startup validation.
-- Giving every app access to every secret.
-- No rotation plan.
-- Assuming Kubernetes Secrets are fully secure by default.
-- Storing passwords when Managed Identity would work.
-- Keeping old feature flags forever.
 
 ## Practice Task
 

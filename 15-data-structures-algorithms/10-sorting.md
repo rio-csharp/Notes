@@ -4,12 +4,6 @@
 
 Sorting arranges data in order and is often used as a preprocessing step in algorithmic problem solving.
 
-Chinese notes:
-
-- `sorting`: 排序.
-- `stable sort`: 稳定排序.
-- `in-place`: 原地.
-
 ## Built-in Sorting
 
 ```csharp
@@ -278,28 +272,6 @@ Why compare `b + a` with `a + b`?
 ```text
 "9" before "34" because "934" > "349"
 ```
-
-## Knowledge Checks
-
-### Stable sort?
-
-A stable sort preserves the relative order of equal elements.
-
-### When can sorting help?
-
-Sorting can simplify duplicate detection, interval merging, two-pointer problems, and grouping.
-
-### Why is comparison sorting usually `O(n log n)`?
-
-Comparison-based sorting has a theoretical lower bound of `O(n log n)` in the general case because comparisons distinguish among many possible orderings.
-
-## Common Mistakes
-
-- Forgetting sorting changes original array.
-- Assuming all sorts are stable.
-- Wrong custom comparer.
-- Sorting when O(n) hash solution exists.
-- Not considering value range for counting sort.
 
 ## Practice Problems
 

@@ -2,15 +2,13 @@
 
 ## Core Idea
 
-Middleware components form the HTTP request pipeline.
+Middleware is the unit from which the ASP.NET Core request pipeline is constructed. If the previous chapter explained the pipeline as a model, this chapter focuses on middleware as the mechanism that makes that model real.
 
-Chinese notes:
+Each middleware component receives the current `HttpContext` and a delegate representing the rest of the pipeline. It may inspect state, enrich state, wrap downstream execution, or produce the response directly. That flexibility makes middleware the natural home for cross-cutting HTTP concerns that should apply broadly and do not depend on MVC-specific concepts such as action arguments or model state.
 
-- `middleware`: 中间件.
-- `short-circuit`: 短路.
-- `pipeline`: 管道.
+## Inline Middleware And Execution Shape
 
-## Inline Middleware
+The simplest middleware is inline:
 
 ```csharp
 app.Use(async (context, next) =>
@@ -21,17 +19,19 @@ app.Use(async (context, next) =>
 });
 ```
 
-Execution model:
+The execution shape is the important part:
 
 ```text
 Before
-  -> downstream middleware/endpoint
+  -> downstream middleware or endpoint
 After
 ```
 
-Inline middleware is useful for small experiments or very small custom logic. For reusable production logic, prefer a named middleware class.
+Inline middleware is useful for experiments, startup-local behavior, or very small pipeline customizations. For reusable production behavior, a dedicated middleware class is usually clearer and more maintainable.
 
-## Custom Middleware
+## Custom Middleware Classes
+
+A middleware class typically captures stable dependencies in the constructor and processes each request through `InvokeAsync`.
 
 ```csharp
 public sealed class SecurityHeadersMiddleware
@@ -53,13 +53,13 @@ public sealed class SecurityHeadersMiddleware
 }
 ```
 
-Registration:
-
 ```csharp
 app.UseMiddleware<SecurityHeadersMiddleware>();
 ```
 
-Extension method registration:
+The point of a middleware class is not just organization. It gives the concern a clear name, isolates it from `Program.cs`, and makes its dependencies and behavior easier to understand in isolation.
+
+Extension methods usually improve readability further:
 
 ```csharp
 public static class SecurityHeadersMiddlewareExtensions
@@ -71,30 +71,13 @@ public static class SecurityHeadersMiddlewareExtensions
 }
 ```
 
-Usage:
-
 ```csharp
 app.UseSecurityHeaders();
 ```
 
-This keeps `Program.cs` readable.
+## When Middleware Should Short-Circuit
 
-## Short-circuit
-
-```csharp
-app.Use(async (context, next) =>
-{
-    if (!context.Request.Headers.ContainsKey("X-Client-Version"))
-    {
-        context.Response.StatusCode = StatusCodes.Status400BadRequest;
-        return;
-    }
-
-    await next();
-});
-```
-
-Better response:
+Middleware is allowed to end the request without calling the next delegate.
 
 ```csharp
 app.Use(async (context, next) =>
@@ -113,11 +96,13 @@ app.Use(async (context, next) =>
 });
 ```
 
-Short-circuiting should be intentional and return a clear response.
+Short-circuiting is appropriate when the middleware can fully decide the outcome of the request. Examples include required-header checks, rate limiting, maintenance mode, static file serving, and health endpoints.
 
-## Ordering
+It should not be treated casually, however. Once middleware begins to reject or complete requests early, it becomes part of the application's public behavior and must return clear, consistent HTTP responses rather than silently terminating the chain.
 
-Typical order:
+## Middleware Ordering And Dependency Relationships
+
+Middleware does not run in isolation. Its correctness depends on where it sits in the broader pipeline.
 
 ```csharp
 app.UseExceptionHandler();
@@ -129,23 +114,20 @@ app.UseAuthorization();
 app.MapControllers();
 ```
 
-Common dependency relationships:
+Several dependencies are structural:
 
-```text
-UseExceptionHandler before risky downstream work
-UseRouting before endpoint-aware auth
-UseAuthentication before UseAuthorization
-UseCors before endpoints
-MapControllers near the end
-```
+- exception handling should wrap risky downstream work;
+- routing should happen before endpoint-aware authorization behavior;
+- authentication should precede authorization;
+- endpoint mapping should remain late in the pipeline.
 
-If middleware behaves strangely, check ordering first.
+When middleware behaves unexpectedly, order is often the first thing to inspect. Many bugs attributed to routing, CORS, or security configuration are really consequences of a misplaced middleware component.
 
-## Middleware With Scoped Services
+## Middleware And Dependency Injection Lifetimes
 
-Do not capture scoped services in middleware constructors.
+One subtle but important aspect of middleware design is dependency lifetime.
 
-Risky:
+Middleware instances are generally long-lived. Scoped services, by contrast, are created per request. For that reason, scoped services should usually not be captured in middleware constructors.
 
 ```csharp
 public sealed class AuditMiddleware
@@ -159,7 +141,7 @@ public sealed class AuditMiddleware
 }
 ```
 
-Better:
+That pattern is risky because it mixes long-lived middleware instances with request-scoped state. A better approach is method injection:
 
 ```csharp
 public sealed class AuditMiddleware
@@ -178,13 +160,11 @@ public sealed class AuditMiddleware
 }
 ```
 
-Reason:
+This keeps the middleware itself stable while resolving the scoped dependency per request.
 
-> Middleware instances can be long-lived, while scoped services are per request.
+## The Response-Started Boundary
 
-## Response Started
-
-Once response headers are sent, changing headers/status is unsafe.
+Middleware can only modify response headers and status code safely until the response has begun.
 
 ```csharp
 app.Use(async (context, next) =>
@@ -198,11 +178,13 @@ app.Use(async (context, next) =>
 });
 ```
 
-Middleware that modifies response headers after `next()` should check whether the response has started.
+This boundary matters in real systems because late attempts to rewrite status codes, alter headers, or convert an already-streaming response into an error payload often fail or produce inconsistent results. Middleware that intends to shape the outgoing response must be placed and designed with that timing in mind.
 
-## Practical Middleware Examples
+## Representative Middleware Patterns
 
-Correlation ID:
+Several recurring middleware patterns appear in production applications.
+
+Correlation ID propagation:
 
 ```csharp
 public sealed class CorrelationIdMiddleware
@@ -291,139 +273,22 @@ public sealed class MaintenanceModeMiddleware
 }
 ```
 
-Request body size guard:
+These patterns demonstrate the main strengths of middleware: broad applicability, early interception, and control over both request and response flow.
 
-```csharp
-public sealed class JsonBodySizeMiddleware
-{
-    private readonly RequestDelegate _next;
-    private readonly long _maxBytes;
+## Middleware Versus Filters
 
-    public JsonBodySizeMiddleware(RequestDelegate next, long maxBytes)
-    {
-        _next = next;
-        _maxBytes = maxBytes;
-    }
+Middleware and filters are related but belong to different layers.
 
-    public async Task InvokeAsync(HttpContext context)
-    {
-        if (context.Request.ContentType?.StartsWith("application/json") == true &&
-            context.Request.ContentLength > _maxBytes)
-        {
-            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            await context.Response.WriteAsJsonAsync(new
-            {
-                title = "Request body is too large",
-                maxBytes = _maxBytes
-            });
-            return;
-        }
+Middleware is appropriate for concerns such as:
 
-        await _next(context);
-    }
-}
-```
+- correlation IDs;
+- security headers;
+- global exception handling;
+- request timing;
+- CORS;
+- static files;
+- rate limiting.
 
-Registration with an extension method:
+Filters are more appropriate when the logic depends on MVC-specific context such as action arguments, model state, or action results. In other words, middleware shapes the HTTP pipeline broadly, while filters shape controller execution more locally.
 
-```csharp
-public static class MiddlewareRegistration
-{
-    public static IApplicationBuilder UseJsonBodySizeLimit(
-        this IApplicationBuilder app,
-        long maxBytes)
-    {
-        return app.UseMiddleware<JsonBodySizeMiddleware>(maxBytes);
-    }
-}
-```
-
-Usage:
-
-```csharp
-app.UseMaintenanceMode();
-app.UseJsonBodySizeLimit(maxBytes: 1024 * 1024);
-```
-
-The extension for maintenance mode would be similar:
-
-```csharp
-public static IApplicationBuilder UseMaintenanceMode(this IApplicationBuilder app)
-{
-    return app.UseMiddleware<MaintenanceModeMiddleware>();
-}
-```
-
-## Review Questions
-
-### What is middleware?
-
-> Middleware is a component in the ASP.NET Core request pipeline. It can run code before and after the next middleware and can short-circuit the request.
-
-### Why does order matter?
-
-> Because each middleware depends on what happened before it. For example, authorization depends on authentication.
-
-### Can middleware modify response?
-
-> Yes, as long as the response has not already started.
-
-### Middleware class vs inline middleware?
-
-> Inline middleware is fine for small local logic. Middleware classes are better for reusable, testable, named behavior.
-
-### When should middleware short-circuit?
-
-> When it can fully handle the request or reject it early, such as static files, health checks, rate limiting, maintenance mode, or missing required headers.
-
-## Common Mistakes
-
-### Mistake: Forgetting `await next()`.
-
-Why it is wrong:
-
-> Later middleware and endpoints will not run unless the middleware intentionally short-circuits.
-
-Better answer:
-
-> Call `await next()` for pass-through middleware.
-
-### Mistake: Calling `next()` multiple times.
-
-Why it is wrong:
-
-> It can execute downstream logic twice and corrupt the response or duplicate side effects.
-
-Better answer:
-
-> Call `next()` once.
-
-### Mistake: Writing response after it started.
-
-Why it is wrong:
-
-> The server may have already sent headers/body to the client.
-
-Better answer:
-
-> Check `Response.HasStarted` and design response modifications before writing begins.
-
-### Mistake: Wrong authentication/authorization order.
-
-Why it is wrong:
-
-> Authorization needs the user produced by authentication.
-
-Better answer:
-
-> Use `UseAuthentication()` before `UseAuthorization()`.
-
-### Mistake: Too much business logic in middleware.
-
-Why it is wrong:
-
-> Middleware should handle cross-cutting HTTP concerns. Business workflows belong in application/domain services.
-
-Better answer:
-
-> Keep middleware focused on pipeline concerns such as logging, headers, correlation, rate limiting, and exception handling.
+This distinction matters because middleware should not become an all-purpose dumping ground for concerns that actually need endpoint-specific semantic context.

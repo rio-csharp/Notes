@@ -4,23 +4,10 @@
 
 Load testing measures how a system behaves under expected and peak traffic.
 
-Chinese notes:
-
-- `load test`: 负载测试.
-- `stress test`: 压力测试.
-- `spike test`: 峰值冲击测试.
-- `soak test`: 稳定性长跑测试.
-- `throughput`: 吞吐量.
-- `p95 latency`: 95 分位延迟.
-
 ## Why Load Test?
 
 Load testing helps answer:
 
-- How many requests per second can the system handle?
-- What is p95/p99 latency under expected traffic?
-- Where is the first bottleneck?
-- What happens when traffic spikes?
 - Does memory grow over time?
 - Do errors appear before CPU is saturated?
 - Does scaling out actually improve throughput?
@@ -403,32 +390,6 @@ After:
 Pass/fail:
 Next actions:
 ```
-
-## Common Mistakes
-
-- Testing with tiny database.
-- Only looking at average latency.
-- No warm-up.
-- Ignoring errors.
-- Unrealistic request mix.
-- Testing only one endpoint.
-- Running load tests against shared production without controls.
-- Not correlating load-tool metrics with server metrics.
-- Forgetting external dependency limits.
-
-## Knowledge Checks
-
-### What do you look at in a load test?
-
-Look at throughput, latency percentiles, error rate, CPU, memory, GC, database metrics, external dependency latency, and saturation points.
-
-### Average latency vs p95?
-
-Average hides tail latency. p95 shows the latency experienced by slower 5% of requests and is usually more useful for user experience.
-
-### How do you find bottlenecks?
-
-Correlate latency with resource metrics and traces. If API CPU is low but DB time is high, focus on database. If thread pool queue grows, check blocking calls.
 
 ## Practice Task
 

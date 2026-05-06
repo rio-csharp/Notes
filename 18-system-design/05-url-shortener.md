@@ -4,12 +4,6 @@
 
 Design a URL shortener like Bitly.
 
-Chinese notes:
-
-- `short code`: 短码.
-- `redirect`: 重定向.
-- `collision`: 冲突.
-
 ## Requirements
 
 Functional:
@@ -205,25 +199,3 @@ Add a disable flag:
 ALTER TABLE ShortUrls
 ADD IsDisabled BIT NOT NULL DEFAULT 0;
 ```
-
-## Knowledge Checks
-
-### How do you generate unique short codes?
-
-A common approach is to generate an ID and encode it with Base62. Random codes are also possible but require collision checks.
-
-### Why use cache?
-
-Redirect traffic is read-heavy and latency-sensitive, so caching code-to-URL mappings reduces database load.
-
-### How do you record analytics without slowing redirects?
-
-Publish click events asynchronously to a queue or log pipeline and process them in the background.
-
-## Common Mistakes
-
-- Synchronous analytics writes in redirect path.
-- No abuse prevention.
-- No cache invalidation for expired links.
-- No unique constraint on code.
-- Ignoring custom alias collision.

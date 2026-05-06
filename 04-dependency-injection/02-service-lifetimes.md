@@ -2,27 +2,13 @@
 
 ## Core Idea
 
-A DI service lifetime controls how long a resolved service instance is reused.
+Service lifetime determines how long the DI container reuses a resolved instance and therefore how widely that instance's state, resources, and ownership are shared. In ASP.NET Core, lifetime choice is not a minor registration detail. It is one of the main ways object design becomes runtime behavior.
 
-Chinese notes:
+The three standard lifetimes are singleton, scoped, and transient. On paper they are simple. In practice, they shape correctness, thread safety, disposal behavior, caching, and the boundaries between request-specific and application-wide state.
 
-- `lifetime`: 生命周期.
-- `singleton`: 单例, one instance for the application.
-- `scoped`: 作用域, usually one instance per HTTP request.
-- `transient`: 瞬态, new instance per resolution.
-- `captive dependency`: 生命周期捕获.
+## Lifetime As Reuse And Ownership
 
-In ASP.NET Core, common lifetimes are:
-
-- `Singleton`;
-- `Scoped`;
-- `Transient`.
-
-Key takeaway:
-
-> Lifetime is mainly about caching and ownership: singleton is cached in the root provider, scoped is cached in a scope, and transient is created for each resolution.
-
-## Mental Model
+The easiest way to understand lifetimes is to think in terms of caching and scope ownership.
 
 ```text
 Application root provider
@@ -43,23 +29,15 @@ Transient
   Created each time it is requested
 ```
 
+This model immediately explains several important behaviors. Singleton state is shared by the whole application. Scoped state is shared only inside a particular scope, which in web applications usually means a request. Transient state is not reused by design.
+
 ## Singleton
 
-One instance is created and reused for the entire application lifetime.
+Singleton services are created once and then reused for the lifetime of the application.
 
 ```csharp
 builder.Services.AddSingleton<ISystemClock, SystemClock>();
 ```
-
-Use singleton for:
-
-- stateless services;
-- thread-safe shared services;
-- configuration helpers;
-- app-wide in-memory caches;
-- expensive objects designed for reuse.
-
-Example:
 
 ```csharp
 public interface ISystemClock
@@ -73,58 +51,35 @@ public sealed class SystemClock : ISystemClock
 }
 ```
 
-Why singleton is safe here:
+Singleton is a good fit when the service is:
 
-- no request-specific state;
-- no mutable shared state;
+- stateless;
 - thread-safe;
-- no scoped dependency.
+- intentionally shared;
+- expensive enough that reuse is desirable;
+- free of request-specific assumptions.
 
-Be careful:
-
-- singleton services must be thread-safe;
-- singleton services cannot directly depend on scoped services;
-- singleton services should not store user-specific data;
-- singleton mutable state can create race conditions.
-
-Bad singleton:
+The most important warning is that singleton lifetime makes shared state global to the process. If the service contains mutable state, that state is now potentially visible across users, requests, and threads.
 
 ```csharp
 public sealed class CurrentUserCache
 {
-    public string? UserId { get; set; } // bad in singleton
+    public string? UserId { get; set; }
 }
 ```
 
-Why it is bad:
-
-> All users share the same singleton instance, so one request can overwrite another request's user data.
+A type like this is dangerous as a singleton because it turns one user's request data into application-wide shared mutable state.
 
 ## Scoped
 
-One instance is created per scope. In ASP.NET Core web apps, a scope usually means one HTTP request.
+Scoped services are created once per scope. In ASP.NET Core web applications, one HTTP request normally creates one scope.
 
 ```csharp
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddDbContext<AppDbContext>();
 ```
 
-Use scoped for:
-
-- business services;
-- repositories;
-- EF Core `DbContext`;
-- per-request state;
-- unit-of-work style operations.
-
-Example:
-
 ```csharp
-public interface IOrderService
-{
-    Task<OrderDto> CreateAsync(CreateOrderRequest request, CancellationToken cancellationToken);
-}
-
 public sealed class OrderService : IOrderService
 {
     private readonly AppDbContext _dbContext;
@@ -156,35 +111,15 @@ public sealed class OrderService : IOrderService
 }
 ```
 
-Registration:
-
-```csharp
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
-
-builder.Services.AddScoped<IOrderService, OrderService>();
-```
-
-Why scoped?
-
-> `OrderService` depends on `AppDbContext`. `DbContext` tracks changes for a unit of work and is not thread-safe. A request scope is a natural unit of work for many APIs.
+Scoped lifetime is a natural fit for business services, repositories, and EF Core `DbContext` because these often participate in a request-shaped unit of work. The main idea is not merely "per request." It is that the reused instance belongs to a meaningful operational boundary.
 
 ## Transient
 
-A new instance is created every time it is requested.
+Transient services are created each time the container resolves them.
 
 ```csharp
 builder.Services.AddTransient<IEmailTemplateRenderer, EmailTemplateRenderer>();
 ```
-
-Use transient for:
-
-- lightweight stateless services;
-- short-lived calculations;
-- formatting/rendering helpers;
-- services with no shared state.
-
-Example:
 
 ```csharp
 public interface IEmailTemplateRenderer
@@ -201,132 +136,48 @@ public sealed class EmailTemplateRenderer : IEmailTemplateRenderer
 }
 ```
 
-Transient does not mean "always safe."
+Transient lifetime works best for small, stateless, low-cost services that do not need reuse across resolutions.
 
-Be careful when:
+It is tempting to think of transient as the "safe default," but that is only partly true. A transient can still be expensive to create, can own disposable resources, or can become effectively long-lived if it is captured by a longer-lived service. Lifetime labels alone do not guarantee correctness.
 
-- transient service is expensive to create;
-- transient service owns unmanaged resources;
-- transient service is disposable;
-- transient service is captured by a singleton;
-- transient service has mutable state.
+## Lifetime Direction And Dependency Flow
 
-## Lifetime Rules
+One of the most important conceptual rules is that longer-lived services should not depend directly on shorter-lived ones in a way that captures them for too long.
 
-Shorter-lived services should not be captured by longer-lived services.
-
-Safe direction:
+The dangerous case is usually:
 
 ```text
-Scoped -> Singleton dependency: usually OK
-Transient -> Singleton dependency: usually OK
-Scoped -> Transient dependency: OK if transient is safe
-Singleton -> Scoped dependency: dangerous
+singleton -> scoped
 ```
 
-Why singleton depending on scoped is dangerous:
+because the singleton outlives the scoped service's intended boundary.
 
-```text
-Singleton lives for the app lifetime.
-Scoped service lives for one request.
-```
+Even when the container technically allows certain patterns, the real design question is whether the dependency relationship preserves the shorter-lived service's assumptions about scope, freshness, and thread safety.
 
-If the singleton captures the scoped service, it may reuse request-specific data after the request is gone.
+## `DbContext` As A Lifetime Example
 
-## Captive Dependency Example
-
-Bad:
-
-```csharp
-builder.Services.AddScoped<ICurrentUser, CurrentUser>();
-builder.Services.AddSingleton<AuditWriter>();
-
-public sealed class AuditWriter
-{
-    private readonly ICurrentUser _currentUser;
-
-    public AuditWriter(ICurrentUser currentUser)
-    {
-        _currentUser = currentUser;
-    }
-}
-```
-
-Problem:
-
-> `AuditWriter` is singleton. It may hold onto one scoped `ICurrentUser`, which is request-specific.
-
-Better option 1: make service scoped.
-
-```csharp
-builder.Services.AddScoped<AuditWriter>();
-```
-
-Better option 2: pass required data.
-
-```csharp
-public sealed class AuditWriter
-{
-    public Task WriteAsync(string userId, string action, CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
-}
-```
-
-Better option 3: create a scope for background/infrastructure work.
-
-```csharp
-public sealed class AuditWorker
-{
-    private readonly IServiceScopeFactory _scopeFactory;
-
-    public AuditWorker(IServiceScopeFactory scopeFactory)
-    {
-        _scopeFactory = scopeFactory;
-    }
-
-    public async Task WriteAsync(string message, CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        dbContext.AuditLogs.Add(new AuditLog
-        {
-            Message = message,
-            CreatedAt = DateTimeOffset.UtcNow
-        });
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
-}
-```
-
-## DbContext Lifetime
+EF Core `DbContext` is one of the clearest examples of why scoped lifetime matters.
 
 `DbContext` is usually scoped because:
 
-- it tracks changes for a unit of work;
-- it maintains an identity map;
+- it represents a unit of work;
+- it tracks entity instances;
 - it is not thread-safe;
-- sharing it globally would cause state and concurrency bugs;
-- one request often maps naturally to one unit of work.
-
-Bad:
+- it should not be shared across unrelated requests;
+- stale tracked state becomes dangerous if reused too broadly.
 
 ```csharp
-builder.Services.AddSingleton<AppDbContext>();
+builder.Services.AddDbContext<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("Default")));
 ```
 
-Why it is wrong:
+Registering it as a singleton would be incorrect because it would stretch unit-of-work state across the application lifetime and across concurrent requests.
 
-> A singleton `DbContext` would be shared across requests, accumulate tracked entities, and be used concurrently by multiple threads.
+## `HttpClient` And Misleading Lifetime Intuition
 
-## HttpClient Lifetime
+Lifetime design is not always obvious from type shape alone. `HttpClient` is a well-known example.
 
-Do not create `new HttpClient()` per request.
-
-Bad:
+The naive pattern creates a new client repeatedly:
 
 ```csharp
 public async Task<string> GetAsync()
@@ -336,11 +187,7 @@ public async Task<string> GetAsync()
 }
 ```
 
-Why it is wrong:
-
-> Creating many short-lived clients can exhaust sockets because underlying connections may remain open in `TIME_WAIT`.
-
-Use `IHttpClientFactory`:
+That looks tidy, but repeated short-lived clients can cause connection-management problems. In ASP.NET Core, `IHttpClientFactory` is the usual abstraction because it decouples logical client usage from underlying handler lifetime management.
 
 ```csharp
 builder.Services.AddHttpClient<IPaymentClient, PaymentClient>(client =>
@@ -350,67 +197,30 @@ builder.Services.AddHttpClient<IPaymentClient, PaymentClient>(client =>
 });
 ```
 
-Client:
+This example is useful because it shows that lifetime design is sometimes about resource management behavior that is not immediately visible from the consumer's perspective.
 
-```csharp
-public sealed class PaymentClient : IPaymentClient
-{
-    private readonly HttpClient _httpClient;
+## Disposal And Scope Ownership
 
-    public PaymentClient(HttpClient httpClient)
-    {
-        _httpClient = httpClient;
-    }
+The container disposes services it creates according to the owning scope or provider.
 
-    public async Task<PaymentResult> ChargeAsync(
-        PaymentRequest request,
-        CancellationToken cancellationToken)
-    {
-        var response = await _httpClient.PostAsJsonAsync(
-            "/charges",
-            request,
-            cancellationToken);
+- singleton disposables are disposed when the root provider shuts down;
+- scoped disposables are disposed when the scope ends;
+- transient disposables may still be tracked if the container creates them inside a scope.
 
-        response.EnsureSuccessStatusCode();
+This is one reason lifetime is also about ownership. The container is not simply memoizing objects. It is managing the boundary within which those objects remain valid and the point at which they should be cleaned up.
 
-        return await response.Content.ReadFromJsonAsync<PaymentResult>(
-            cancellationToken: cancellationToken)
-            ?? throw new InvalidOperationException("Empty payment response.");
-    }
-}
-```
-
-## Disposable Services
-
-The container disposes services it creates.
-
-Rules:
-
-- scoped disposable services are disposed when the scope ends;
-- singleton disposable services are disposed when the root provider shuts down;
-- disposable transients resolved from a scope may be tracked and disposed with that scope;
-- disposable transients resolved from the root provider can live too long.
-
-Bad:
-
-```csharp
-var service = app.Services.GetRequiredService<MyDisposableTransient>();
-```
-
-Why it can be bad:
-
-> Resolving disposable transients from the root provider can keep them alive until application shutdown.
-
-Better:
+Resolving disposable services from the root provider can therefore be risky when they were meant to be short-lived:
 
 ```csharp
 using var scope = app.Services.CreateScope();
 var service = scope.ServiceProvider.GetRequiredService<MyDisposableTransient>();
 ```
 
-## Factory Registration
+Creating a scope aligns resolution with intended disposal behavior.
 
-Factory registration is useful when construction needs configuration or special setup.
+## Factory Registrations And Lifetime Still Apply
+
+Factory registrations can make construction more explicit, but they do not escape lifetime rules.
 
 ```csharp
 builder.Services.AddScoped<IReportGenerator>(sp =>
@@ -421,95 +231,12 @@ builder.Services.AddScoped<IReportGenerator>(sp =>
 });
 ```
 
-Be careful:
+The fact that a factory constructs the object does not make the lifetime less important. If a singleton factory-created service captures scoped dependencies, the problem is still a lifetime mismatch. Registration style does not change ownership reality.
 
-> The lifetime of the factory registration still matters. A singleton factory-created service still cannot safely capture scoped dependencies.
+## Lifetime As A Design Decision
 
-## Review Questions
+Lifetime is often described as a performance concern, but correctness is usually the more important dimension.
 
-### What is the difference between Singleton, Scoped, and Transient?
+Choosing singleton when the object should really be scoped can create cross-request leakage, stale state, and threading hazards. Choosing transient when the object is expensive and stateless can create unnecessary churn. Choosing scoped for request-specific coordination can make business behavior clearer because the lifetime now matches the operational boundary.
 
-Singleton is one instance for the application lifetime. Scoped is one instance per scope, usually per HTTP request. Transient creates a new instance every time it is resolved.
-
-### Why is injecting Scoped into Singleton dangerous?
-
-The singleton lives longer than the scoped service. It may capture request-specific state and reuse it across requests, causing data leaks, incorrect behavior, disposed object access, and thread-safety issues.
-
-### Why is `DbContext` scoped?
-
-`DbContext` represents a unit of work and tracks entity changes. It is not thread-safe and should not be shared globally. Scoped lifetime matches the request/unit-of-work model.
-
-### Is Transient always safe?
-
-No. If a transient service is expensive to create, owns resources, is disposable, stores mutable state, or is captured by a singleton, it can still cause problems.
-
-### Can a scoped service depend on a singleton?
-
-Yes, usually. A shorter-lived service can depend on a longer-lived stateless/thread-safe service.
-
-### Can a singleton depend on a transient?
-
-Technically yes, but be careful. If the singleton stores the transient in a field, the transient effectively becomes singleton-like. That may be fine for stateless services but dangerous for stateful or disposable services.
-
-## Common Mistakes
-
-### Mistake: Injecting scoped service into singleton
-
-Why it is wrong:
-
-> The singleton may keep request-specific state beyond the request lifetime.
-
-Better answer:
-
-> Change the singleton to scoped, pass data into methods, or create a scope only in infrastructure/background scenarios.
-
-### Mistake: Storing user-specific data in singleton
-
-Why it is wrong:
-
-> All requests share the same singleton instance, so user data can leak across requests.
-
-Better answer:
-
-> Store user data in scoped services, claims, request context, or persistent storage.
-
-### Mistake: Manually building `ServiceProvider`
-
-Why it is wrong:
-
-> It creates a second container and can duplicate singleton instances.
-
-Better answer:
-
-> Let ASP.NET Core build the provider. Use factory registrations or options binding instead.
-
-### Mistake: Registering stateful services as singleton
-
-Why it is wrong:
-
-> Mutable shared state must be thread-safe and can create cross-request bugs.
-
-Better answer:
-
-> Use scoped or transient lifetime unless the state is intentionally shared and protected.
-
-### Mistake: Creating `HttpClient` manually per request
-
-Why it is wrong:
-
-> It can cause socket exhaustion and does not centralize timeout/resilience configuration.
-
-Better answer:
-
-> Use `IHttpClientFactory` with typed or named clients.
-
-## Practice Task
-
-Create:
-
-1. `IOrderService` as scoped;
-2. `IEmailTemplateRenderer` as transient;
-3. `IClock` as singleton;
-4. `IPaymentClient` using `IHttpClientFactory`;
-5. one intentional captive dependency example and explain why it is wrong.
-
+This is why lifetime should not be chosen mechanically. It should follow the shape of the service's state, ownership, thread-safety expectations, and intended unit of work.

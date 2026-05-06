@@ -2,43 +2,35 @@
 
 ## Core Idea
 
-`async/await` is a language feature for writing asynchronous code in a readable way.
+`async` and `await` let C# express asynchronous work without forcing ordinary control flow to be written in callbacks or manual continuation chains. They matter most in .NET because so much production code waits on external systems: databases, HTTP services, queues, file systems, cloud storage, and other I/O-heavy dependencies.
 
-It is mainly used to avoid blocking threads during I/O-bound work, such as:
+This chapter focuses on asynchronous control flow itself: how `Task` represents work, what `await` does to method execution, why blocking defeats the model, and where asynchronous code changes API design. The following chapter takes over when the problem becomes shared state, synchronization, backpressure, or thread-safety under concurrent activity.
 
-- database calls;
-- HTTP calls;
-- file I/O;
-- message queue operations;
-- cloud storage operations.
+## Asynchronous Code Is About Non-Blocking Wait
 
-Important Chinese note:
-
-- `asynchronous` means 异步.
-- `non-blocking` means 非阻塞.
-- `continuation` means 继续执行的后续逻辑.
-
-## What Async/Await Is Not
-
-`async/await` does not automatically make code faster.
-
-It does not always create a new thread.
-
-It does not turn CPU-heavy work into cheap work.
-
-Wrong mental model:
+The most important mental model is that asynchronous code is not primarily about creating more threads. It is about avoiding the waste of holding a thread idle while external work is in progress.
 
 ```text
-await = start a new thread
+await = pause this method until the operation completes, then resume it later
 ```
 
-Better mental model:
+That is why async is so valuable for I/O-bound systems and much less magical for CPU-bound work. If the bottleneck is a database round trip or a network response, a thread does not need to sit blocked during the wait. If the bottleneck is pure CPU computation, the work still has to be executed somewhere.
 
-```text
-await = pause this method, return control, resume later when the awaited operation completes
+## Tasks As Representations Of In-Flight Work
+
+`Task` and `Task<T>` are the standard abstractions for asynchronous completion in .NET.
+
+```csharp
+Task<string> task = httpClient.GetStringAsync(url);
 ```
 
-## Basic Example
+The task is not the thread. It is an object that represents an operation that may already be running, may complete in the future, may fail with an exception, or may be canceled.
+
+This distinction is crucial because many asynchronous operations do not own a dedicated waiting thread at all. For network and file I/O, the runtime can initiate the work, return the current thread to the pool, and schedule a continuation only when the operating system reports completion.
+
+## What `await` Changes In A Method
+
+Consider a typical asynchronous method:
 
 ```csharp
 public async Task<UserDto?> GetUserAsync(int id, CancellationToken cancellationToken)
@@ -52,59 +44,13 @@ public async Task<UserDto?> GetUserAsync(int id, CancellationToken cancellationT
 }
 ```
 
-What happens:
+At the surface, this looks like ordinary sequential code. Underneath, the compiler rewrites the method into a state machine. When execution reaches an incomplete awaitable, the method saves enough state to continue later, returns a `Task`, and arranges for the remainder of the method to resume when the awaited operation completes.
 
-1. The database query starts.
-2. The current thread is not blocked while waiting for the database.
-3. When the database returns, the method continues.
+This is why asynchronous methods can preserve local variables across awaits, propagate exceptions through the returned task, and resume at the right source location without the caller needing to manage callbacks manually.
 
-Controller usage:
+## The Compiler-Generated State Machine
 
-```csharp
-[HttpGet("{id:int}")]
-public async Task<ActionResult<UserDto>> GetUser(int id, CancellationToken ct)
-{
-    var user = await _userService.GetUserAsync(id, ct);
-
-    return user is null ? NotFound() : Ok(user);
-}
-```
-
-Why this matters:
-
-> In ASP.NET Core, async I/O lets the request thread return to the thread pool while waiting for the database. This improves scalability under concurrent load.
-
-## Async State Machine
-
-The compiler transforms an async method into a state machine.
-
-Source:
-
-```csharp
-public async Task<int> GetNumberAsync()
-{
-    await Task.Delay(1000);
-    return 42;
-}
-```
-
-Conceptual flow:
-
-```text
-Start method
-  -> hit await
-  -> if task not completed, save state and return Task
-  -> later, continuation resumes
-  -> return result
-```
-
-This is why exceptions thrown in async methods are stored in the returned `Task`.
-
-## Under The Hood: What The Compiler Generates
-
-When a method contains `await`, the C# compiler rewrites it into a state machine（状态机）.
-
-Original:
+The state-machine transformation is worth understanding because it explains several behaviors that otherwise feel surprising.
 
 ```csharp
 public async Task<int> GetValueAsync()
@@ -115,156 +61,94 @@ public async Task<int> GetValueAsync()
 }
 ```
 
-Conceptually, the compiler creates something like:
+Conceptually, the compiler produces something like this:
 
 ```text
-State machine fields:
-  state
-  builder
-  local variable a
-  awaiter for GetAAsync
-  awaiter for GetBAsync
+State machine contains:
+  current state
+  task builder
+  lifted local variables
+  awaiters
 
-MoveNext():
-  switch state
-    start:
-      call GetAAsync
-      if not complete:
-        save state
-        register continuation
-        return
-      read result
-
-    after GetAAsync:
-      call GetBAsync
-      if not complete:
-        save state
-        register continuation
-        return
-      read result
-
-    finish:
-      set result or exception on Task
+Execution flow:
+  start method
+  call GetAAsync
+  if incomplete, save state and return task
+  resume when GetAAsync completes
+  call GetBAsync
+  if incomplete, save state and return task
+  resume when GetBAsync completes
+  compute result
+  complete the task
 ```
 
-This explains several important behaviors:
+Three consequences matter in real engineering work.
 
-- local variables may become fields on the state machine;
-- exceptions are captured into the returned `Task`;
-- the method can return before the work is complete;
-- continuation resumes when the awaited operation completes.
+First, local variables that survive across awaits may become fields on the generated state machine, which means asynchronous methods are not free of allocation or capture costs. Second, exceptions thrown after an `await` do not surface synchronously to the caller; they fault the returned task. Third, a method can appear to "return" before its work is finished, because what it returns is the promise of eventual completion.
 
-## Awaiter Pattern
+## Awaitables And The Awaiter Pattern
 
-`await` works on awaitable objects, not only `Task`.
+In normal application code, the awaitable types you see most often are `Task`, `Task<T>`, `ValueTask`, and `ValueTask<T>`. The language, however, is defined in terms of an awaiter pattern rather than a hard dependency on `Task`.
 
-The object must expose an awaiter pattern:
+An awaitable type must provide the members that allow the compiler to ask whether the operation is complete, how to schedule continuation, and how to retrieve the result. Most developers do not implement custom awaitables directly, but understanding that `await` is pattern-based helps explain why the feature is broader than one library type.
 
-- `GetAwaiter()`;
-- `IsCompleted`;
-- `OnCompleted(...)`;
-- `GetResult()`.
+## Continuations, Context, And Resumption
 
-For most application code, you use `Task`, `Task<T>`, or `ValueTask<T>`.
+When an awaited operation completes, the rest of the asynchronous method continues as a continuation. Where that continuation runs depends partly on the environment.
 
-Key point:
+In UI applications, code often resumes on the UI thread because the synchronization context requires it. In classic ASP.NET, continuation may capture a request context. In ASP.NET Core, there is no classic request `SynchronizationContext`, so continuation usually resumes on an available thread-pool thread without a special request-thread affinity.
 
-> `await` is pattern-based. `Task` is the common awaitable type, but the compiler only requires the awaiter pattern.
-
-## SynchronizationContext And Continuation
-
-`SynchronizationContext` represents where continuation should resume.
-
-Examples:
-
-- UI app: resume on UI thread;
-- classic ASP.NET: resume on request context;
-- ASP.NET Core: no classic request `SynchronizationContext`.
-
-This matters because blocking on async can deadlock in UI/classic ASP.NET:
+This context behavior explains why sync-over-async can deadlock in some environments:
 
 ```text
-UI thread calls .Result and blocks.
-Async operation completes.
-Continuation wants UI thread.
-UI thread is blocked waiting for continuation.
-Deadlock.
+UI thread blocks waiting on .Result
+async operation completes
+continuation needs UI thread
+UI thread is still blocked
+deadlock
 ```
 
-ASP.NET Core usually avoids this exact deadlock, but blocking still harms scalability because it occupies thread pool threads.
+ASP.NET Core avoids that exact classic deadlock pattern more often, but blocking is still harmful because it occupies worker threads that could otherwise serve other requests or run queued continuations.
 
-## I/O Completion And Thread Pool
+## I/O Completion And Scalability
 
-For I/O-bound operations, a thread does not sit there waiting.
-
-Example:
+When asynchronous I/O works well, the runtime is not making the database or network intrinsically faster. It is preserving thread capacity while the process waits.
 
 ```csharp
 var json = await httpClient.GetStringAsync(url);
 ```
 
-High-level flow:
+The high-level flow is closer to this:
 
 ```text
-1. Request starts on a thread pool thread.
-2. HTTP I/O is initiated.
-3. The current thread returns to the pool.
-4. OS/network completion eventually signals completion.
-5. A continuation is queued.
-6. A thread pool thread runs the continuation.
+request begins on a worker thread
+HTTP operation is initiated
+worker thread returns to the pool
+I/O completion arrives later
+continuation is scheduled
+another worker thread resumes the method
 ```
 
-This is why async improves scalability for I/O-heavy web servers.
+That is the key scalability benefit in web servers and background processors that spend a large portion of their time waiting on external dependencies. Async improves throughput under load because fewer threads remain blocked doing nothing useful.
 
-It does not make the database or network faster. It lets the server use threads more efficiently while waiting.
+## Async APIs And Application Boundaries
 
-## ExecutionContext
-
-`ExecutionContext` flows ambient data across async calls.
-
-Examples:
-
-- current culture;
-- security context;
-- `AsyncLocal<T>`;
-- logging scopes and correlation IDs in some designs.
-
-Example:
+Asynchronous code tends to propagate outward. If a repository exposes asynchronous I/O, then the service that depends on it usually becomes asynchronous, and so does the controller or endpoint that calls the service.
 
 ```csharp
-private static readonly AsyncLocal<string?> CorrelationId = new();
-
-public async Task HandleAsync()
+[HttpGet("{id:int}")]
+public async Task<ActionResult<UserDto>> GetUser(int id, CancellationToken ct)
 {
-    CorrelationId.Value = "abc";
-    await Task.Delay(100);
-    Console.WriteLine(CorrelationId.Value); // usually still "abc"
+    var user = await _userService.GetUserAsync(id, ct);
+    return user is null ? NotFound() : Ok(user);
 }
 ```
 
-Key point:
+This is one reason partial async adoption often feels awkward. Once the underlying work is genuinely asynchronous, keeping the upper layers synchronous usually means blocking somewhere, and that destroys much of the benefit.
 
-> Async code can preserve contextual data across awaits using ExecutionContext and AsyncLocal. This is useful for correlation IDs, but overusing AsyncLocal can make behavior harder to reason about.
+## I/O-Bound Work Versus CPU-Bound Work
 
-## Task vs Thread
-
-`Thread` is an OS-level execution resource.
-
-`Task` is a promise-like abstraction representing future completion.
-
-Example:
-
-```csharp
-Task<string> task = httpClient.GetStringAsync(url);
-```
-
-This does not mean there is one dedicated thread waiting for the HTTP response.
-
-## I/O-bound vs CPU-bound
-
-### I/O-bound
-
-Use async APIs.
+Async is the natural shape for I/O-bound work:
 
 ```csharp
 public async Task<string> ReadFileAsync(string path, CancellationToken ct)
@@ -273,23 +157,22 @@ public async Task<string> ReadFileAsync(string path, CancellationToken ct)
 }
 ```
 
-### CPU-bound
-
-Async does not reduce CPU work.
+CPU-bound work is different:
 
 ```csharp
 public int CalculateHash(byte[] data)
 {
-    // CPU-bound work
     return data.Aggregate(17, (hash, b) => hash * 31 + b);
 }
 ```
 
-If you need to move CPU-bound work away from a request thread, use a background worker or queue. Avoid blindly using `Task.Run` in ASP.NET Core request handlers.
+Making a CPU-heavy method `async` does not reduce the amount of computation. It only changes how the result is represented. If CPU-bound work should not run in a latency-sensitive request path, the real solution is usually architectural: offload it to background processing, separate workers, bounded pipelines, or specialized compute resources.
 
-## CancellationToken
+Blindly wrapping CPU work in `Task.Run` inside ASP.NET Core request handlers often just moves the pressure from one thread-pool thread to another.
 
-Production code should support cancellation.
+## Cancellation As Part Of API Design
+
+Cancellation is one of the most important engineering disciplines in asynchronous systems because it allows work to stop when the caller no longer cares about the result.
 
 ```csharp
 [HttpGet("{id:int}")]
@@ -308,15 +191,13 @@ public async Task<ActionResult<UserDto>> GetUser(
 }
 ```
 
-Pass `CancellationToken` to:
+The token should usually be passed through to downstream asynchronous APIs so that the whole operation observes the same cancellation signal:
 
-- EF Core async methods;
-- HTTP calls;
-- file I/O;
-- message publishing;
-- long-running operations.
-
-Manual cancellation check:
+- EF Core query methods
+- HTTP calls
+- file I/O
+- queue operations
+- long-running loops
 
 ```csharp
 public async Task ImportAsync(IEnumerable<Row> rows, CancellationToken ct)
@@ -329,7 +210,7 @@ public async Task ImportAsync(IEnumerable<Row> rows, CancellationToken ct)
 }
 ```
 
-Timeout example:
+Timeouts are commonly expressed through cancellation as well:
 
 ```csharp
 using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -340,13 +221,11 @@ using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
 await _externalClient.CallAsync(linkedCts.Token);
 ```
 
-Why link tokens:
+This keeps the cancellation story coherent instead of inventing separate timeout and abort mechanisms for every layer.
 
-> The operation should stop if either the request is aborted or the internal timeout expires.
+## Coordinating Independent Asynchronous Operations
 
-## Task.WhenAll
-
-Use `Task.WhenAll` for independent operations.
+When several asynchronous operations are independent, starting them together and awaiting them as a group can reduce overall latency.
 
 ```csharp
 public async Task<UserProfilePage> GetProfilePageAsync(int userId, CancellationToken ct)
@@ -364,72 +243,20 @@ public async Task<UserProfilePage> GetProfilePageAsync(int userId, CancellationT
 }
 ```
 
-Common pitfall:
+This is valuable when the operations do not depend on one another and the downstream systems can tolerate the combined concurrency. The warning matters as much as the benefit: `Task.WhenAll` is not a universal optimization. Starting too much work at once can overload external systems, create memory pressure, or trigger rate limits.
+
+The broader topic of bounded concurrency belongs in the next chapter, but the design principle begins here: asynchronous composition is about both latency and load shape.
+
+## Blocking Defeats The Model
+
+One of the most expensive mistakes in C# asynchronous code is sync-over-async: forcing asynchronous operations back into synchronous waiting.
 
 ```csharp
-var user = await GetUserAsync();
-var orders = await GetOrdersAsync();
-var preferences = await GetPreferencesAsync();
-```
-
-This runs sequentially. It may be slower if the operations are independent.
-
-Exception behavior:
-
-```csharp
-try
-{
-    await Task.WhenAll(userTask, ordersTask, preferencesTask);
-}
-catch
-{
-    // At least one task failed. Inspect individual tasks if needed.
-    throw;
-}
-```
-
-Important:
-
-> `Task.WhenAll` is not a rate limiter. Starting too many operations at once can overload downstream services.
-
-Bounded concurrency example:
-
-```csharp
-var semaphore = new SemaphoreSlim(10);
-
-var tasks = ids.Select(async id =>
-{
-    await semaphore.WaitAsync(ct);
-    try
-    {
-        return await _client.GetItemAsync(id, ct);
-    }
-    finally
-    {
-        semaphore.Release();
-    }
-});
-
-var results = await Task.WhenAll(tasks);
-```
-
-## Deadlock Example
-
-Avoid blocking async code:
-
-```csharp
-// Bad
 var result = GetUserAsync(id).Result;
-
-// Bad
-var result = GetUserAsync(id).GetAwaiter().GetResult();
+var other = GetUserAsync(id).GetAwaiter().GetResult();
 ```
 
-In classic ASP.NET or UI apps, this can deadlock due to `SynchronizationContext`.
-
-In ASP.NET Core, deadlock is less likely, but blocking still wastes thread pool threads and can cause thread pool starvation（线程池饥饿）.
-
-Sync-over-async in ASP.NET Core:
+In UI and classic ASP.NET applications this can deadlock because continuations attempt to resume on a blocked context. In ASP.NET Core, the more common failure mode is reduced scalability and eventual thread-pool starvation under load.
 
 ```csharp
 public IActionResult Get()
@@ -439,15 +266,11 @@ public IActionResult Get()
 }
 ```
 
-Problem:
+This request thread now waits instead of returning to the pool. Multiply that pattern across many concurrent requests and the server spends threads waiting rather than serving work.
 
-> The request thread waits instead of returning to the pool. Under load, many blocked threads can delay continuations and unrelated requests.
+## ConfigureAwait And Library Boundaries
 
-## ConfigureAwait
-
-In ASP.NET Core, there is no classic request `SynchronizationContext`, so `ConfigureAwait(false)` is usually not required in application code.
-
-In reusable libraries, it can still be useful:
+`ConfigureAwait(false)` matters most in reusable libraries and environments with a synchronization context.
 
 ```csharp
 public async Task<string> LoadAsync()
@@ -456,15 +279,13 @@ public async Task<string> LoadAsync()
 }
 ```
 
-Practical explanation:
+In ASP.NET Core application code, there is no classic request synchronization context to avoid, so `ConfigureAwait(false)` is often unnecessary. In general-purpose libraries, it can still be useful because the library should not assume anything about the caller's context requirements.
 
-> In UI applications, `ConfigureAwait(false)` avoids resuming on the UI context. In ASP.NET Core, there is no classic synchronization context, so it is less important for request code. For library code, it is still commonly used to avoid unnecessary context capture.
+The important point is not that one style is always correct. It is that continuation context is part of asynchronous behavior, and library code often needs to be more conservative about context capture than top-level application code.
 
-## ValueTask
+## ValueTask And Hot-Path Optimization
 
-`ValueTask` can reduce allocations when a result is often available synchronously.
-
-Example:
+`ValueTask<T>` can reduce allocation overhead when an asynchronous result is frequently available synchronously.
 
 ```csharp
 public ValueTask<User?> GetCachedUserAsync(int id)
@@ -478,24 +299,19 @@ public ValueTask<User?> GetCachedUserAsync(int id)
 }
 ```
 
-Use carefully:
+This is a specialized optimization, not the default recommendation. `Task` remains simpler, easier to compose, and safer to use in ordinary application code. `ValueTask` becomes attractive only when profiling shows real allocation pressure or when a library API is deliberately tuned for high-frequency paths.
 
-- `Task` is simpler and usually good enough.
-- `ValueTask` has usage constraints.
-- Prefer `ValueTask` only for measured hot paths or APIs designed for high performance.
+It also has usage constraints:
 
-Important `ValueTask` caution:
+- it should not be awaited multiple times unless the source explicitly allows that;
+- it should not be treated like a stable long-lived value object;
+- converting it to `Task` may reintroduce allocation.
 
-- do not await the same `ValueTask` multiple times unless you know it is safe;
-- do not call `.Result` before completion;
-- avoid storing it for later;
-- convert to `Task` with `.AsTask()` only when needed, because that may allocate.
+The presence of `ValueTask` in an API is therefore a signal that performance trade-offs have become important enough to complicate the programming model.
 
-Engineering perspective:
+## Exceptions, Fire-And-Forget Work, And Reliability
 
-> I default to `Task`. I use `ValueTask` only when profiling shows allocation pressure or when implementing high-performance APIs where synchronous completion is common.
-
-## Exception Handling
+Exceptions in asynchronous methods are stored in the returned task and surface when the task is awaited.
 
 ```csharp
 public async Task ProcessAsync(CancellationToken ct)
@@ -516,181 +332,14 @@ public async Task ProcessAsync(CancellationToken ct)
 }
 ```
 
-Important:
-
-- Do not swallow exceptions silently.
-- Use `throw;` instead of `throw ex;` to preserve stack trace.
-- Treat cancellation differently from failure.
-
-Fire-and-forget risk:
+This is one reason fire-and-forget work is risky:
 
 ```csharp
 public IActionResult Submit()
 {
-    _ = SendEmailAsync(); // risky
+    _ = SendEmailAsync();
     return Accepted();
 }
 ```
 
-Why risky:
-
-- exceptions may be unobserved;
-- app shutdown can interrupt work;
-- no retry or monitoring;
-- request-scoped services may be disposed.
-
-Better:
-
-```csharp
-public async Task<IActionResult> Submit(CancellationToken ct)
-{
-    await _backgroundQueue.EnqueueAsync(new SendEmailJob(), ct);
-    return Accepted();
-}
-```
-
-Use a background queue, Hangfire, Quartz, worker service, or message broker when work must outlive the request.
-
-## Practical API Example
-
-```csharp
-[ApiController]
-[Route("api/orders")]
-public class OrdersController : ControllerBase
-{
-    private readonly IOrderService _orderService;
-
-    public OrdersController(IOrderService orderService)
-    {
-        _orderService = orderService;
-    }
-
-    [HttpPost]
-    public async Task<ActionResult<OrderDto>> Create(
-        CreateOrderRequest request,
-        CancellationToken cancellationToken)
-    {
-        var order = await _orderService.CreateAsync(request, cancellationToken);
-        return CreatedAtAction(nameof(GetById), new { id = order.Id }, order);
-    }
-
-    [HttpGet("{id:int}")]
-    public async Task<ActionResult<OrderDto>> GetById(
-        int id,
-        CancellationToken cancellationToken)
-    {
-        var order = await _orderService.GetByIdAsync(id, cancellationToken);
-        return order is null ? NotFound() : Ok(order);
-    }
-}
-```
-
-## Review Questions
-
-### What is async/await?
-
-> `async/await` is syntax built around `Task` and compiler-generated state machines. It allows a method to suspend at an incomplete asynchronous operation and resume later, without blocking the current thread.
-
-### Does async create a new thread?
-
-> Not necessarily. For I/O-bound operations, the thread can return to the thread pool while the OS or external service handles the operation. CPU-bound work still needs CPU time and may require a separate execution strategy.
-
-### What does the compiler generate for async/await?
-
-> The compiler generates a state machine. It stores state and local variables, registers continuations at incomplete awaits, and completes the returned `Task` with either a result or an exception.
-
-### Why is blocking on async dangerous?
-
-> Blocking wastes threads and can cause deadlocks in environments with a synchronization context. In ASP.NET Core, it can still cause thread pool starvation and reduce throughput.
-
-### When should you use Task.WhenAll?
-
-> Use it when operations are independent and can run concurrently. Avoid it when operations depend on each other or when it may overload downstream services.
-
-### How do you add timeout to async work?
-
-> Use cancellation, often with `CancellationTokenSource` and linked tokens. The timeout should cancel the operation and the code should pass the token to underlying async APIs.
-
-### Is `Task.Run` good for making APIs faster?
-
-> Usually no. For I/O-bound work, use true async APIs. `Task.Run` just moves work to another thread pool thread. For heavy CPU work, use background workers or separate compute capacity when the work is significant.
-
-## Common Mistakes
-
-### Mistake: Using `.Result` or `.Wait()`.
-
-Why it is wrong:
-
-> Blocking on async work ties up a thread and can contribute to thread pool starvation. In some synchronization-context environments, it can also deadlock.
-
-Better answer:
-
-> Use `await` all the way through the call chain.
-
-### Mistake: Forgetting `CancellationToken`.
-
-Why it is wrong:
-
-> If the client disconnects or a timeout occurs, the server may keep doing useless work.
-
-Better answer:
-
-> Accept and pass `CancellationToken` to I/O, EF Core, and long-running operations.
-
-### Mistake: Making every method async without awaiting anything.
-
-Why it is wrong:
-
-> An `async` method without `await` adds unnecessary state-machine overhead and can hide design confusion.
-
-Better answer:
-
-> Return the existing `Task` directly or keep the method synchronous if no asynchronous work exists.
-
-### Mistake: Using `async void` except for event handlers.
-
-Why it is wrong:
-
-> `async void` cannot be awaited and exceptions are harder to observe and handle.
-
-Better answer:
-
-> Use `Task` or `Task<T>` for async methods. Reserve `async void` for event handlers.
-
-### Mistake: Running independent I/O sequentially.
-
-Why it is wrong:
-
-> If operations do not depend on each other, awaiting them one by one increases total latency.
-
-Better answer:
-
-> Start independent tasks and await them with `Task.WhenAll`, while respecting rate limits and failure behavior.
-
-### Mistake: Using `Task.Run` inside ASP.NET Core request handlers without a clear reason.
-
-Why it is wrong:
-
-> ASP.NET Core already runs request code on thread pool threads. Wrapping I/O work in `Task.Run` wastes threads and can hurt scalability.
-
-Better answer:
-
-> Use true async I/O. Use background queues/workers for long CPU-bound or out-of-band work.
-
-### Mistake: Swallowing exceptions in fire-and-forget tasks.
-
-Why it is wrong:
-
-> Failures can disappear without logs, retries, or user-visible results.
-
-Better answer:
-
-> Use a background job system, queue, or explicitly observe/log exceptions.
-
-## Practice Tasks
-
-1. Create an API endpoint that calls three fake external services sequentially.
-2. Rewrite it with `Task.WhenAll`.
-3. Add cancellation support.
-4. Add timeout handling.
-5. Add logging for success, cancellation, and failure.
+Once the task is detached, failures may be unobserved, request-scoped dependencies may already be disposed when the work runs, and shutdown may interrupt the operation with no retry or recovery boundary. If work must outlive the request, it usually belongs in a queue, background worker, scheduler, or message-driven system rather than in a detached task launched from a controller.

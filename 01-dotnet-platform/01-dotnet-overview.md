@@ -4,12 +4,7 @@
 
 .NET is a modern, cross-platform development platform for building web APIs, desktop apps, cloud services, background workers, mobile apps, games, and command-line tools.
 
-Chinese notes:
-
-- `runtime`: 运行时.
-- `SDK`: software development kit, 开发工具包.
-- `BCL`: Base Class Library, 基础类库.
-- `assembly`: 程序集.
+This opening chapter is not trying to explain every part of .NET at full depth. Its job is to establish the platform map that the rest of the chapter will refine: what the SDK does, what the runtime does, where the CLR fits, and why deployment choices affect how an application starts and runs.
 
 ## .NET Components
 
@@ -51,7 +46,7 @@ The CLR provides services such as:
 
 The runtime libraries implement many `System.*` APIs used by applications. In everyday language, people often say ".NET runtime" to mean this whole execution package.
 
-Example:
+A small example makes the layering concrete:
 
 ```csharp
 var names = new List<string> { "Alice", "Bob" };
@@ -67,7 +62,7 @@ In this tiny example:
 
 ### SDK
 
-The SDK includes tools to build and publish apps.
+The SDK belongs to the build side of the platform. It provides the tools that create, restore, test, and publish applications.
 
 Examples:
 
@@ -80,22 +75,11 @@ dotnet publish
 
 ### BCL
 
-The Base Class Library provides common APIs:
+The Base Class Library provides the common APIs that application code uses for collections, file I/O, networking, JSON, reflection, threading, cryptography, and diagnostics.
 
-- collections;
-- file I/O;
-- networking;
-- JSON;
-- reflection;
-- threading;
-- cryptography;
-- diagnostics.
+The useful distinction is this: the BCL is the API surface you program against, while the runtime contains the implementation that executes those APIs. In everyday conversation those ideas are often blurred together, but keeping them separate helps clarify what belongs to tooling, what belongs to execution, and what belongs to library design.
 
-Important nuance:
-
-> The BCL is the set of common APIs you program against. The runtime includes the implementation needed to run those APIs. In everyday conversation people often say "BCL" for both the API surface and its runtime implementation, but in engineering practice you can simply say that .NET includes rich base libraries plus the runtime that executes them.
-
-## How The Pieces Fit Together In A Web API
+## Platform Flow In A Web API
 
 For an ASP.NET Core API, the pieces show up like this:
 
@@ -113,6 +97,56 @@ Production runtime
 ```
 
 This separation explains why a build server needs the SDK, while a production server may need only the runtime for a framework-dependent deployment.
+
+You can also see the build-side versus run-side split directly in publish output.
+
+After:
+
+```bash
+dotnet publish -c Release
+```
+
+a framework-dependent publish commonly contains artifacts such as:
+
+```text
+MyApp.dll
+MyApp.deps.json
+MyApp.runtimeconfig.json
+appsettings.json
+```
+
+If the publish is self-contained, the output also includes runtime files or a platform-specific host executable, because the target machine is no longer expected to provide the runtime separately.
+
+## Host And Runtime Resolution
+
+Between `dotnet MyApp.dll` and "CLR starts executing code", there is an important host layer.
+
+At a high level, startup looks like this:
+
+```text
+dotnet MyApp.dll
+  -> native host starts
+  -> hostfxr reads runtime configuration
+  -> framework resolution chooses shared frameworks and runtime version
+  -> hostpolicy prepares dependency loading rules
+  -> CoreCLR is loaded
+  -> managed entry point starts
+```
+
+Important runtime artifacts:
+
+- `runtimeconfig.json`: describes the target runtime and framework requirements;
+- `deps.json`: describes dependency assets and assembly resolution metadata;
+- app host: optional native executable created for the application;
+- shared frameworks: centrally installed framework packs such as `Microsoft.NETCore.App` and `Microsoft.AspNetCore.App`.
+
+This host layer matters because deployment, framework resolution, runtime roll-forward, and startup failures often happen before the CLR begins executing managed code.
+
+For example, if the application targets a framework that is not installed, or if the runtime selection rules do not find a compatible framework version, startup can fail before any of your C# code runs.
+
+Framework-dependent deployment relies heavily on this resolution process. Self-contained deployment packages the runtime with the application, so framework resolution becomes more predictable because fewer external runtime dependencies remain.
+
+A concrete startup failure helps make this boundary real. If a machine has only .NET 7 installed and the application requires `net8.0`, a framework-dependent app may fail during host resolution with a message about a missing compatible framework. That failure happens before your `Program.cs` entry point runs. Operationally, this is a host/runtime packaging problem, not an application-logic bug.
 
 ## Build Time vs Run Time
 
@@ -137,7 +171,7 @@ dotnet MyApp.dll
   -> GC manages heap memory
 ```
 
-Example:
+For example:
 
 ```powershell
 dotnet new console -n PlatformDemo
@@ -173,63 +207,19 @@ Modern `.NET`:
 - cross-platform;
 - used for ASP.NET Core, worker services, console apps, cloud-native apps.
 
-Practical explanation:
-
-> Modern .NET is the unified successor to .NET Core. It is cross-platform and high-performance. .NET Framework is older and Windows-focused, still used in legacy systems.
-
-## Project, Solution, Assembly
-
-Solution:
-
-```text
-MyApp.sln
-```
-
-Projects:
-
-```text
-MyApp.Api.csproj
-MyApp.Application.csproj
-MyApp.Domain.csproj
-MyApp.Infrastructure.csproj
-```
-
-Assembly:
-
-```text
-MyApp.Api.dll
-```
-
-A project usually compiles into an assembly.
-
-## NuGet
-
-NuGet is the package manager for .NET.
-
-Example:
-
-```bash
-dotnet add package Microsoft.EntityFrameworkCore.SqlServer
-```
-
-Dependency hygiene:
-
-- check package maintenance;
-- check license;
-- check vulnerabilities;
-- avoid unnecessary dependencies.
+In practice, modern .NET is the unified successor to .NET Core. It is cross-platform and high-performance. .NET Framework is older and Windows-focused, and it mainly remains in legacy enterprise systems.
 
 ## Target Framework
 
-Example:
+The target framework tells the compiler and runtime which .NET version and API set the project expects.
+
+For example:
 
 ```xml
 <TargetFramework>net8.0</TargetFramework>
 ```
 
-This tells the compiler/runtime which .NET version and APIs the project targets.
-
-Example:
+In a project file that may look like this:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk.Web">
@@ -241,7 +231,7 @@ Example:
 </Project>
 ```
 
-If a project targets `net8.0`, it can use .NET 8 APIs. If a server only has an older runtime installed, a framework-dependent `net8.0` app will not run correctly.
+If a project targets `net8.0`, it can use .NET 8 APIs. If a framework-dependent deployment runs on a machine that only has an older or otherwise incompatible runtime, startup will fail before the application can run normally.
 
 ## Deployment Models
 
@@ -249,12 +239,12 @@ If a project targets `net8.0`, it can use .NET 8 APIs. If a server only has an o
 
 The target machine needs .NET runtime installed.
 
-Pros:
+Operational advantages:
 
 - smaller deployment;
 - runtime can be shared.
 
-Cons:
+Operational limitations:
 
 - runtime must exist on server.
 
@@ -262,12 +252,12 @@ Cons:
 
 Application includes the .NET runtime.
 
-Pros:
+Operational advantages:
 
 - no runtime installation required;
 - predictable runtime version.
 
-Cons:
+Operational limitations:
 
 - larger deployment size.
 
@@ -281,70 +271,28 @@ Useful for:
 - simple services;
 - deployment simplicity.
 
-## Review Questions
+Concrete publish commands make the distinction easier to remember:
 
-### What is .NET?
+```bash
+dotnet publish -c Release
+dotnet publish -c Release -r win-x64 --self-contained true
+dotnet publish -c Release -r linux-x64 -p:PublishSingleFile=true --self-contained true
+```
 
-> .NET is a cross-platform development platform with a runtime, SDK, compilers, libraries, and tools for building different types of applications, including web APIs and cloud services.
+These commands are not the main point of the chapter, but they make the deployment model less theoretical. The publish shape changes because the execution boundary changes.
 
-### SDK vs Runtime?
+Framework-dependent deployment assumes a compatible .NET runtime already exists on the target machine. Self-contained deployment packages the runtime with the application, which increases size but makes runtime behavior more predictable.
 
-> Runtime runs applications. SDK includes runtime plus tools to build, test, and publish applications.
+## Deployment Trade-offs In Practice
 
-### Is GC part of the runtime or part of the CLR?
+Deployment mode affects more than file size.
 
-> The precise answer is that GC is part of the CLR. The runtime includes the CLR, and the CLR provides garbage collection as one of its core services. In casual conversation, people may say "the .NET runtime provides GC," which is not completely wrong, but the more accurate layering is runtime -> CLR -> GC/JIT/exception handling and other services.
+| Mode | Runtime Source | Operational Strength | Operational Cost |
+| --- | --- | --- | --- |
+| Framework-dependent | machine-provided shared runtime | smaller deployment, central runtime servicing | runtime availability and compatibility must be managed |
+| Self-contained | packaged with the app | predictable runtime behavior, simpler machine requirements | larger deployment, duplicate runtime bits across apps |
+| Single-file | packaged as one distribution unit | simpler delivery and handling | extraction, diagnostics, and packaging behavior may be less transparent |
 
-### What is an assembly?
+Publishing choices also affect patching and diagnostics. Framework-dependent apps can benefit from centrally patched runtimes, while self-contained apps require republishing if the bundled runtime must change. This is one reason deployment mode is both an engineering decision and an operational one.
 
-> An assembly is a compiled .NET unit, usually a `.dll` or `.exe`, containing IL, metadata, and resources.
-
-### What happens when I run `dotnet run`?
-
-> `dotnet run` is an SDK command. It builds the project if needed, then starts the application. The runtime loads the produced assembly, the CLR executes it, methods are JIT-compiled as needed, and GC manages managed heap memory.
-
-### Framework-dependent vs self-contained deployment?
-
-> Framework-dependent deployment relies on a compatible .NET runtime already installed on the target machine. Self-contained deployment includes the runtime with the application, which makes deployment more predictable but larger.
-
-## Common Mistakes
-
-### Mistake: Confusing .NET Framework with modern .NET.
-
-Why it is wrong:
-
-> .NET Framework is the older Windows-only platform. Modern .NET is cross-platform and is the main platform for new ASP.NET Core, worker service, and cloud-native development.
-
-Better answer:
-
-> .NET Framework is mostly legacy Windows enterprise technology; modern .NET is the unified successor to .NET Core.
-
-### Mistake: Installing runtime only and expecting to build apps.
-
-Why it is wrong:
-
-> The runtime can run compiled apps, but it does not include all build tools. The SDK includes the compiler, CLI templates, build tools, and publish support.
-
-Better answer:
-
-> Use the SDK for development and build pipelines. Use the runtime when a server only needs to run an already-built app.
-
-### Mistake: Not understanding target framework.
-
-Why it is wrong:
-
-> The target framework controls which APIs and runtime version the app expects. A library targeting a newer framework may not run in an older application.
-
-Better answer:
-
-> `net8.0`, for example, means the project targets .NET 8 APIs and runtime behavior.
-
-### Mistake: Adding packages without checking security or maintenance.
-
-Why it is wrong:
-
-> Dependencies become part of your production risk. Unmaintained or vulnerable packages can create security issues, upgrade problems, or supply-chain risk.
-
-Better answer:
-
-> Check package maintenance, license, vulnerabilities, compatibility, and whether the dependency is really needed.
+At this stage, the important outcome is a stable mental map. The SDK creates and publishes the application. The host selects and starts the runtime. The CLR participates once managed execution begins. Libraries provide the API surface the application uses. Deployment choices determine how much of that execution environment is expected to exist on the machine already and how much travels with the application itself.

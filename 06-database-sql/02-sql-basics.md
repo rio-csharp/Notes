@@ -1,25 +1,27 @@
-# SQL Basics
+# SQL As A Declarative Query Language
 
 ## Core Idea
 
-SQL is the language used to query and modify relational databases.
+SQL is not a sequence of row-by-row instructions in the way many application programmers first imagine it. It is a declarative language in which the query describes the result set the database should produce, while the optimizer chooses an execution strategy. That distinction matters because effective SQL work depends on thinking in sets, predicates, and result shape rather than in procedural loops.
 
-Chinese notes:
+This chapter introduces SQL from that perspective. The objective is not to list syntax mechanically. It is to build the mental model needed for the later chapters on joins, indexing, and query optimization.
 
-- `SELECT`: 查询.
-- `INSERT`: 插入.
-- `UPDATE`: 更新.
-- `DELETE`: 删除.
-- `WHERE`: 条件.
+## Result Sets And Projection
 
-## SELECT
+The most basic SQL query is a `SELECT` statement:
 
 ```sql
 SELECT Id, Name, Email
 FROM Users;
 ```
 
-Filter:
+This query projects specific columns from a set of rows. Projection matters because result shape has real cost. Selecting only the necessary columns reduces I/O, memory usage, network transfer, and often makes later indexing decisions more effective.
+
+For that reason, explicit projection is usually better than `SELECT *` in application queries.
+
+## Filtering With `WHERE`
+
+`WHERE` restricts which rows participate in the result:
 
 ```sql
 SELECT Id, Name
@@ -27,28 +29,20 @@ FROM Users
 WHERE IsActive = 1;
 ```
 
-Select explicit columns:
+At a conceptual level, filtering is one of the most important operations in SQL because it determines how much data the rest of the query must process. A well-shaped predicate can make a query narrow and efficient. A weak or non-SARGable predicate can force the database to inspect far more rows than the application intended.
 
-```sql
-SELECT
-    Id,
-    Email,
-    Name,
-    CreatedAt
-FROM Customers
-WHERE IsActive = 1;
-```
+## Data Modification
 
-Avoid `SELECT *` in application queries because table shape can grow over time and increase network, memory, and serialization cost.
+SQL also defines set-based data modification operations.
 
-## INSERT
+Insert:
 
 ```sql
 INSERT INTO Users (Name, Email, IsActive)
 VALUES ('Alice', 'alice@example.com', 1);
 ```
 
-## UPDATE
+Update:
 
 ```sql
 UPDATE Users
@@ -56,24 +50,18 @@ SET Name = 'Alice Smith'
 WHERE Id = 1;
 ```
 
-Always use `WHERE` unless intentionally updating all rows.
-
-## DELETE
+Delete:
 
 ```sql
 DELETE FROM Users
 WHERE Id = 1;
 ```
 
-For business systems, soft delete is often used:
+These operations should be read with the same set-oriented mindset as queries. Even an `UPDATE` that affects one row is still expressed as a set operation over all rows matching the predicate. That is why an omitted `WHERE` clause on an update or delete is so dangerous: it changes the target set from one row to all rows.
 
-```sql
-UPDATE Users
-SET IsDeleted = 1
-WHERE Id = 1;
-```
+## Ordering And Deterministic Results
 
-## ORDER BY
+`ORDER BY` defines output ordering:
 
 ```sql
 SELECT Id, Total, CreatedAt
@@ -81,7 +69,13 @@ FROM Orders
 ORDER BY CreatedAt DESC;
 ```
 
-## GROUP BY
+This seems straightforward, but two points matter in practice.
+
+First, rows are not inherently ordered unless the query specifies an order. Second, ordering can be expensive if the database must sort a large intermediate result set. This is why index design and query shape later become closely tied to ordering patterns.
+
+## Aggregation And Grouping
+
+Aggregation collapses many rows into summary values.
 
 ```sql
 SELECT CustomerId, SUM(Total) AS TotalAmount
@@ -89,24 +83,20 @@ FROM Orders
 GROUP BY CustomerId;
 ```
 
-Monthly sales:
+Grouping changes the shape of the query. The result is no longer one row per order. It is one row per customer group. Once a query becomes grouped, the database must reason not only about filtering rows but also about how to form and aggregate sets of rows.
+
+## `WHERE` Versus `HAVING`
+
+`WHERE` filters rows before grouping:
 
 ```sql
-SELECT
-    DATEFROMPARTS(YEAR(CreatedAt), MONTH(CreatedAt), 1) AS SalesMonth,
-    COUNT(*) AS OrderCount,
-    SUM(Total) AS TotalAmount
+SELECT CustomerId, SUM(Total) AS TotalAmount
 FROM Orders
 WHERE Status = 'Paid'
-GROUP BY DATEFROMPARTS(YEAR(CreatedAt), MONTH(CreatedAt), 1)
-ORDER BY SalesMonth;
+GROUP BY CustomerId;
 ```
 
-## HAVING
-
-`WHERE` filters rows before grouping.
-
-`HAVING` filters groups after grouping.
+`HAVING` filters groups after aggregation:
 
 ```sql
 SELECT CustomerId, SUM(Total) AS TotalAmount
@@ -115,9 +105,11 @@ GROUP BY CustomerId
 HAVING SUM(Total) > 1000;
 ```
 
-## Pagination
+This distinction is conceptually important. `WHERE` changes the input rows to the aggregation. `HAVING` changes which aggregated groups survive afterward.
 
-SQL Server:
+## Pagination As Result Windowing
+
+Application queries often need only part of a larger ordered set:
 
 ```sql
 SELECT Id, Total, CreatedAt
@@ -126,9 +118,11 @@ ORDER BY CreatedAt DESC
 OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY;
 ```
 
-## CTE
+This is not only an API convenience. Pagination is a protective design decision that prevents unbounded result sets from overwhelming the application and the database. The deeper performance implications of offset pagination are addressed later, but the conceptual role is already important here: SQL often returns windows over sets rather than full sets.
 
-Common Table Expression:
+## Common Table Expressions
+
+A common table expression, or CTE, gives a name to an intermediate query:
 
 ```sql
 WITH RecentOrders AS
@@ -142,7 +136,11 @@ FROM RecentOrders
 GROUP BY CustomerId;
 ```
 
-## Window Function
+CTEs are useful mainly because they improve structure and readability for complex statements. They do not automatically make a query faster. Their value is architectural within the query text: they allow larger set-based transformations to be broken into understandable stages.
+
+## Window Functions
+
+Window functions compute values across related rows without collapsing them into one row per group.
 
 ```sql
 SELECT
@@ -153,14 +151,9 @@ SELECT
 FROM Orders;
 ```
 
-Useful for:
+This is powerful because it allows ranking, running totals, and top-N-per-group logic while preserving row-level output.
 
-- ranking;
-- top N per group;
-- running totals;
-- pagination patterns.
-
-Top 3 orders per customer:
+For example, top three orders per customer:
 
 ```sql
 WITH RankedOrders AS
@@ -181,35 +174,13 @@ FROM RankedOrders
 WHERE RowNumber <= 3;
 ```
 
-Running total:
+Window functions are one of the clearest examples of SQL's expressive power as a set language. They solve many problems that would be awkward or inefficient if approached procedurally.
 
-```sql
-SELECT
-    Id,
-    CustomerId,
-    Total,
-    CreatedAt,
-    SUM(Total) OVER (
-        PARTITION BY CustomerId
-        ORDER BY CreatedAt, Id
-        ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-    ) AS CustomerRunningTotal
-FROM Orders;
-```
+## `NULL` And Three-Valued Logic
 
-## NULL Behavior
+`NULL` does not mean empty string or zero. It represents missing or unknown value state.
 
-`NULL` means unknown or missing, not an empty string and not zero.
-
-This does not work as expected:
-
-```sql
-SELECT Id, Email
-FROM Customers
-WHERE DeletedAt = NULL;
-```
-
-Use:
+That affects predicates:
 
 ```sql
 SELECT Id, Email
@@ -217,7 +188,15 @@ FROM Customers
 WHERE DeletedAt IS NULL;
 ```
 
-Use `COALESCE` to provide fallback values:
+The equality form:
+
+```sql
+WHERE DeletedAt = NULL
+```
+
+does not behave as intended because SQL uses three-valued logic around nulls. This is one of the points where SQL semantics differ sharply from many application-language intuitions.
+
+Functions such as `COALESCE` help provide fallback values:
 
 ```sql
 SELECT
@@ -226,9 +205,9 @@ SELECT
 FROM Customers;
 ```
 
-## Transactions For Changes
+## Transactions As SQL Boundaries
 
-Wrap related changes in a transaction when they must succeed or fail together.
+SQL also defines explicit transaction boundaries:
 
 ```sql
 BEGIN TRANSACTION;
@@ -243,37 +222,8 @@ VALUES ('KB-001', SYSUTCDATETIME(), 'Supplier price update');
 COMMIT TRANSACTION;
 ```
 
-If something fails, use `ROLLBACK TRANSACTION`.
+This is included here not to fully explain transactions yet, but to reinforce the set-oriented model. SQL is a full data language: it defines reading, writing, and transactional grouping, all at the level of result sets and predicates rather than procedural loops.
 
-## Review Questions
+## Design Consequences
 
-### WHERE vs HAVING?
-
-> `WHERE` filters rows before grouping. `HAVING` filters grouped results after aggregation.
-
-### DELETE vs TRUNCATE?
-
-> `DELETE` removes rows and can use a WHERE clause. `TRUNCATE` removes all rows more efficiently but has restrictions and is more destructive.
-
-### What is a CTE?
-
-> A CTE is a named temporary result set within a query. It can make complex queries more readable.
-
-## Common Mistakes
-
-- UPDATE or DELETE without WHERE.
-- SELECT * in production APIs.
-- No ORDER BY with pagination.
-- Misusing HAVING instead of WHERE.
-- Forgetting NULL behavior.
-
-## Practice Task
-
-Write SQL for:
-
-1. active users;
-2. orders by customer;
-3. total sales by month;
-4. customers with more than 10 orders;
-5. paginated order list;
-6. top 3 orders per customer.
+Good SQL work begins with the right mental model. Queries describe result sets. Filters narrow those sets. grouping and windowing reshape them. Transactions define atomic units around them. Once that becomes natural, later topics such as joins, indexing, and optimization become much easier because the query can be reasoned about as a set transformation rather than as a hidden algorithm.

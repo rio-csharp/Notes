@@ -8,14 +8,6 @@ Mediator, Strategy, and Decorator appear often in .NET backend systems because t
 - Strategy handles behavior variation.
 - Decorator adds behavior around services without changing the service.
 
-Chinese notes:
-
-- `mediator`: 中介者.
-- `strategy`: 策略.
-- `decorator`: 装饰器.
-- `pipeline behavior`: 管道行为.
-- `cross-cutting concern`: 横切关注点.
-
 ## Mediator
 
 Mediator decouples request senders from request handlers.
@@ -480,21 +472,3 @@ Do not use Decorator when:
 - hidden behavior surprises callers;
 - order of decorators is unclear;
 - the wrapper changes the meaning of the original contract.
-
-## Knowledge Checks
-
-### When would you use Mediator?
-
-Use Mediator when request/handler separation and pipeline behavior make the application easier to organize. It works well with CQRS but can be overkill for simple CRUD.
-
-### Strategy vs decorator?
-
-Strategy selects an algorithm or behavior. Decorator wraps an existing service to add behavior around it.
-
-### Decorator vs middleware?
-
-Middleware wraps HTTP request processing. Decorator wraps service interface calls.
-
-### What is the biggest risk of these patterns?
-
-The biggest risk is ceremony without value. A pattern should remove real coupling, isolate real variation, or make cross-cutting behavior easier to manage.

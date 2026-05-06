@@ -1,25 +1,29 @@
-# Pagination, Filtering, And Sorting APIs
+# Collection Endpoints, Pagination, Filtering, And Sorting
 
 ## Core Idea
 
-List APIs must support pagination, filtering, and sorting to stay fast and usable.
+Collection endpoints are where many APIs begin to show their real design quality. A single-resource endpoint can remain acceptable even with weak conventions. List endpoints quickly become expensive, ambiguous, and difficult to evolve unless pagination, filtering, and sorting are designed deliberately.
 
-Chinese notes:
+This chapter treats collection queries as contract design rather than as controller plumbing.
 
-- `pagination`: 分页.
-- `filtering`: 筛选.
-- `sorting`: 排序.
-- `cursor`: 游标.
+## The Need For Structured Collection Endpoints
+
+An unbounded list endpoint is rarely acceptable in a production API. It places too much trust in dataset size, client restraint, and network capacity. Even when it works initially, it tends to degrade quietly as data volume grows.
+
+Pagination therefore serves two purposes:
+
+- it protects the system from unbounded result sets;
+- it gives the client a predictable way to navigate large collections.
+
+Filtering and sorting serve a similar role. They make the collection query expressive without forcing the client to download and process far more data than it needs.
 
 ## Offset Pagination
 
-Request:
+Offset pagination is familiar and easy to explain:
 
 ```http
 GET /api/orders?page=1&pageSize=20
 ```
-
-Response:
 
 ```json
 {
@@ -30,241 +34,70 @@ Response:
 }
 ```
 
-Backend:
+It works well when:
 
-```csharp
-var page = Math.Max(request.Page, 1);
-var pageSize = Math.Clamp(request.PageSize, 1, 100);
+- clients need page numbers;
+- result sets are not extremely deep;
+- simplicity matters more than perfect stability under concurrent writes.
 
-var items = await query
-    .OrderByDescending(o => o.CreatedAt)
-    .ThenByDescending(o => o.Id)
-    .Skip((page - 1) * pageSize)
-    .Take(pageSize)
-    .ToListAsync(ct);
-```
-
-Complete request/response models:
-
-```csharp
-public sealed record OrderListRequest(
-    OrderStatus? Status,
-    DateTimeOffset? From,
-    DateTimeOffset? To,
-    string Sort = "-createdAt",
-    int Page = 1,
-    int PageSize = 20);
-
-public sealed record PagedResponse<T>(
-    IReadOnlyList<T> Items,
-    int Page,
-    int PageSize,
-    int Total,
-    bool HasNext);
-```
-
-Complete offset query:
-
-```csharp
-public async Task<PagedResponse<OrderListItemResponse>> SearchAsync(
-    OrderListRequest request,
-    CancellationToken ct)
-{
-    var page = Math.Max(request.Page, 1);
-    var pageSize = Math.Clamp(request.PageSize, 1, 100);
-
-    IQueryable<Order> query = _dbContext.Orders.AsNoTracking();
-
-    if (request.Status is not null)
-    {
-        query = query.Where(order => order.Status == request.Status);
-    }
-
-    if (request.From is not null)
-    {
-        var from = request.From.Value;
-        query = query.Where(order => order.CreatedAt >= from);
-    }
-
-    if (request.To is not null)
-    {
-        var to = request.To.Value;
-        query = query.Where(order => order.CreatedAt < to);
-    }
-
-    query = ApplySorting(query, request.Sort);
-
-    var total = await query.CountAsync(ct);
-
-    var items = await query
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(order => new OrderListItemResponse(
-            order.Id,
-            order.Status.ToString(),
-            order.Total,
-            order.CreatedAt))
-        .ToListAsync(ct);
-
-    return new PagedResponse<OrderListItemResponse>(
-        items,
-        page,
-        pageSize,
-        total,
-        page * pageSize < total);
-}
-```
+The server still needs guardrails such as minimum and maximum page size, deterministic ordering, and a predictable response envelope.
 
 ## Cursor Pagination
 
-Request:
+Cursor pagination is often better for large, continuously changing datasets:
 
 ```http
 GET /api/orders?cursor=eyJjcmVhdGVkQXQiOiIyMDI2...&limit=50
 ```
 
-Good for:
+This model is valuable because it navigates from one known boundary to the next rather than skipping an arbitrary number of rows. That usually makes it more stable under concurrent inserts and more efficient for deep traversal.
 
-- infinite scroll;
-- large datasets;
-- stable next-page navigation.
+Its costs are also real:
 
-Trade-off:
+- clients cannot jump naturally to page 87;
+- cursor format becomes part of the contract;
+- sorting rules must remain stable and deterministic.
 
-- harder to jump to arbitrary page;
-- cursor format must be stable and protected.
+Cursor pagination is therefore not universally better. It is better for specific collection-access patterns.
 
-Cursor shape:
+## Deterministic Ordering
 
-```csharp
-public sealed record OrderCursor(DateTimeOffset CreatedAt, int Id);
-```
+Pagination only works well if ordering is stable. Sorting solely by a non-unique field such as `CreatedAt` can lead to row movement between pages when duplicate values exist.
 
-Encode/decode:
+That is why a secondary tie-breaker is often required:
 
 ```csharp
-public static class CursorCodec
-{
-    public static string Encode(OrderCursor cursor)
-    {
-        var json = JsonSerializer.Serialize(cursor);
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
-    }
-
-    public static OrderCursor? Decode(string? cursor)
-    {
-        if (string.IsNullOrWhiteSpace(cursor))
-        {
-            return null;
-        }
-
-        var json = Encoding.UTF8.GetString(Convert.FromBase64String(cursor));
-        return JsonSerializer.Deserialize<OrderCursor>(json);
-    }
-}
+query = query
+    .OrderByDescending(order => order.CreatedAt)
+    .ThenByDescending(order => order.Id);
 ```
 
-Cursor query:
+This is not merely a database optimization. It is contract hygiene for collection traversal.
 
-```csharp
-public async Task<CursorPage<OrderListItemResponse>> SearchByCursorAsync(
-    string? cursor,
-    int limit,
-    CancellationToken ct)
-{
-    var safeLimit = Math.Clamp(limit, 1, 100);
-    var decoded = CursorCodec.Decode(cursor);
+## Filter Design
 
-    var query = _dbContext.Orders
-        .AsNoTracking()
-        .OrderByDescending(order => order.CreatedAt)
-        .ThenByDescending(order => order.Id)
-        .AsQueryable();
-
-    if (decoded is not null)
-    {
-        query = query.Where(order =>
-            order.CreatedAt < decoded.CreatedAt ||
-            (order.CreatedAt == decoded.CreatedAt && order.Id < decoded.Id));
-    }
-
-    var rows = await query
-        .Take(safeLimit + 1)
-        .Select(order => new OrderListItemResponse(
-            order.Id,
-            order.Status.ToString(),
-            order.Total,
-            order.CreatedAt))
-        .ToListAsync(ct);
-
-    var items = rows.Take(safeLimit).ToList();
-    var nextCursor = rows.Count > safeLimit
-        ? CursorCodec.Encode(new OrderCursor(items[^1].CreatedAt, items[^1].Id))
-        : null;
-
-    return new CursorPage<OrderListItemResponse>(items, nextCursor);
-}
-```
-
-Response:
-
-```csharp
-public sealed record CursorPage<T>(
-    IReadOnlyList<T> Items,
-    string? NextCursor);
-```
-
-For public APIs, consider signing or encrypting cursors if clients must not tamper with cursor contents.
-
-## Filtering
+Filtering should let clients narrow the collection through a predictable set of allowed dimensions:
 
 ```http
 GET /api/orders?status=Paid&customerId=123&from=2026-01-01&to=2026-02-01
 ```
 
-Backend:
+Each filter should have clear semantics:
 
-```csharp
-if (request.Status is not null)
-{
-    query = query.Where(o => o.Status == request.Status);
-}
+- does it represent exact match, range, or inclusion;
+- is it optional or required;
+- how does it interact with pagination and sorting;
+- what happens if the filter is invalid or contradictory.
 
-if (request.CustomerId is not null)
-{
-    query = query.Where(o => o.CustomerId == request.CustomerId);
-}
-```
+A well-designed filter surface is explicit and enumerable. A loosely defined "query object" that tries to support every imagined combination often becomes harder for both server and client to reason about.
 
-## Sorting
+## Sorting As A Whitelisted Contract
 
-Simple:
+Sorting looks simple until clients can choose it dynamically. At that point, the sorting surface becomes part of the contract and should be whitelisted explicitly:
 
 ```http
 GET /api/orders?sort=-createdAt
 ```
-
-Meaning:
-
-- `createdAt`: ascending;
-- `-createdAt`: descending.
-
-Validate allowed sort fields.
-
-```csharp
-query = request.Sort switch
-{
-    "createdAt" => query.OrderBy(o => o.CreatedAt),
-    "-createdAt" => query.OrderByDescending(o => o.CreatedAt),
-    "total" => query.OrderBy(o => o.Total),
-    "-total" => query.OrderByDescending(o => o.Total),
-    _ => query.OrderByDescending(o => o.CreatedAt)
-};
-```
-
-Do not directly convert arbitrary user input to dynamic SQL without validation.
-
-Reusable sorting helper:
 
 ```csharp
 private static IQueryable<Order> ApplySorting(IQueryable<Order> query, string sort)
@@ -280,64 +113,28 @@ private static IQueryable<Order> ApplySorting(IQueryable<Order> query, string so
 }
 ```
 
-Stable ordering matters because duplicate `CreatedAt` or `Total` values can otherwise make rows jump between pages.
+The important design point is that sorting fields belong to a known contract. Arbitrary field names or raw SQL order fragments should not flow directly from user input into the query layer.
 
-## Response Metadata
+## Metadata In Collection Responses
 
-Useful fields:
+Collection responses often benefit from metadata such as:
 
-```json
-{
-  "items": [],
-  "page": 1,
-  "pageSize": 20,
-  "total": 1000,
-  "hasNext": true
-}
-```
+- `page`;
+- `pageSize`;
+- `total`;
+- `hasNext`;
+- `nextCursor`.
 
-Controller endpoint:
+That metadata should reflect the chosen pagination model rather than mixing incompatible concepts. Offset-style responses and cursor-style responses usually deserve different envelopes because they support different navigation behavior.
 
-```csharp
-[HttpGet]
-public async Task<ActionResult<PagedResponse<OrderListItemResponse>>> Search(
-    [FromQuery] OrderListRequest request,
-    CancellationToken ct)
-{
-    var result = await _orders.SearchAsync(request, ct);
-    return Ok(result);
-}
-```
+## Backend Query Shape And Contract Design
 
-## Review Questions
+Collection design is not purely an API concern. The contract and the database access path influence one another. A filter or sort option should usually exist only if the backend can support it predictably with appropriate query shape and indexing.
 
-### Why must list APIs be paginated?
+This is one reason collection endpoints become such a strong test of overall system design. They reveal whether contract design, persistence design, and operational constraints are aligned.
 
-> Unbounded list APIs can overload the database, network, API server, and frontend. Pagination controls resource usage and improves user experience.
+## Design Consequences
 
-### Offset vs cursor pagination?
+Strong collection endpoints are bounded, explicit, and deterministic. They expose a clear filter and sort surface, use pagination that matches the client access pattern, and avoid pretending that unbounded lists are acceptable just because they are convenient to code.
 
-> Offset pagination is simple and supports page numbers, but deep pages can be slow and inconsistent under writes. Cursor pagination is better for large or continuously changing datasets but is more complex.
-
-### How do you design sorting safely?
-
-> Define a whitelist of allowed sort fields and map them to known expressions. Do not pass arbitrary user input into SQL order clauses.
-
-## Common Mistakes
-
-- No maximum page size.
-- No stable ordering.
-- No indexes for filters/sorts.
-- Counting total on very expensive queries without thought.
-- Dynamic SQL injection through sort field.
-- Returning all rows for export.
-
-## Practice Task
-
-Build:
-
-1. offset paginated order list;
-2. cursor paginated order list;
-3. status/date filters;
-4. safe sorting whitelist;
-5. indexes supporting the query.
+When those choices are made deliberately, list APIs become far easier to evolve and far less likely to turn into the system's hidden scalability failure point.

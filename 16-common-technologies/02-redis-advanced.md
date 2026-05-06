@@ -74,8 +74,6 @@ Trade-off:
 
 These three problems are frequently asked in engineering practice because they test whether you understand production cache failure modes.
 
-### Cache Penetration（缓存穿透）
-
 Request pattern:
 
 ```text
@@ -104,8 +102,6 @@ Practical explanation:
 
 > Cache penetration means requests bypass the cache because the requested data does not exist. I prevent it with validation, short-lived null caching, Bloom filters for large known sets, and rate limiting.
 
-### Cache Breakdown（缓存击穿）
-
 Request pattern:
 
 ```text
@@ -133,8 +129,6 @@ Solutions:
 Practical explanation:
 
 > Cache breakdown is a hot-key expiration problem. I prevent it by ensuring only one request rebuilds the hot cache entry, or by refreshing it in the background before it expires.
-
-### Cache Avalanche（缓存雪崩）
 
 Request pattern:
 
@@ -271,8 +265,6 @@ Questions to decide:
 - Is Redis a cache or source of truth?
 - Can the system fall back to database?
 - Should the feature fail open or fail closed?
-- How do we protect the database from fallback traffic?
-- What do we alert on?
 
 Examples:
 
@@ -390,34 +382,6 @@ user:{123}:settings
 ```
 
 These keys share the same hash tag.
-
-## Knowledge Checks
-
-### How do you handle Redis outage?
-
-> The system should degrade gracefully. For cache use cases, fall back to database with rate protection. For locks or rate limiting, choose fail-open or fail-closed depending on business risk. Alert and monitor Redis latency/error rate.
-
-### How do you prevent cache avalanche?
-
-> Randomize TTL, avoid mass expiration, pre-warm cache, use background refresh, and protect the database with rate limiting or request coalescing.
-
-### Is Redis strongly consistent with database?
-
-> No. Redis cache and database can become temporarily inconsistent. The design must define acceptable staleness and invalidation strategy.
-
-### What should not be stored in Redis?
-
-> Large unbounded objects, highly sensitive data without protection, data requiring strong relational transactions, and data with no eviction or lifecycle strategy.
-
-## Common Mistakes
-
-- No TTL.
-- No tenant ID in cache key.
-- Huge cached values.
-- Treating Redis as source of truth accidentally.
-- No Redis timeout configuration.
-- No fallback plan.
-- Using distributed lock for everything.
 
 ## Practice Scenarios
 

@@ -1,44 +1,27 @@
-# EF Core Performance Optimization
+# Performance And Operational Tuning
 
 ## Core Idea
 
-EF Core performance is mostly about controlling:
+Most EF Core performance work is not about clever micro-optimizations. It is about making the read and write path reflect how the database actually works: selecting less data, tracking fewer objects, reducing round trips, preserving index-friendly predicates, and choosing set-based operations when object-by-object updates are unnecessary.
 
-- how much data you load;
-- how many SQL queries you execute;
-- whether EF tracks entities;
-- whether the database can use indexes;
-- whether your query is translated efficiently;
-- how much work happens in application memory.
+This chapter closes the EF Core section by turning the earlier concepts into an operational tuning framework.
 
-Chinese notes:
+## Diagnose Before Tuning
 
-- `tracking`: 变更跟踪.
-- `projection`: 投影，只查询需要的字段.
-- `N+1 query`: N+1 查询问题.
-- `cartesian explosion`: 笛卡尔爆炸.
-- `keyset pagination`: 游标分页.
+The first rule of EF Core performance work is to measure before changing behavior. A practical diagnosis flow usually looks like this:
 
-Key takeaway:
+1. identify the slow endpoint, background job, or database-heavy operation;
+2. inspect traces and logs to confirm the database is the bottleneck;
+3. inspect generated SQL;
+4. review the execution plan in the database;
+5. determine whether the issue is query shape, data volume, indexing, round trips, or tracking overhead;
+6. re-measure after the change.
 
-> I optimize EF Core by measuring first, inspecting generated SQL and execution plans, reducing loaded data, avoiding unnecessary tracking, preventing N+1 queries, and making sure the database can use indexes.
+This matters because EF Core is often blamed for problems that are really schema, indexing, or query-design problems.
 
-## Performance Diagnosis Flow
+## Data Shape Matters More Than ORM Overhead
 
-Good production workflow:
-
-1. Check API metrics: latency, error rate, timeouts.
-2. Check traces: is time spent in database?
-3. Check logs: which query or endpoint is slow?
-4. Inspect generated SQL with `ToQueryString`.
-5. Check database execution plan.
-6. Add or adjust indexes if needed.
-7. Reduce data shape with projection/pagination.
-8. Re-measure.
-
-Avoid guessing.
-
-## Use Projection
+The most common performance win in EF Core is reducing data shape.
 
 Bad:
 
@@ -51,8 +34,6 @@ return users.Select(u => new UserListItemDto
     Name = u.Name
 }).ToList();
 ```
-
-This loads full user entities.
 
 Better:
 
@@ -67,9 +48,11 @@ var users = await _dbContext.Users
     .ToListAsync(ct);
 ```
 
-This selects only required columns.
+Projection usually matters more than low-level ORM tuning because the database can send less data, EF Core can materialize less data, and the application can serialize less data.
 
-## Use AsNoTracking For Read-only Queries
+## Tracking Cost On Read Paths
+
+Read-only queries often benefit from no-tracking:
 
 ```csharp
 var orders = await _dbContext.Orders
@@ -85,20 +68,11 @@ var orders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-Use tracking when you plan to update entities.
+This reduces memory usage, snapshot creation, relationship fix-up work, and the likelihood that large read operations will pollute a request's tracked graph. It does not make every query fast, but it avoids paying write-oriented infrastructure cost on read-oriented paths.
 
-Use no-tracking when you only read.
+## Round Trips And The N+1 Pattern
 
-Why it helps:
-
-- less memory;
-- less CPU;
-- fewer change tracker entries;
-- less relationship fix-up work.
-
-## Avoid N+1 Query
-
-Bad:
+Round-trip count is one of the fastest ways to destroy query performance.
 
 ```csharp
 var orders = await _dbContext.Orders.ToListAsync(ct);
@@ -109,65 +83,37 @@ foreach (var order in orders)
 }
 ```
 
-If lazy loading is enabled, this may execute one query for orders plus one query per order's customer.
+If this triggers lazy loading, the system now performs one query for the orders and then one additional query per row. That pattern is often much worse than a single heavier SQL statement.
 
-Better with projection:
+The usual corrections are:
+
+- project related values directly;
+- use `Include` when the full entity graph is genuinely needed;
+- avoid hidden lazy-loading paths in API or loop-heavy code.
+
+## Pagination And Result Windowing
+
+Unbounded queries are rarely acceptable in production APIs. Offset pagination is a common starting point:
 
 ```csharp
-var orders = await _dbContext.Orders
+var items = await _dbContext.Orders
     .AsNoTracking()
+    .OrderByDescending(o => o.CreatedAt)
+    .ThenByDescending(o => o.Id)
+    .Skip((page - 1) * pageSize)
+    .Take(pageSize)
     .Select(o => new OrderListItemDto
     {
         Id = o.Id,
-        CustomerName = o.Customer.Name,
-        Total = o.Total
+        Total = o.Total,
+        CreatedAt = o.CreatedAt
     })
     .ToListAsync(ct);
 ```
 
-Or use `Include` only when you need full related entities:
+It is easy to implement, but large offsets can become expensive because the database may still scan or sort rows that the application later discards.
 
-```csharp
-var orders = await _dbContext.Orders
-    .Include(o => o.Customer)
-    .ToListAsync(ct);
-```
-
-## Pagination
-
-Basic offset pagination:
-
-```csharp
-public async Task<PagedResult<OrderListItemDto>> GetOrdersAsync(
-    int page,
-    int pageSize,
-    CancellationToken ct)
-{
-    page = Math.Max(page, 1);
-    pageSize = Math.Clamp(pageSize, 1, 100);
-
-    var query = _dbContext.Orders.AsNoTracking();
-
-    var total = await query.CountAsync(ct);
-
-    var items = await query
-        .OrderByDescending(o => o.CreatedAt)
-        .ThenByDescending(o => o.Id)
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(o => new OrderListItemDto
-        {
-            Id = o.Id,
-            Total = o.Total,
-            CreatedAt = o.CreatedAt
-        })
-        .ToListAsync(ct);
-
-    return new PagedResult<OrderListItemDto>(items, total, page, pageSize);
-}
-```
-
-For very large tables, consider keyset pagination（游标分页）:
+For deep scrolling or large datasets, keyset pagination is often more stable:
 
 ```csharp
 var items = await _dbContext.Orders
@@ -186,13 +132,11 @@ var items = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-Offset pagination problem:
+The trade-off is more complex client state in exchange for better scaling on large ordered sets.
 
-> Large `Skip` values can become expensive because the database may still need to scan/sort skipped rows.
+## `Include`, Split Queries, And Graph Size
 
-## Split Query
-
-Large `Include` queries can create huge joins.
+Large `Include` chains can create result sets with duplicated parent data and unexpectedly large join shapes:
 
 ```csharp
 var customers = await _dbContext.Customers
@@ -202,45 +146,41 @@ var customers = await _dbContext.Customers
     .ToListAsync(ct);
 ```
 
-Trade-off:
+Split queries can reduce cartesian expansion in some cases by issuing multiple related queries instead of one very large join. The trade-off is additional round trips. This is a good example of EF Core tuning being about shape and trade-off rather than about one universally best option.
 
-- single query: fewer round trips, but can duplicate lots of data;
-- split query: more round trips, but avoids cartesian explosion（笛卡尔爆炸）.
+When a graph is only needed for output, projection is often better than either eager entity loading strategy.
 
-Use split query when:
+## Index Awareness And SARGability
 
-- including multiple collections;
-- result has duplicated parent data;
-- SQL result set becomes huge.
-
-## Compiled Queries
-
-For very hot queries:
+EF Core cannot compensate for poor indexing or non-SARGable predicates. The query:
 
 ```csharp
-private static readonly Func<AppDbContext, int, Task<UserDto?>> GetUserByIdQuery =
-    EF.CompileAsyncQuery((AppDbContext db, int id) =>
-        db.Users
-            .Where(u => u.Id == id)
-            .Select(u => new UserDto(u.Id, u.Name))
-            .FirstOrDefault());
+var orders = await _dbContext.Orders
+    .Where(o => o.Status == OrderStatus.Paid)
+    .OrderByDescending(o => o.CreatedAt)
+    .Take(50)
+    .ToListAsync(ct);
 ```
 
-Use only when profiling shows query compilation overhead matters.
+still depends on the database having an index shape that supports the filter and order pattern.
 
-Most EF performance issues are caused by:
+Likewise, a predicate such as:
 
-- bad SQL shape;
-- missing indexes;
-- too much data loaded;
-- too many round trips;
-- unnecessary tracking.
+```csharp
+o.CreatedAt.Date == targetDate
+```
 
-Compiled queries do not fix those.
+often harms index usage compared with a range predicate:
 
-## Batch Operations
+```csharp
+o.CreatedAt >= start && o.CreatedAt < end
+```
 
-Modern EF Core supports set-based updates:
+Performance tuning in EF Core therefore requires reading the LINQ expression as a database query, not only as C# code.
+
+## Set-Based Operations Versus Entity Loops
+
+When the task is bulk infrastructure work rather than domain behavior on loaded aggregates, set-based operations are often superior.
 
 ```csharp
 await _dbContext.Orders
@@ -251,317 +191,43 @@ await _dbContext.Orders
         ct);
 ```
 
-This avoids loading all entities into memory.
+This avoids loading every row into memory and bypasses change tracking. The trade-off is that domain methods, entity callbacks, and graph-level invariants are also bypassed. That is acceptable only when the operation is fundamentally a data maintenance action rather than a rich domain command.
 
-Set-based delete:
+## Compiled Queries
 
-```csharp
-await _dbContext.Sessions
-    .Where(s => s.ExpiresAt < DateTimeOffset.UtcNow)
-    .ExecuteDeleteAsync(ct);
-```
-
-Important:
-
-> Set-based operations bypass normal change tracking and entity domain methods. Use them for infrastructure/bulk operations where this is acceptable.
-
-## Index Awareness
-
-EF Core queries still rely on database indexes.
-
-Example query:
+Compiled queries can reduce overhead for very hot query paths:
 
 ```csharp
-var orders = await _dbContext.Orders
-    .Where(o => o.Status == OrderStatus.Paid)
-    .OrderByDescending(o => o.CreatedAt)
-    .Take(50)
-    .ToListAsync(ct);
+private static readonly Func<AppDbContext, int, Task<UserDto?>> GetUserByIdQuery =
+    EF.CompileAsyncQuery((AppDbContext db, int id) =>
+        db.Users
+            .Where(u => u.Id == id)
+            .Select(u => new UserDto(u.Id, u.Name))
+            .FirstOrDefault());
 ```
 
-Useful index:
+They should not be introduced speculatively. Most EF Core performance issues come from SQL shape, data volume, indexing, tracking, or round trips rather than from query compilation cost.
 
-```csharp
-modelBuilder.Entity<Order>()
-    .HasIndex(o => new { o.Status, o.CreatedAt, o.Id });
-```
+Compiled queries are best treated as a late-stage optimization for a measured hot path whose broader query shape is already sound.
 
-Key point:
+## Logging And SQL Inspection
 
-> EF Core does not remove the need to understand database indexes. LINQ shape and index design must work together.
+Operational tuning depends on visibility. `ToQueryString`, EF logging, tracing, and database execution plans form the bridge between application code and database behavior.
 
-## Avoid Non-SARGable Filters
+Without that visibility, teams often guess incorrectly about the root cause. With it, they can distinguish between:
 
-Bad:
+- too much data returned;
+- poor predicate shape;
+- missing indexes;
+- excessive includes;
+- query count explosion;
+- tracking overhead;
+- command batching issues.
 
-```csharp
-var orders = await _dbContext.Orders
-    .Where(o => o.CreatedAt.Date == targetDate)
-    .ToListAsync(ct);
-```
+Performance work becomes much more predictable once the generated SQL and actual execution plan are part of the normal debugging workflow.
 
-Better:
+## Design Consequences
 
-```csharp
-var start = targetDate;
-var end = targetDate.AddDays(1);
+The best EF Core performance improvements usually come from design discipline, not from isolated tweaks. Project read models instead of loading entities by habit. Use no-tracking when the data will not be updated. Keep pagination bounded. Preserve index-friendly predicates. Prefer set-based operations for bulk data changes. Measure first, and confirm the database behavior rather than optimizing against assumptions.
 
-var orders = await _dbContext.Orders
-    .Where(o => o.CreatedAt >= start && o.CreatedAt < end)
-    .ToListAsync(ct);
-```
-
-Why:
-
-> Applying functions to a column can prevent efficient index usage. Range predicates are usually more index-friendly.
-
-## Complete Optimized List API Example
-
-Request model:
-
-```csharp
-public sealed record OrderListRequest(
-    OrderStatus? Status,
-    DateTimeOffset? From,
-    DateTimeOffset? To,
-    int Page = 1,
-    int PageSize = 20);
-```
-
-Response models:
-
-```csharp
-public sealed record OrderListItemDto(
-    int Id,
-    string CustomerName,
-    string Status,
-    decimal Total,
-    DateTimeOffset CreatedAt);
-
-public sealed record PagedResult<T>(
-    IReadOnlyList<T> Items,
-    int Total,
-    int Page,
-    int PageSize);
-```
-
-Query service:
-
-```csharp
-public sealed class OrderQueryService
-{
-    private readonly AppDbContext _dbContext;
-    private readonly ILogger<OrderQueryService> _logger;
-
-    public OrderQueryService(
-        AppDbContext dbContext,
-        ILogger<OrderQueryService> logger)
-    {
-        _dbContext = dbContext;
-        _logger = logger;
-    }
-
-    public async Task<PagedResult<OrderListItemDto>> SearchAsync(
-        OrderListRequest request,
-        CancellationToken ct)
-    {
-        var page = Math.Max(request.Page, 1);
-        var pageSize = Math.Clamp(request.PageSize, 1, 100);
-
-        IQueryable<Order> query = _dbContext.Orders.AsNoTracking();
-
-        if (request.Status is not null)
-        {
-            query = query.Where(order => order.Status == request.Status);
-        }
-
-        if (request.From is not null)
-        {
-            var from = request.From.Value;
-            query = query.Where(order => order.CreatedAt >= from);
-        }
-
-        if (request.To is not null)
-        {
-            var to = request.To.Value;
-            query = query.Where(order => order.CreatedAt < to);
-        }
-
-        var total = await query.CountAsync(ct);
-
-        var itemsQuery = query
-            .OrderByDescending(order => order.CreatedAt)
-            .ThenByDescending(order => order.Id)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(order => new OrderListItemDto(
-                order.Id,
-                order.Customer.Name,
-                order.Status.ToString(),
-                order.Total,
-                order.CreatedAt));
-
-        _logger.LogDebug("Order list SQL: {Sql}", itemsQuery.ToQueryString());
-
-        var items = await itemsQuery.ToListAsync(ct);
-
-        return new PagedResult<OrderListItemDto>(items, total, page, pageSize);
-    }
-}
-```
-
-Controller:
-
-```csharp
-[ApiController]
-[Route("api/orders")]
-public sealed class OrdersController : ControllerBase
-{
-    private readonly OrderQueryService _orders;
-
-    public OrdersController(OrderQueryService orders)
-    {
-        _orders = orders;
-    }
-
-    [HttpGet]
-    public async Task<ActionResult<PagedResult<OrderListItemDto>>> Search(
-        [FromQuery] OrderListRequest request,
-        CancellationToken ct)
-    {
-        var result = await _orders.SearchAsync(request, ct);
-        return Ok(result);
-    }
-}
-```
-
-Model index:
-
-```csharp
-modelBuilder.Entity<Order>()
-    .HasIndex(order => new { order.Status, order.CreatedAt, order.Id });
-```
-
-What this example applies:
-
-- query composition stays as `IQueryable` until the end;
-- `AsNoTracking` is used for read-only data;
-- projection avoids loading full entities;
-- pagination protects the endpoint;
-- sorting is deterministic with `CreatedAt` and `Id`;
-- generated SQL can be inspected during development;
-- the index matches the common filter/order shape.
-
-## Review Questions
-
-### How do you improve EF Core query performance?
-
-Answer structure:
-
-> I first check generated SQL and execution plan. Then I reduce loaded columns using projection, use `AsNoTracking` for read-only queries, avoid N+1 queries, apply proper indexes, paginate results, avoid unnecessary `Include`, consider split queries for large graphs, and use compiled queries only for hot paths after measurement.
-
-### What is the N+1 problem?
-
-N+1 means one query loads a list, then each item causes another query for related data. It often happens with lazy loading. It increases round trips and can destroy performance.
-
-### When should you use `Include`?
-
-Use `Include` when you need full related entities. For list pages and API DTOs, projection is often better because it loads only required columns.
-
-### What is cartesian explosion?
-
-It happens when joins over multiple collections multiply rows and duplicate parent data. Split queries or projection can help.
-
-### When should you use compiled queries?
-
-Only for very hot paths where profiling shows query compilation overhead is meaningful. Compiled queries do not fix bad SQL or missing indexes.
-
-### Why can `AsNoTracking` improve performance?
-
-It avoids change tracker overhead for read-only data.
-
-## Common Mistakes
-
-### Mistake: Calling `ToList()` too early
-
-Why it is wrong:
-
-> It materializes data before all filters/projections are applied.
-
-Better answer:
-
-> Compose the query first and materialize at the boundary.
-
-### Mistake: Returning `IQueryable` from repository to controller without boundaries
-
-Why it is wrong:
-
-> It spreads data access concerns and makes query execution harder to reason about.
-
-Better answer:
-
-> Keep query composition in the application/data layer and return DTOs or results.
-
-### Mistake: Loading entire tables
-
-Why it is wrong:
-
-> It increases database, network, memory, and serialization cost.
-
-Better answer:
-
-> Filter, paginate, and project.
-
-### Mistake: Using `Include` for every relationship
-
-Why it is wrong:
-
-> It can load huge graphs and create cartesian explosion.
-
-Better answer:
-
-> Include only what is needed. Prefer projection for read endpoints.
-
-### Mistake: Forgetting `AsNoTracking` for read-only queries
-
-Why it is wrong:
-
-> EF spends CPU and memory tracking entities that will not be updated.
-
-Better answer:
-
-> Use `AsNoTracking` for read-only queries.
-
-### Mistake: Ignoring indexes
-
-Why it is wrong:
-
-> Even well-written LINQ can be slow without suitable indexes.
-
-Better answer:
-
-> Review execution plans and align indexes with filters, joins, and ordering.
-
-### Mistake: Using offset pagination for huge datasets without considering keyset pagination
-
-Why it is wrong:
-
-> Large offsets can become increasingly slow.
-
-Better answer:
-
-> Use keyset pagination for high-volume infinite-scroll or timeline-style endpoints.
-
-## Practice Task
-
-Build an orders list API with:
-
-1. filtering by status;
-2. sorting by created date;
-3. pagination;
-4. DTO projection;
-5. `AsNoTracking`;
-6. index on `(Status, CreatedAt, Id)`;
-7. `ToQueryString` inspection;
-8. one N+1 example and fix;
-9. offset vs keyset pagination comparison.
+Those habits keep EF Core aligned with the relational engine underneath it, which is where most meaningful performance gains actually come from.

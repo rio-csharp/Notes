@@ -4,13 +4,6 @@
 
 CSS controls presentation: layout, spacing, colors, typography, and responsive behavior.
 
-Chinese notes:
-
-- `selector`: 选择器.
-- `specificity`: 优先级.
-- `cascade`: 层叠.
-- `box model`: 盒模型.
-
 ## Selector
 
 ```css
@@ -229,8 +222,6 @@ This example uses:
 - focus-visible styling for keyboard users;
 - spacing and sizing that do not depend on fixed viewport width.
 
-## Review Questions
-
 ### What is the CSS box model?
 
 > The box model describes how content, padding, border, and margin make up the size and spacing of an element.
@@ -242,14 +233,6 @@ This example uses:
 ### What is specificity?
 
 > Specificity determines which CSS rule wins when multiple rules target the same element.
-
-## Common Mistakes
-
-- Overusing `!important`.
-- No `box-sizing: border-box`.
-- Position absolute without positioned parent.
-- Z-index wars.
-- Fixed pixel layouts that break on small screens.
 
 ## Practice Task
 

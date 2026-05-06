@@ -4,13 +4,6 @@
 
 Design a reporting/export system for dashboards and large CSV/Excel/PDF exports.
 
-Chinese notes:
-
-- `reporting`: 报表.
-- `export`: 导出.
-- `aggregation`: 聚合.
-- `background job`: 后台任务.
-
 ## Requirements
 
 Functional:
@@ -203,26 +196,3 @@ Track:
 - file ID;
 - created time;
 - download time.
-
-## Common Mistakes
-
-- Loading all rows into memory.
-- No audit log.
-- No tenant filter.
-- Long request timeout.
-- No job status.
-- Public report files.
-
-## Knowledge Checks
-
-### How do you export large reports?
-
-Create an export job, process it in the background using batches/streaming, store the file in object storage, and notify the user when ready.
-
-### Why not export in HTTP request?
-
-Large exports can timeout, consume memory, and block API resources. Background jobs are more reliable.
-
-### How do you secure reports?
-
-Apply backend permissions and tenant filters, audit export actions, and use short-lived secure download links.

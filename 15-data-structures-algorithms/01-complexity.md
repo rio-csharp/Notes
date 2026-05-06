@@ -4,12 +4,6 @@
 
 Complexity analysis estimates how runtime or memory grows as input size grows.
 
-Chinese notes:
-
-- `time complexity`: 时间复杂度.
-- `space complexity`: 空间复杂度.
-- `Big O`: 渐进上界.
-
 ## Big O
 
 Common complexities:
@@ -249,8 +243,6 @@ O(2^n)
 
 ## Amortized Complexity
 
-Amortized complexity（摊还复杂度）means expensive operations happen sometimes, but the average cost over many operations is lower.
-
 `List<T>.Add` is usually `O(1)` amortized.
 
 Why? `List<T>` internally uses an array. When capacity is full, it allocates a larger array and copies existing elements.
@@ -346,31 +338,6 @@ An O(n) API loop that performs one database query per item may be much worse tha
 ```
 
 That is the classic N+1 query problem.
-
-## Common Mistakes
-
-- Ignoring nested loops.
-- Forgetting space complexity.
-- Saying all hash operations are always O(1) without mentioning average case.
-- Confusing input size with number of fields.
-- Optimizing DSA without explaining trade-offs.
-- Forgetting recursion stack space.
-- Treating average-case hash table complexity as guaranteed.
-- Ignoring database/network work hidden inside loops.
-
-## Knowledge Checks
-
-### Why does Big O ignore constants?
-
-Because it describes growth as input becomes large. `O(2n)` and `O(n)` grow linearly, so both are written as `O(n)`.
-
-### Why is `List<T>.Add` amortized `O(1)`?
-
-Most additions write directly into unused capacity. When capacity is full, the list resizes and copies elements. That resize cost is spread across many cheap additions.
-
-### Why can recursion use extra space?
-
-Each active recursive call needs a stack frame. A recursion depth of `n` usually means `O(n)` stack space.
 
 ## Practice Tasks
 

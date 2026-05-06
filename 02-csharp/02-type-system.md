@@ -4,14 +4,11 @@
 
 C# has a strong, static type system.
 
-Chinese notes:
-
-- `value type`: 值类型.
-- `reference type`: 引用类型.
-- `boxing`: 装箱.
-- `nullable reference type`: 可空引用类型.
-
 Understanding the type system helps you reason about memory, equality, null safety, generics, and API design.
+
+This chapter focuses on the type system itself: value semantics, reference semantics, nullability, equality, and the way type design shapes correctness. Generics are important to that story, but their deeper design rules belong to the dedicated generics chapter later in the chapter sequence.
+
+In practice, this chapter matters because many bugs that appear to be "business logic bugs" are actually type-design bugs. A model that allows contradictory states, ambiguous equality, or accidental nulls often shifts too much correctness work from the compiler into runtime conventions. The type system is one of the main tools C# offers for moving that work back into the design.
 
 ## Value Types
 
@@ -27,7 +24,7 @@ Examples:
 
 Value types usually contain the data directly.
 
-Mental model:
+The simplest mental model is:
 
 ```text
 int a = 10;
@@ -68,6 +65,8 @@ var copy = price;
 
 `copy` is a separate value. The `Currency` property is still a reference to a string object, but the struct value itself is copied.
 
+That last nuance is important. A value type is copied as a value, but the fields inside it still keep their own semantics. If a struct contains references, those references are copied too. This is one reason immutable structs are usually easier to reason about than mutable ones: copy semantics remain predictable even when the struct contains references to immutable objects.
+
 ## Reference Types
 
 Examples:
@@ -80,7 +79,7 @@ Examples:
 
 Reference variables point to objects.
 
-Mental model:
+The simplest mental model is:
 
 ```text
 user1 -> User object on managed heap
@@ -115,7 +114,7 @@ Console.WriteLine(user.Name); // Charlie
 
 The reference is passed by value, but the copied reference still points to the same object.
 
-Important nuance:
+One important nuance is that:
 
 ```csharp
 public static void Replace(User user)
@@ -129,6 +128,8 @@ Console.WriteLine(user.Name); // Alice
 ```
 
 The method changed its local copy of the reference. It did not change the caller's variable.
+
+This distinction becomes especially important in API design. Many developers initially describe reference types as "passed by reference," but the more accurate statement is that the reference value is passed by value unless `ref` is explicitly used. That mental model explains why a method can mutate an object but cannot rebind the caller's variable just by assigning a new object to its parameter.
 
 ## Boxing And Unboxing
 
@@ -182,6 +183,8 @@ Why performance can suffer:
 - boxing allocates;
 - unboxing casts;
 - repeated boxing in hot loops creates GC pressure.
+
+Boxing is not always a disaster, but it is often a sign that the type system is being forced through a less precise abstraction than the code really wants. Modern generic APIs exist partly to avoid that cost while keeping the call sites strongly typed.
 
 Common hidden boxing:
 
@@ -301,6 +304,8 @@ Console.WriteLine(left == right); // false by default
 
 This is why records are nice for DTOs but should be used carefully for domain entities.
 
+The underlying design question is whether the type is identified by who it is or by what data it contains. DTOs, commands, settings objects, and immutable projections often fit value-based equality naturally. Domain entities usually do not, because two separate customers with the same visible data are not the same customer.
+
 ## Nullable Reference Types
 
 Enable:
@@ -362,9 +367,9 @@ public static int GetLength(string? text)
 }
 ```
 
-Key point:
+Nullable reference types are a static analysis feature. They reduce null-related bugs, but runtime input still needs validation.
 
-> Nullable reference types are a static analysis feature. They reduce null bugs, but runtime input still needs validation.
+This is one of the healthiest changes in modern C#. Before nullable reference types, many codebases treated nullability as a social convention. With nullable enabled, null becomes part of the documented type contract. That does not eliminate null bugs entirely, but it makes careless API design far easier to spot.
 
 ## Pattern Matching
 
@@ -408,6 +413,8 @@ public static bool CanApprove(Order order)
 ```
 
 Pattern matching is especially useful when it makes business rules easier to read.
+
+It also encourages a style of code where the shape of the data is expressed directly in the control flow rather than through deeply nested `if` statements and manual casts. That improves readability when the patterns represent real distinctions in the model. When pattern matching becomes excessively dense, however, it can also hide complexity, so clarity still matters more than novelty.
 
 ## Modeling State With Types
 
@@ -464,39 +471,13 @@ public static string Describe(PaymentStatus status)
 
 This is not a full algebraic data type system, but it is a practical C# way to express alternatives.
 
-Chinese note:
+Good type design reduces the number of runtime checks needed later. The compiler becomes part of the design feedback loop.
 
-- `algebraic data type`: 代数数据类型，一种用类型表达“几种可能形态”的建模方式.
+This is one of the central professional uses of the type system. Good type design does not merely store data neatly. It narrows the set of invalid programs that the rest of the system can accidentally write.
 
-Key point:
+## Type Parameters As Part Of Type Design
 
-> Good type design reduces the number of runtime checks needed later. The compiler becomes part of the design feedback loop.
-
-## Generics
-
-```csharp
-public interface IRepository<TEntity>
-{
-    Task<TEntity?> GetByIdAsync(int id, CancellationToken ct);
-}
-```
-
-Generic constraints:
-
-```csharp
-public sealed class EntityRepository<TEntity>
-    where TEntity : class, IEntity
-{
-}
-```
-
-Benefits:
-
-- type safety;
-- reusable code;
-- avoids boxing for generic collections.
-
-Generic result example:
+Generic type parameters are one of the reasons the C# type system scales well across libraries and application code. They allow types and APIs to preserve specific type information instead of collapsing everything to `object`.
 
 ```csharp
 public sealed record Result<T>(bool IsSuccess, T? Value, string? Error)
@@ -506,13 +487,11 @@ public sealed record Result<T>(bool IsSuccess, T? Value, string? Error)
 }
 ```
 
-Usage:
+Here the compiler knows that `Value` is a `UserDto?`, not just `object`, which means the type system continues to protect the API all the way to the call site.
 
-```csharp
-Result<UserDto> result = Result<UserDto>.Success(new UserDto(1, "Alice"));
-```
+The dedicated generics chapter later in this part of the book goes deeper into constraints, variance, boxing avoidance, open generics, and generic design trade-offs. At this stage, the important idea is simply that generics are part of the type system's ability to keep APIs precise without giving up reuse.
 
-The compiler knows that `Value` is a `UserDto?`, not just `object`.
+That precision matters operationally as well as aesthetically. Once an API falls back to `object`, strings, loosely structured dictionaries, or parallel booleans for concepts that could have been modeled precisely, the codebase often compensates with more runtime checks, more documentation burden, and more fragile integration code.
 
 ## Equality
 
@@ -579,104 +558,20 @@ Why `GetHashCode` matters:
 
 > Collections such as `Dictionary` and `HashSet` depend on equality and hash codes. If you override equality incorrectly, lookups can behave incorrectly.
 
-## Review Questions
+Equality design has real downstream consequences. It affects hash-based collections, caching, deduplication, set operations, testing semantics, and sometimes persistence behavior. That is why equality should be treated as part of the type's meaning, not just as a mechanical override required by tooling.
 
-### Value type vs reference type?
+## Type Design Notes
 
-> Value types generally contain data directly and are copied by value. Reference types store references to objects, and copying the variable copies the reference, not the object.
+Value types generally contain data directly and are copied by value. Reference types store references to objects, and copying the variable copies the reference rather than the object itself.
 
-### Is every value type stored on the stack?
+Value types are not guaranteed to live on the stack. Placement depends on context. A value type can appear inside an object on the heap, inside an array, boxed, captured by a closure, or optimized by the JIT in other ways.
 
-> No. Placement depends on context. A value type can be inside an object on the heap, inside an array, boxed, captured by a closure, or optimized by the JIT.
+Boxing wraps a value type in an object so it can be treated as `object` or an interface. That introduces heap allocation and can matter in hot paths.
 
-### What is boxing?
+Records are useful for immutable data models, DTOs, commands, and values where value-based equality is the natural design.
 
-> Boxing wraps a value type in an object so it can be treated as `object` or an interface. It creates heap allocation and can affect performance in hot paths.
+By default, C# passes a reference value by value. A method receives a copy of the reference, so it can mutate the same object, but reassigning the parameter does not reassign the caller's variable. `ref` should be used only when the caller's variable itself must be changed.
 
-### When would you use record?
+Nullable reference types provide compile-time warnings about possible null misuse. They improve local correctness, but they do not guarantee that runtime data from JSON, databases, or external systems is valid.
 
-> Records are useful for immutable data models, DTOs, commands, and values where value-based equality is desired.
-
-### Passing reference type by value vs by reference?
-
-> By default, C# passes the reference value by value. The method receives a copy of the reference, so it can mutate the same object, but reassigning the parameter does not reassign the caller's variable. Use `ref` only when the method must change the caller's variable itself.
-
-### What does nullable reference type actually guarantee?
-
-> It gives compile-time warnings about possible null usage. It does not guarantee that runtime data from JSON, databases, or external APIs is valid.
-
-### Why model state with different types instead of several booleans?
-
-> Several booleans can represent invalid combinations. Separate types or records can express valid alternatives directly and make business rules easier to read.
-
-## Common Mistakes
-
-### Mistake: Saying value types are always on stack.
-
-Why it is wrong:
-
-> Value types can live inside heap objects, arrays, closures, boxed objects, or be optimized by the JIT. Stack vs heap is an implementation detail, while value semantics are the language concept.
-
-Better answer:
-
-> Value types are copied by value; their storage location depends on context.
-
-### Mistake: Using mutable structs.
-
-Why it is wrong:
-
-> Structs are copied by value. If they are mutable, changes to a copy may not affect the original, which creates subtle bugs.
-
-Better answer:
-
-> Prefer small immutable structs.
-
-### Mistake: Ignoring nullable warnings.
-
-Why it is wrong:
-
-> Nullable reference types help catch possible null bugs at compile time. Ignoring warnings removes much of their value.
-
-Better answer:
-
-> Treat nullable warnings as design feedback and model optional values explicitly with `?`.
-
-### Mistake: Using `object` where generics are better.
-
-Why it is wrong:
-
-> `object` loses type safety and may require casts or boxing. Generics keep compile-time type information and avoid many runtime errors.
-
-Better answer:
-
-> Use generics when the operation should work over different types while preserving type safety.
-
-### Mistake: Confusing reference equality and value equality.
-
-Why it is wrong:
-
-> Two variables can reference different objects with the same values, or the same object through two references. These are different questions.
-
-Better answer:
-
-> Reference equality asks "same object?" Value equality asks "same value?"
-
-### Mistake: Using records for entities with identity without thinking.
-
-Why it is wrong:
-
-> Records default to value-based equality, but domain entities often use identity-based equality. A user entity changing its name is still the same user.
-
-Better answer:
-
-> Use records for DTOs and value-like data; be careful using them for mutable domain entities.
-
-### Mistake: Modeling mutually exclusive states with unrelated flags.
-
-Why it is wrong:
-
-> Boolean flags can accidentally create impossible combinations, such as an order being both cancelled and shipped.
-
-Better answer:
-
-> Use enums for simple finite states, or separate record/class types when each state carries different data.
+Several booleans often permit invalid combinations. Separate types or discriminated state shapes usually express valid alternatives more clearly and make business rules easier to enforce.

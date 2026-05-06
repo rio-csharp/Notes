@@ -4,15 +4,6 @@
 
 Azure provides managed services for hosting, databases, storage, identity, messaging, secrets, networking, and observability.
 
-Chinese notes:
-
-- `App Service`: 托管 Web 应用服务.
-- `Container Apps`: 托管容器应用平台.
-- `Key Vault`: 密钥管理服务.
-- `Managed Identity`: 托管身份, Azure resource can authenticate without storing credentials.
-- `Application Insights`: 应用监控.
-- `Private Endpoint`: 私有终结点, access a service through private network instead of public internet.
-
 The engineering goal is not to use every Azure service. The goal is to choose the smallest reliable platform for the application.
 
 ## Common Azure Building Blocks
@@ -213,8 +204,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 Chinese note:
 
-- `transient error`: 瞬时错误, such as temporary network or failover issues.
-
 Do not use retries to hide permanent problems such as bad SQL, missing tables, or wrong credentials.
 
 ## Blob Storage
@@ -310,8 +299,6 @@ Common options:
 SAS means Shared Access Signature.
 
 Chinese note:
-
-- `SAS`: 带过期时间和权限范围的临时访问签名.
 
 Example concept:
 
@@ -516,8 +503,6 @@ Consumers should be idempotent because messages can be delivered more than once.
 
 Chinese note:
 
-- `idempotent`: 幂等, running the same operation multiple times has the same final effect.
-
 ## Azure Cache For Redis
 
 Use Redis for:
@@ -564,8 +549,6 @@ Public internet
 
 Chinese note:
 
-- `WAF`: Web Application Firewall, Web 应用防火墙.
-
 ## Backup And Restore
 
 Backups are only useful if restore has been tested.
@@ -578,11 +561,6 @@ Important checks:
 - infrastructure configuration backup;
 - restore time objective;
 - restore point objective.
-
-Chinese notes:
-
-- `RTO`: Recovery Time Objective, 可接受的恢复时间.
-- `RPO`: Recovery Point Objective, 可接受的数据丢失时间范围.
 
 Example:
 
@@ -612,41 +590,6 @@ Practical habits:
 - define log retention;
 - move old blobs to cool/archive tiers;
 - delete temporary resources.
-
-## Common Mistakes
-
-- Putting production secrets in `appsettings.json`.
-- Making blob containers public accidentally.
-- Overusing AKS when App Service or Container Apps is enough.
-- No Application Insights or structured logs.
-- No health checks.
-- No restore test.
-- Giving one identity access to every secret.
-- Using public database endpoints without network restrictions.
-- Storing uploaded files on local app disk.
-- Ignoring connection limits and database sizing.
-
-## Knowledge Checks
-
-### When is App Service a good choice?
-
-App Service is good for standard APIs and web apps that need managed hosting, TLS, scaling, deployment slots, health checks, and easy configuration without operating Kubernetes.
-
-### Why use Managed Identity?
-
-Managed Identity avoids storing credentials in code or configuration. Azure issues tokens to the resource identity, and SDKs can use those tokens to access services such as Key Vault or Blob Storage.
-
-### Why should Blob Storage usually store uploaded files instead of the database?
-
-Blob Storage is built for large binary objects, streaming, lifecycle policies, and lower storage cost. The database should usually store metadata and the blob key, not the entire file.
-
-### What does Application Insights help you understand?
-
-It helps connect requests, dependencies, exceptions, traces, and performance metrics so production behavior can be investigated with evidence.
-
-### What is the difference between Service Bus and Kafka-like event streaming?
-
-Service Bus is a message broker for queues, topics, commands, workflows, and dead-letter handling. Kafka-like systems are append-only event logs designed for high-throughput streams and replay.
 
 ## Practice Task
 

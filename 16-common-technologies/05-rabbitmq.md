@@ -4,15 +4,6 @@
 
 RabbitMQ is a message broker commonly used for work queues, routing, retries, and asynchronous business processing.
 
-Chinese notes:
-
-- `message broker`: 消息代理.
-- `queue`: 队列.
-- `exchange`: 交换机.
-- `routing key`: 路由键.
-- `acknowledgement`: 确认.
-- `dead-letter queue`: 死信队列.
-
 ## Mental Model
 
 RabbitMQ does not send messages directly to queues by default. Producers publish messages to an exchange. The exchange routes messages to queues through bindings.
@@ -332,8 +323,6 @@ Avoid infinite requeue loops. Requeueing immediately can create a hot failure lo
 
 ## Idempotent Consumer
 
-RabbitMQ can deliver a message more than once. Consumers must be idempotent（幂等）.
-
 ```sql
 CREATE TABLE ProcessedMessages
 (
@@ -404,31 +393,6 @@ Monitor:
 - memory and disk alarms.
 
 Queue depth by itself is not enough. A growing queue plus flat consumer throughput usually means consumers are failing, too slow, or under-provisioned.
-
-## Common Mistakes
-
-- Auto-ack before processing.
-- Infinite requeue loops.
-- No DLQ.
-- No idempotency.
-- Huge messages.
-- No monitoring for queue depth and unacked messages.
-- Too high prefetch causing unfair distribution or memory pressure.
-- Treating RabbitMQ like Kafka replay storage.
-
-## Knowledge Checks
-
-### When would you choose RabbitMQ?
-
-Choose RabbitMQ for work queues, command processing, flexible routing, delayed/retry messaging, and business workflow messaging.
-
-### RabbitMQ vs Kafka?
-
-RabbitMQ is a broker optimized for routing, queues, and per-message acknowledgement. Kafka is an event streaming platform optimized for durable logs, replay, and high-throughput event pipelines.
-
-### How do you handle failed messages?
-
-Use retry with backoff, retry queues, dead-letter queues, idempotent consumers, logging, metrics, and alerts.
 
 ## Practice Task
 

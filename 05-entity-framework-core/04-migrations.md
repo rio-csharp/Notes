@@ -1,58 +1,23 @@
-# EF Core Migrations
+# Migrations And Schema Evolution
 
 ## Core Idea
 
-EF Core migrations track database schema changes over time.
+EF Core migrations are versioned schema changes generated from model evolution. In small projects they can feel like a development convenience. In serious systems they are deployment artifacts that carry operational risk. The difference matters. A migration is not only a piece of source code. It is a database change that may lock tables, rewrite large amounts of data, invalidate application assumptions, or break rolling deployments.
 
-Chinese notes:
+This chapter treats migrations as part of production engineering rather than as a local developer tool.
 
-- `migration`: 数据库迁移.
-- `schema`: 数据库结构.
-- `rollback`: 回滚.
-- `idempotent script`: 幂等脚本, safe to run when some migrations may already be applied.
-- `expand-contract`: 扩展-收缩, a zero-downtime schema change pattern.
+## The Migration Model
 
-Migrations help keep the application model and database schema in sync.
-
-Key takeaway:
-
-> In production, I treat migrations as database deployment artifacts. I review generated SQL, consider locks and data volume, and design backward-compatible changes for rolling deployments.
-
-## Basic Commands
-
-Add migration:
+At a basic level, EF Core compares the current model with the model snapshot and generates a migration describing the difference.
 
 ```bash
 dotnet ef migrations add InitialCreate
-```
-
-Apply to database:
-
-```bash
 dotnet ef database update
-```
-
-Rollback to previous migration:
-
-```bash
-dotnet ef database update PreviousMigrationName
-```
-
-Generate SQL script:
-
-```bash
 dotnet ef migrations script
-```
-
-Generate idempotent script:
-
-```bash
 dotnet ef migrations script --idempotent
 ```
 
-Idempotent scripts are useful for deployment pipelines because they check migration history before applying changes.
-
-## Migration File
+A migration contains two directions:
 
 ```csharp
 public partial class AddOrderStatus : Migration
@@ -76,93 +41,89 @@ public partial class AddOrderStatus : Migration
 }
 ```
 
-`Up` applies changes.
+`Up` moves the schema forward. `Down` attempts to reverse that change. In practice, the existence of a `Down` method should not be mistaken for a guaranteed safe rollback story. Some schema and data changes are not reversibly safe in operational reality.
 
-`Down` reverts changes.
+## Model Snapshot And Migration History
 
-## Model Snapshot
+EF Core keeps a model snapshot in source control and records applied migrations in the database, usually through `__EFMigrationsHistory`.
 
-EF Core keeps a model snapshot file.
+Those two mechanisms serve different purposes:
 
-Conceptually:
+- the snapshot helps EF compute the next schema delta;
+- the history table tells EF which migrations a database has already applied.
 
-```text
-Current EF model
-  compared with
-Model snapshot
-  -> generates new migration
-```
+That history is what makes idempotent scripts possible and what keeps multiple environments from blindly replaying the same schema change.
 
-Important:
+## Generated Migrations Still Require Review
 
-> Do not randomly edit or delete migration files after they have been applied to shared environments. Migration history must remain consistent across developers, CI, and production.
+The generated migration is a starting point, not a final authority. EF Core can infer many schema changes correctly, but it cannot understand operational intent the way an experienced engineer or database reviewer can.
 
-## Migration History Table
+Generated output should be reviewed especially for:
 
-EF Core records applied migrations in a table, usually:
+- destructive drops;
+- drop-and-add sequences that should really be renames;
+- type narrowing;
+- nullable-to-non-nullable transitions without backfill;
+- expensive index rebuilds;
+- unexpected cascade changes.
 
-```text
-__EFMigrationsHistory
-```
-
-This table lets EF know which migrations have already been applied.
-
-Idempotent scripts use this history to avoid reapplying migrations.
-
-## Production Migration Strategy
-
-For production, avoid blindly running migrations from app startup for critical systems.
-
-Safer options:
-
-- generate SQL script;
-- review SQL;
-- run in deployment pipeline;
-- backup before risky schema changes;
-- monitor after deployment;
-- separate destructive changes;
-- test on production-like data volume;
-- coordinate with rolling deployment strategy.
-
-Why startup migrations are risky:
-
-- multiple app instances may try to migrate at once;
-- migrations can require elevated database permissions;
-- failed migrations can stop app startup;
-- long schema changes can block user traffic;
-- schema changes should often be reviewed by database owners or experienced engineers.
-
-Acceptable cases:
-
-> Startup migrations may be fine for local development, prototypes, or small internal apps. For serious production systems, reviewed scripts are safer.
-
-## Zero-downtime Migration Pattern
-
-For breaking changes, use expand-contract.
-
-Example: rename column `Name` to `FullName`.
-
-Bad:
+For example, a rename can be misdetected as drop plus add:
 
 ```text
-Deploy migration that renames column
-Deploy app that uses new column
+Rename FullName -> DisplayName
+EF generates DropColumn FullName + AddColumn DisplayName
 ```
 
-This can break during rolling deployment because old app instances may still read `Name` while new app instances read `FullName`.
+That would lose data. The migration should be corrected:
 
-Better:
+```csharp
+migrationBuilder.RenameColumn(
+    name: "FullName",
+    table: "Users",
+    newName: "DisplayName");
+```
 
-1. Add new nullable column `FullName`.
-2. Deploy app writing both `Name` and `FullName`.
-3. Backfill data.
-4. Deploy app reading `FullName`.
-5. Stop writing `Name`.
-6. Remove old `Name` column later.
+The broader principle is simple: migrations represent database intent, not only model differences.
 
-This keeps old and new application versions compatible during deployment.
+## Production Execution Strategy
 
-Migration step 1: expand schema.
+Automatically applying migrations on application startup may be acceptable in local development, prototypes, or small internal systems. It is often the wrong default for production.
+
+The risk comes from several directions:
+
+- multiple instances may attempt migration concurrently;
+- schema changes may require elevated permissions the app should not normally hold;
+- a failed migration can block startup of the application;
+- long-running DDL can interfere with user traffic;
+- operational teams may need review and coordination before schema changes execute.
+
+For production systems, reviewed SQL scripts, migration bundles, or pipeline-driven deployment steps are usually safer because they separate schema rollout from application boot.
+
+## Idempotent Scripts And Controlled Deployment
+
+An idempotent script applies only the migrations that a target database has not yet recorded in migration history:
+
+```bash
+dotnet ef migrations script --idempotent
+```
+
+This is especially useful when environments are not guaranteed to be on the exact same version at deployment time. It also fits CI/CD pipelines well because the script can be reviewed, archived, and executed with a controlled operator workflow.
+
+Idempotence does not remove the need for review. It only makes the execution path more adaptable across environments.
+
+## Expand-Contract For Backward Compatibility
+
+The most important migration pattern for modern deployment is expand-contract.
+
+Suppose `Name` is being replaced by `FullName`. A direct rename may break rolling deployment because old code and new code may coexist during rollout. The safer path is:
+
+1. add the new column;
+2. deploy code that can write both;
+3. backfill existing data;
+4. switch reads to the new column;
+5. remove the old column only after the old version is gone.
+
+The first migration expands the schema:
 
 ```csharp
 public partial class AddFullNameToUsers : Migration
@@ -176,78 +137,31 @@ public partial class AddFullNameToUsers : Migration
             maxLength: 200,
             nullable: true);
     }
-
-    protected override void Down(MigrationBuilder migrationBuilder)
-    {
-        migrationBuilder.DropColumn(
-            name: "FullName",
-            table: "Users");
-    }
 }
 ```
 
-Temporary application write path:
+The application temporarily writes both:
 
 ```csharp
 user.Name = request.FullName;
 user.FullName = request.FullName;
 ```
 
-Backfill migration:
+Then a backfill step can populate the new column:
 
 ```csharp
-public partial class BackfillUserFullName : Migration
-{
-    protected override void Up(MigrationBuilder migrationBuilder)
-    {
-        migrationBuilder.Sql("""
-            UPDATE Users
-            SET FullName = Name
-            WHERE FullName IS NULL
-        """);
-    }
-
-    protected override void Down(MigrationBuilder migrationBuilder)
-    {
-        migrationBuilder.Sql("""
-            UPDATE Users
-            SET FullName = NULL
-        """);
-    }
-}
+migrationBuilder.Sql("""
+    UPDATE Users
+    SET FullName = Name
+    WHERE FullName IS NULL
+""");
 ```
 
-Final cleanup after all app instances read `FullName`:
+Only after the new application version is fully stable should the cleanup migration remove the old column. Delaying cleanup is not wasted ceremony. It is what makes rollback and mixed-version deployment survivable.
 
-```csharp
-public partial class DropOldUserNameColumn : Migration
-{
-    protected override void Up(MigrationBuilder migrationBuilder)
-    {
-        migrationBuilder.DropColumn(
-            name: "Name",
-            table: "Users");
-    }
+## Data Migrations And Table Scale
 
-    protected override void Down(MigrationBuilder migrationBuilder)
-    {
-        migrationBuilder.AddColumn<string>(
-            name: "Name",
-            table: "Users",
-            type: "nvarchar(200)",
-            maxLength: 200,
-            nullable: true);
-    }
-}
-```
-
-Key point:
-
-> The cleanup migration is intentionally delayed. Removing old schema too early is what breaks rolling deployments.
-
-## Data Migration
-
-Migrations can include data updates:
+Migrations may also include data updates:
 
 ```csharp
 migrationBuilder.Sql("""
@@ -257,32 +171,18 @@ migrationBuilder.Sql("""
 """);
 ```
 
-Be careful:
+This is where migration work becomes operationally sensitive. Large updates can:
 
-- large updates can lock tables;
-- large transactions can fill logs;
-- data changes may need batching;
-- test on production-like data;
-- consider background backfill for very large tables.
+- lock tables;
+- fill transaction logs;
+- trigger long-running replication or CDC side effects;
+- exceed maintenance windows.
 
-Batching idea:
+For large datasets, a one-shot data migration may be the wrong mechanism. Batching, online backfill jobs, or staged rollout logic may be safer than placing the entire transformation inside one deployment-time transaction.
 
-```sql
-WHILE 1 = 1
-BEGIN
-    UPDATE TOP (1000) Orders
-    SET Status = 'Submitted'
-    WHERE Status IS NULL;
+## Index Changes And Operational Cost
 
-    IF @@ROWCOUNT = 0 BREAK;
-END
-```
-
-## Index Migrations
-
-Adding an index can be expensive on large tables.
-
-Example:
+Index creation and rebuilds are often among the most expensive migration operations on large tables.
 
 ```csharp
 migrationBuilder.CreateIndex(
@@ -291,77 +191,26 @@ migrationBuilder.CreateIndex(
     columns: new[] { "Status", "CreatedAt" });
 ```
 
-Key point:
+Even when the generated migration is correct, the operational question remains:
 
-> Index creation can lock or slow a large table depending on database edition/options. I review the generated SQL and choose online index creation if supported and required.
+- how long will it run;
+- will it lock writes or reads;
+- does the provider support online options;
+- is the table large enough that rollout must be staged?
 
-Provider-specific SQL can be used when EF's fluent migration API does not expose the exact option needed.
+Provider-specific SQL is sometimes justified when the generic migration API cannot express the exact operational requirement.
 
-SQL Server example:
+## Rollback, Forward Fixes, And Reality
 
-```csharp
-migrationBuilder.Sql("""
-    CREATE INDEX IX_Orders_Status_CreatedAt
-    ON dbo.Orders (Status, CreatedAt DESC)
-    INCLUDE (Total)
-    WITH (ONLINE = ON)
-""");
-```
+Database rollback is not always "run `Down` and continue." If the new schema has already accepted new writes, or if a migration removed or transformed data, the cleanest recovery path may be a forward fix rather than a literal rollback.
 
-Important:
+That is why backward-compatible schema evolution is so valuable. If new application code can tolerate the old schema for a while, and old code can tolerate the expanded schema, the team gains room to roll back binaries or pause rollout without immediate database surgery.
 
-> `ONLINE = ON` depends on SQL Server edition/version and workload. Always test the generated SQL against a production-like database.
+The best migration strategy is often the one that makes emergency rollback unnecessary.
 
-## Dangerous Generated Changes
+## Design-Time Context Creation
 
-Always review migrations for:
-
-- drop column;
-- drop table;
-- rename detected as drop/add;
-- column type narrowing;
-- nullable to non-nullable without default/backfill;
-- large default constraints;
-- cascade delete changes;
-- index rebuilds on huge tables.
-
-Example risk:
-
-```text
-Rename FullName -> DisplayName
-EF generates DropColumn FullName + AddColumn DisplayName
-Data is lost unless migration is corrected
-```
-
-Better:
-
-```csharp
-migrationBuilder.RenameColumn(
-    name: "FullName",
-    table: "Users",
-    newName: "DisplayName");
-```
-
-## Rollback Strategy
-
-Rollback is not always simply running `Down`.
-
-Consider:
-
-- was data deleted?
-- did the app write new data in a new format?
-- are old binaries compatible with new schema?
-- should rollback be app rollback, database rollback, or forward fix?
-
-Engineering perspective:
-
-> I prefer backward-compatible migrations so application rollback is possible without emergency database rollback. Destructive schema cleanup happens after the new version is stable.
-
-## Design-time DbContext Creation
-
-The EF CLI needs to create your `DbContext` at design time.
-
-For simple apps, EF can often discover it from `Program.cs`. For more complex apps, use a design-time factory:
+The EF CLI needs a way to construct the `DbContext` at design time. In simple applications it can often infer that from the startup project. In more complex solutions, a design-time factory is clearer:
 
 ```csharp
 public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbContext>
@@ -377,125 +226,20 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
 }
 ```
 
-Use a design-time factory when:
+This keeps migration generation predictable even when the application startup path has complex runtime dependencies.
 
-- the app has complex startup dependencies;
-- configuration is difficult to load from the CLI;
-- migrations live in a separate project;
-- design-time creation should be explicit and predictable.
+## Migration Bundles
 
-## Migration Bundle
-
-EF Core can create an executable migration bundle for deployment.
+EF Core can also produce a migration bundle:
 
 ```bash
 dotnet ef migrations bundle --self-contained -r win-x64
 ```
 
-Run the generated executable with a connection string:
+That executable can then be run against a target database with a supplied connection string. Bundles are useful because they separate migration execution from application startup and avoid requiring the full SDK on the target machine.
 
-```bash
-efbundle.exe --connection "Server=prod;Database=OrdersDb;..."
-```
+## Design Consequences
 
-Why this can be useful:
+Good migration discipline comes from treating schema evolution as part of release engineering. Review the generated change, understand its operational cost, prefer backward-compatible rollout patterns, and avoid conflating "the migration compiles" with "the migration is safe to run in production."
 
-- deployment machines do not need the .NET SDK;
-- migration execution is separated from app startup;
-- the bundle can be reviewed, stored, and executed by a deployment pipeline.
-
-## Review Questions
-
-### What are EF Core migrations?
-
-Migrations are versioned schema changes generated from EF Core model changes. They let teams evolve database structure consistently over time.
-
-### Should applications run migrations automatically on startup?
-
-It can be acceptable for small internal apps, but for production systems I prefer reviewed scripts in CI/CD to reduce risk and control timing.
-
-### How do you handle zero-downtime schema changes?
-
-Use expand-contract: add new schema in a backward-compatible way, deploy app changes gradually, backfill data, switch reads, then remove old schema later.
-
-### What is an idempotent migration script?
-
-An idempotent script checks migration history and applies only migrations that have not already been applied. It is useful when environments may be at different migration versions.
-
-### Why review generated migrations?
-
-Because EF may generate destructive operations, expensive table changes, or drop/add instead of rename. Database schema changes can cause data loss or downtime.
-
-## Common Mistakes
-
-### Mistake: Deleting migration files manually after deployment
-
-Why it is wrong:
-
-> Other environments and developers may still depend on the migration history.
-
-Better answer:
-
-> Keep applied migrations. If cleanup is needed, plan a baseline strategy carefully.
-
-### Mistake: Running destructive migrations without backup
-
-Why it is wrong:
-
-> Dropped data may not be recoverable.
-
-Better answer:
-
-> Back up first and separate destructive cleanup from initial deployment.
-
-### Mistake: Renaming columns without checking generated SQL
-
-Why it is wrong:
-
-> EF may interpret rename as drop/add, causing data loss.
-
-Better answer:
-
-> Review and use `RenameColumn` when appropriate.
-
-### Mistake: Large data updates in one transaction
-
-Why it is wrong:
-
-> It can lock tables, grow transaction logs, and block production traffic.
-
-Better answer:
-
-> Use batching or background backfill.
-
-### Mistake: Startup migrations across multiple app instances
-
-Why it is wrong:
-
-> Multiple instances may compete to modify schema at startup.
-
-Better answer:
-
-> Apply migrations through a controlled deployment pipeline.
-
-### Mistake: No rollback plan
-
-Why it is wrong:
-
-> Failed database deployments are high-risk and often harder to undo than app deployments.
-
-Better answer:
-
-> Prefer backward-compatible changes and define rollback/forward-fix strategy before deployment.
-
-## Practice Task
-
-Create migrations for:
-
-1. initial order table;
-2. add status column;
-3. add index;
-4. backfill data;
-5. generate idempotent script;
-6. design expand-contract rename;
-7. identify whether the generated SQL has any destructive operation.
+That mindset turns migrations from a fragile ORM convenience into a reliable part of system change management.

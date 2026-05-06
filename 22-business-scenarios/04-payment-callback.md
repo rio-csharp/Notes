@@ -4,15 +4,6 @@
 
 Payment callbacks notify a system about payment events from a payment provider.
 
-Chinese notes:
-
-- `payment callback`: 支付回调.
-- `webhook`: 回调通知.
-- `idempotency`: 幂等性.
-- `reconciliation`: 对账.
-- `state transition`: 状态转换.
-- `replay attack`: 重放攻击.
-
 Payment is a high-risk domain. Correctness, auditability, and recovery matter more than cleverness.
 
 ## Typical Flow
@@ -415,37 +406,6 @@ _logger.LogInformation(
     evt.EventId,
     payment.Id);
 ```
-
-## Knowledge Checks
-
-### How can payment callback handling be made safe?
-
-Verify signature, validate timestamp, store provider event IDs, process idempotently, use explicit state transitions, avoid duplicate order confirmation, publish through outbox, and run reconciliation jobs.
-
-### Why is reconciliation needed?
-
-Webhooks are not perfect. Network failures, retries, provider bugs, or local downtime can cause missed or delayed events. Reconciliation compares provider state with local records.
-
-### Should a callback return failure when processing fails?
-
-If processing failed before a safe commit and the provider should retry, return non-2xx. If the event was already processed or safely stored for async processing, return 2xx.
-
-### Why use explicit payment state methods?
-
-They protect valid transitions and prevent blindly assigning provider status values that may not fit local business rules.
-
-## Common Mistakes
-
-- No signature verification.
-- No timestamp/replay protection.
-- No idempotency.
-- Updating payment status blindly.
-- No database uniqueness for provider event ID.
-- No reconciliation.
-- Calling external systems inside long database transactions.
-- Confirming order twice.
-- Logging sensitive payment data.
-- Returning `500` after committing state.
 
 ## Practice Task
 

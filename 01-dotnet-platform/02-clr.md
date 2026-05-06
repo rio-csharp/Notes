@@ -4,17 +4,11 @@
 
 The Common Language Runtime (CLR) is the managed execution engine for .NET applications.
 
-Chinese notes:
-
-- `CLR`: Common Language Runtime, 公共语言运行时.
-- `type safety`: 类型安全.
-- `managed code`: 托管代码.
-
-The CLR provides runtime services so developers do not have to manually handle everything.
+The CLR is the layer that turns managed code into a running process model with specific guarantees and services. It is not just "the thing with GC and JIT." It is the execution environment that loads types, enforces managed semantics, propagates exceptions, coordinates garbage collection, and mediates important boundaries such as interoperability.
 
 In modern .NET, people often use "CLR" to refer to CoreCLR, the runtime engine used by normal server, desktop, console, and worker applications. Other .NET runtimes exist for specialized scenarios, but CoreCLR is the main mental model for ASP.NET Core and most backend work.
 
-Mental model:
+The simplest mental model is:
 
 ```text
 Your C# code
@@ -24,7 +18,21 @@ Your C# code
   -> CLR services keep execution safe and observable
 ```
 
-The CLR is not a library you call directly most of the time. It is the managed execution environment your code runs inside.
+The CLR is not a library you usually call directly. It is the managed execution environment your code runs inside once the host has started the process and selected the runtime.
+
+## Runtime Context In Modern .NET
+
+For most backend, desktop, worker, and console scenarios in modern .NET, the default runtime implementation is CoreCLR.
+
+It is useful to distinguish three related but not identical ideas:
+
+| Runtime Context | Typical Use | Main Characteristic |
+| --- | --- | --- |
+| CoreCLR | ASP.NET Core, workers, console apps, most server workloads | full managed runtime with JIT, GC, and broad library compatibility |
+| Mono runtime family | historically mobile, browser, and specialized scenarios | different runtime trade-offs and execution environments |
+| Native AOT deployment model | startup-sensitive or footprint-sensitive apps | more work moved to publish time and less reliance on a fully dynamic runtime model |
+
+The key point is that ".NET runtime" is not only one implementation detail. CoreCLR is the main default mental model for this book, but execution strategy still changes when the deployment model or environment changes. Native AOT is not simply "another CLR" in the same sense as CoreCLR or Mono; it changes how much runtime dynamism remains available after publish.
 
 ## CLR Responsibilities
 
@@ -40,9 +48,42 @@ The CLR provides:
 - reflection metadata access;
 - interoperability with unmanaged code.
 
-## How These Responsibilities Work Together
+These responsibilities are not separate features bolted together. They form one execution contract. The CLR decides what it means for managed code to be loaded, executed, checked, suspended, unwound, and observed inside a running .NET process.
 
-Example:
+A small ASP.NET Core request path shows how several CLR responsibilities can appear in one ordinary operation:
+
+```csharp
+app.MapPost("/orders/{id:int}/approve", async (
+    int id,
+    AppDbContext dbContext,
+    CancellationToken ct) =>
+{
+    var order = await dbContext.Orders.SingleOrDefaultAsync(x => x.Id == id, ct);
+
+    if (order is null)
+    {
+        return Results.NotFound();
+    }
+
+    order.Approve();
+    await dbContext.SaveChangesAsync(ct);
+    return Results.NoContent();
+});
+```
+
+Even this small endpoint depends on CLR services:
+
+- JIT compiles the endpoint path and called methods;
+- exceptions propagate through managed frames if something fails;
+- the GC tracks request-scoped allocations;
+- thread-pool workers execute continuations;
+- metadata and reflection may be used by framework components around routing, binding, and serialization.
+
+This is why the CLR is best understood as the managed execution substrate rather than as a single feature such as garbage collection.
+
+## Responsibility Flow In A Running Method
+
+For example:
 
 ```csharp
 public static int Divide(int left, int right)
@@ -74,7 +115,7 @@ This is why "CLR" is broader than "memory management."
 
 Managed code runs under CLR control.
 
-Benefits:
+This gives managed code several important properties:
 
 - memory managed by GC;
 - type safety;
@@ -82,7 +123,7 @@ Benefits:
 - runtime diagnostics;
 - cross-language support.
 
-Unmanaged code runs outside CLR memory safety guarantees. Examples include native C/C++ libraries and operating system APIs.
+Managed code therefore gains services that ordinary native code does not receive automatically. The CLR can track object references, cooperate with the GC, maintain metadata, walk call stacks, and enforce type rules at runtime. Unmanaged code runs outside those managed guarantees. Examples include native C and C++ libraries and operating-system APIs.
 
 Interop example:
 
@@ -96,13 +137,13 @@ public static partial class NativeMethods
 }
 ```
 
-In normal ASP.NET Core work, you rarely need interop, but it is useful to understand that managed code can call unmanaged code and that this affects memory/resource responsibility.
+In normal ASP.NET Core work, interop is uncommon, but the boundary matters. As soon as managed code crosses into unmanaged code, resource ownership, calling conventions, pinning, and failure modes become more explicit engineering concerns because the CLR can no longer provide all of its normal safety guarantees automatically.
 
 ## Type Safety
 
 The CLR ensures code uses types consistently.
 
-Example:
+For example:
 
 ```csharp
 object value = "hello";
@@ -115,8 +156,6 @@ if (value is string text)
 
 The runtime knows the actual type of the object.
 
-Why this matters:
-
 ```csharp
 object value = "hello";
 
@@ -124,7 +163,7 @@ object value = "hello";
 var number = (int)value;
 ```
 
-The compiler cannot always know the runtime type behind `object`, but the CLR checks it at runtime and prevents unsafe memory interpretation.
+The compiler cannot always know the runtime type behind `object`, but the CLR can still check it at runtime and prevent unsafe memory interpretation. This illustrates a broader boundary in managed execution: dynamic behavior is allowed, but arbitrary memory reinterpretation is not.
 
 ## Exception Handling
 
@@ -141,7 +180,7 @@ catch (DomainException ex)
 }
 ```
 
-Exceptions travel up the call stack until handled.
+Exceptions travel up the managed call stack until they are handled or become unhandled. The CLR participates in stack unwinding, frame cleanup, and the propagation rules that determine which handler, if any, receives the exception. This is why exception behavior is a runtime concern rather than just a language syntax feature.
 
 ## Reflection And Metadata
 
@@ -166,76 +205,16 @@ Frameworks use reflection for:
 - validation attributes;
 - testing frameworks.
 
+This file only needs the basic connection between metadata and reflection. The dedicated reflection chapter explains runtime cost, caching, source generation, and AOT-related implications in more depth. The key CLR-level idea is that metadata remains part of the execution environment, which makes runtime inspection possible.
+
 ## AppDomain And AssemblyLoadContext
 
 .NET Framework used AppDomains heavily for isolation.
 
-Modern .NET uses `AssemblyLoadContext` for assembly loading scenarios like plugins.
+Modern .NET uses `AssemblyLoadContext` for assembly loading scenarios such as plugins and custom dependency isolation.
 
-Modern .NET note:
+In modern .NET, `AssemblyLoadContext` is the main mechanism for custom assembly loading and unloading.
 
-> In modern .NET, `AssemblyLoadContext` is the main mechanism for custom assembly loading and unloading.
+The CLR is therefore the execution engine inside the broader .NET runtime. The runtime also includes hosting components and runtime libraries needed to start and run the application, while the SDK belongs to the build and authoring side. That distinction matters because many production failures happen either before the CLR exists, such as host resolution failures, or at the CLR boundary itself, such as loading, JIT, GC, and managed-unmanaged interaction problems.
 
-## Review Questions
-
-### What does CLR do?
-
-> CLR executes .NET applications and provides services such as JIT compilation, garbage collection, type safety, exception handling, thread management, and assembly loading.
-
-### What is managed code?
-
-> Managed code is code executed under CLR control, with runtime services like memory management and type safety.
-
-### Why is metadata important?
-
-> Metadata describes types, methods, attributes, and references. It enables reflection, runtime discovery, serialization, dependency injection, and tooling.
-
-### CLR vs runtime?
-
-> The CLR is the core execution engine inside the .NET runtime. The broader runtime also includes runtime libraries and hosting components needed to start and run the application.
-
-### CLR vs SDK?
-
-> The SDK is used to create, build, test, and publish applications. The CLR is used when the compiled application runs.
-
-## Common Mistakes
-
-### Mistake: Thinking CLR only does garbage collection.
-
-Why it is wrong:
-
-> GC is important, but the CLR also handles JIT compilation, type safety, exception handling, assembly loading, thread management, metadata access, and interop.
-
-Better answer:
-
-> CLR is the execution engine for .NET, not just the garbage collector.
-
-### Mistake: Confusing CLR with C# compiler.
-
-Why it is wrong:
-
-> The C# compiler turns source code into IL and metadata. The CLR runs the compiled assembly and provides runtime services.
-
-Better answer:
-
-> Roslyn compiles C#; CLR executes .NET code.
-
-### Mistake: Forgetting JIT and metadata.
-
-Why it is wrong:
-
-> IL is not directly executed by the CPU. The runtime JIT-compiles IL to native code, and metadata enables reflection, type loading, DI, serialization, and tooling.
-
-Better answer:
-
-> A complete CLR explanation should mention IL, metadata, JIT, GC, exceptions, and type safety.
-
-### Mistake: Assuming reflection has no runtime cost.
-
-Why it is wrong:
-
-> Reflection often resolves metadata and members dynamically, which is slower than normal compiled member access. Dynamic invocation can also cause boxing and extra checks.
-
-Better answer:
-
-> Reflection is powerful for frameworks, but in hot paths it should be cached or replaced with compiled delegates/source generation when needed.
+One practical consequence is that diagnostics often need the right mental boundary. A "missing runtime" startup failure points to host and deployment configuration. A type-load exception, interop marshalling problem, or unexpected GC pressure points much more directly at CLR behavior. Distinguishing those categories early makes troubleshooting much faster.

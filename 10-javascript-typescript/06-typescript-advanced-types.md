@@ -4,13 +4,6 @@
 
 TypeScript's advanced types let you model complex JavaScript behavior safely.
 
-Chinese notes:
-
-- `type narrowing`: 类型收窄.
-- `discriminated union`: 可辨识联合.
-- `mapped type`: 映射类型.
-- `conditional type`: 条件类型.
-
 ## Union Types
 
 ```ts
@@ -299,8 +292,6 @@ const statusLabels = {
 
 If a status is missing, TypeScript reports it.
 
-## Review Questions
-
 ### interface vs type?
 
 > Both can describe object shapes. `interface` can be extended and declaration-merged. `type` can represent unions, intersections, primitives, tuples, and conditional types. In application code, either can be fine; consistency matters.
@@ -312,15 +303,6 @@ If a status is missing, TypeScript reports it.
 ### What is a generic?
 
 > A generic is a type parameter that allows reusable type-safe functions or components without losing specific type information.
-
-## Common Mistakes
-
-- Using `any` everywhere.
-- Type asserting with `as` instead of validating runtime data.
-- Not enabling strict mode.
-- Duplicating backend DTOs manually without a process.
-- Making types too clever to understand.
-- Confusing TypeScript safety with runtime validation.
 
 ## Practice Task
 

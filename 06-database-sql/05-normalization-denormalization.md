@@ -1,220 +1,83 @@
-# Normalization And Denormalization
+# Normalization And Controlled Denormalization
 
 ## Core Idea
 
-Normalization reduces duplication and protects data integrity. Denormalization intentionally duplicates or reshapes data to improve read performance.
+Normalization organizes data so that each fact has one primary home, reducing duplication and update anomalies. Denormalization deliberately duplicates or reshapes data when read performance, historical accuracy, or analytical access patterns justify that cost. These are not opposing ideologies. They are design tools serving different purposes.
 
-Chinese notes:
+The important discipline is to keep denormalization intentional. Accidental duplication creates inconsistency. Deliberate duplication can improve performance or preserve business truth.
 
-- `normalization`: 范式化.
-- `denormalization`: 反范式化.
-- `redundancy`: 冗余.
+## The Purpose Of Normalization
 
-## 1NF
+Normalization is not an academic game. It exists because duplicated facts become expensive to keep correct.
 
-First Normal Form:
+If customer name is repeated in every order row, changing a customer's name means updating many rows that do not conceptually own that fact. If one of those updates is missed, the database now contains contradictory truth.
 
-- columns contain atomic values;
-- no repeating groups.
+Normalized design reduces that class of problem by moving the fact to the entity that actually owns it.
 
-Bad:
+## First Through Third Normal Form
 
-```text
-OrderId | ProductIds
-1       | "10,11,12"
-```
+The classic normal forms are useful mainly as reasoning tools.
 
-Better:
+First normal form discourages repeating groups and non-atomic columns. Instead of storing a comma-separated list of product IDs in one order row, a relational design uses an `OrderItems` table.
 
-```text
-OrderItems(OrderId, ProductId)
-```
+Second normal form matters most when composite keys are involved. A non-key attribute should depend on the full key rather than only part of it.
 
-## 2NF
+Third normal form discourages storing non-key facts that depend on other non-key facts. If `CustomerName` depends on `CustomerId`, then `Orders(OrderId, CustomerId, CustomerName)` is usually carrying a fact in the wrong place.
 
-Second Normal Form:
+In practice, experienced teams do not spend most of their time naming normal forms. They use the underlying idea: keep each fact near its real owner unless there is a deliberate reason not to.
 
-- in 1NF;
-- non-key columns depend on the whole key.
+## Historical Snapshots As Legitimate Denormalization
 
-Important for composite keys.
-
-Bad:
-
-```text
-OrderItems(OrderId, ProductId, ProductName, Quantity)
-Primary key: (OrderId, ProductId)
-```
-
-`ProductName` depends only on `ProductId`, not on the whole `(OrderId, ProductId)` key.
-
-Better:
-
-```text
-Products(ProductId, ProductName)
-OrderItems(OrderId, ProductId, Quantity)
-```
-
-## 3NF
-
-Third Normal Form:
-
-- in 2NF;
-- non-key columns do not depend on other non-key columns.
-
-Example:
-
-Bad:
-
-```text
-Orders(OrderId, CustomerId, CustomerName)
-```
-
-If customer name changes, many order rows need updates.
-
-Better:
-
-```text
-Customers(CustomerId, CustomerName)
-Orders(OrderId, CustomerId)
-```
-
-## Denormalization
-
-Sometimes duplicate data for performance or history.
-
-Example:
+A strong example of good denormalization is historical snapshot data:
 
 ```text
 OrderItems(ProductId, ProductNameSnapshot, UnitPriceSnapshot)
 ```
 
-Why:
+This duplicates product name and price, but for a valid reason. An order record often needs to preserve what the customer bought at the time of purchase, not what the current product table says today.
 
-- order history should preserve product name and price at purchase time;
-- joining Product every time may be unnecessary;
-- product name changes should not rewrite old orders.
+That is not a failure of normalization. It is a recognition that the business fact "what was sold" is not identical to the current product catalog fact "what the product is now."
 
-SQL example:
+## Read Models And Summary Tables
 
-```sql
-CREATE TABLE OrderItems
-(
-    Id INT IDENTITY PRIMARY KEY,
-    OrderId INT NOT NULL,
-    ProductId INT NOT NULL,
-    ProductNameSnapshot NVARCHAR(200) NOT NULL,
-    UnitPriceSnapshot DECIMAL(18, 2) NOT NULL,
-    Quantity INT NOT NULL
-);
-```
-
-This is intentional denormalization because order history needs the old name and price.
-
-## Read Model Denormalization
-
-For dashboards:
+Another legitimate reason to denormalize is read performance for summaries and dashboards.
 
 ```text
 DailySalesSummary(Date, TenantId, OrderCount, TotalAmount)
 ```
 
-Generated from order events or scheduled jobs.
+Such a table can support fast reporting without forcing every dashboard request to aggregate a large operational table repeatedly. The cost is that the system must now maintain consistency between the operational source and the summary projection.
 
-Table:
+That maintenance burden is the real price of denormalization.
 
-```sql
-CREATE TABLE DailySalesSummary
-(
-    SalesDate DATE NOT NULL,
-    TenantId INT NOT NULL,
-    OrderCount INT NOT NULL,
-    TotalAmount DECIMAL(18, 2) NOT NULL,
-    UpdatedAt DATETIME2 NOT NULL,
-    CONSTRAINT PK_DailySalesSummary PRIMARY KEY (SalesDate, TenantId)
-);
-```
+## Consistency Strategies For Denormalized Data
 
-Refresh query:
+Once data is duplicated intentionally, the design must answer how consistency will be maintained.
 
-```sql
-MERGE DailySalesSummary AS target
-USING
-(
-    SELECT
-        CAST(CreatedAt AS DATE) AS SalesDate,
-        TenantId,
-        COUNT(*) AS OrderCount,
-        SUM(Total) AS TotalAmount
-    FROM Orders
-    WHERE Status = 'Paid'
-      AND CreatedAt >= @From
-      AND CreatedAt < @To
-    GROUP BY CAST(CreatedAt AS DATE), TenantId
-) AS source
-ON target.SalesDate = source.SalesDate
-AND target.TenantId = source.TenantId
-WHEN MATCHED THEN
-    UPDATE SET
-        OrderCount = source.OrderCount,
-        TotalAmount = source.TotalAmount,
-        UpdatedAt = SYSUTCDATETIME()
-WHEN NOT MATCHED THEN
-    INSERT (SalesDate, TenantId, OrderCount, TotalAmount, UpdatedAt)
-    VALUES (source.SalesDate, source.TenantId, source.OrderCount, source.TotalAmount, SYSUTCDATETIME());
-```
+Common strategies include:
 
-Consistency options:
+- synchronous writes to both representations;
+- asynchronous projection updates from events;
+- scheduled rebuild or reconciliation jobs;
+- outbox-based propagation to avoid missed updates;
+- explicit staleness tracking such as `UpdatedAt`.
 
-- rebuild summaries periodically;
-- update summaries from events;
-- use outbox messages to avoid missing updates;
-- store `UpdatedAt` so stale summaries are visible;
-- compare summary totals with source data during reconciliation.
+The appropriate strategy depends on whether the read model must be strongly current, eventually consistent, or periodically refreshed.
 
-## Trade-offs
+This is why denormalization cannot be evaluated only in terms of query speed. It is also an operational consistency design.
 
-Normalization:
+## Denormalization And Query Simplicity
 
-- less duplication;
-- better integrity;
-- more joins.
+One of denormalization's real benefits is that it can simplify the query surface for common reads. That simplicity can be worth a great deal when APIs, reports, or dashboards would otherwise require repeated heavy joins and aggregations.
 
-Denormalization:
+At the same time, that benefit should be measured rather than guessed. Many schemas are denormalized prematurely because teams fear joins that the database could actually handle well with appropriate indexing and query shape.
 
-- faster reads;
-- simpler queries;
-- data duplication;
-- consistency maintenance.
+## Design Consequences
 
-## Review Questions
+Normalization is the safer default because it keeps facts centralized and reduces inconsistency risk. Denormalization becomes appropriate when one of three things is true:
 
-### What is normalization?
+- historical truth differs from current truth;
+- repeated aggregations are too expensive for the operational workload;
+- a dedicated read model materially improves performance or simplicity.
 
-> Normalization organizes data to reduce duplication and improve integrity, usually by separating entities into related tables.
-
-### When would you denormalize?
-
-> When read performance, reporting, historical snapshots, or simplified queries justify duplicated data and the team has a strategy to keep it consistent.
-
-### Is denormalization bad?
-
-> No. It is a trade-off. It becomes bad when duplication is accidental and consistency is not managed.
-
-## Common Mistakes
-
-- Over-normalizing simple read-heavy systems.
-- Denormalizing without ownership of consistency.
-- Storing comma-separated values in one column.
-- Not preserving historical price/name snapshots.
-- Assuming one design works for both OLTP and reporting.
-
-## Practice Task
-
-Design:
-
-1. normalized order schema;
-2. order item snapshot fields;
-3. daily sales summary table;
-4. process to update summary;
-5. consistency strategy.
+The moment denormalization is introduced, the system also acquires a consistency problem to solve. Mature designs accept that trade-off explicitly instead of pretending the duplicated data will remain correct by accident.

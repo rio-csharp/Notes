@@ -4,13 +4,6 @@
 
 Trees and graphs test traversal, recursion, state tracking, and problem modeling.
 
-Chinese notes:
-
-- `tree`: 树.
-- `graph`: 图.
-- `DFS`: depth-first search, 深度优先搜索.
-- `BFS`: breadth-first search, 广度优先搜索.
-
 A tree is a connected graph without cycles. A binary tree node has at most two children. A graph can have cycles, disconnected components, directed edges, or weighted edges.
 
 ## Binary Tree Node
@@ -505,33 +498,6 @@ public sealed class UnionFind
 ```
 
 Path compression and union by rank make operations almost constant in practice.
-
-## Knowledge Checks
-
-### DFS vs BFS?
-
-DFS goes deep first and is often implemented with recursion or stack. BFS explores level by level and uses a queue. BFS is good for shortest path in unweighted graphs.
-
-### How do you avoid infinite loops in graph traversal?
-
-Track visited nodes with a `HashSet`.
-
-### When do you use topological sort?
-
-Use topological sort when tasks have dependencies and we need a valid order, such as course schedule, build steps, or workflow dependencies.
-
-### Why can tree recursion cause stack overflow?
-
-A very deep tree can create many nested recursive calls. Iterative DFS with an explicit stack avoids using the call stack.
-
-## Common Mistakes
-
-- No visited set in graph.
-- Stack overflow for very deep recursion.
-- Confusing tree with graph.
-- Off-by-one in adjacency array.
-- Not handling disconnected graph.
-- Modifying collection while iterating.
 
 ## Practice Problems
 

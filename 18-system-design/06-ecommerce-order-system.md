@@ -4,13 +4,6 @@
 
 Design an e-commerce order system from cart checkout to payment, inventory, shipping, and notification.
 
-Chinese notes:
-
-- `order lifecycle`: 订单生命周期.
-- `inventory reservation`: 库存预留.
-- `saga`: 分布式事务协调模式.
-- `compensation`: 补偿操作.
-
 ## Requirements
 
 Functional:
@@ -219,29 +212,6 @@ Events:
 - `ShipmentCreated`
 
 Use outbox to publish reliably.
-
-## Knowledge Checks
-
-### How do you prevent duplicate orders?
-
-Use idempotency key, unique constraint, and return the existing order result for repeated checkout requests.
-
-### How do you avoid overselling?
-
-Use inventory reservation with transaction/concurrency control, expiration for unpaid orders, and clear compensation logic.
-
-### How do you handle payment success but order update failure?
-
-Use idempotent payment callbacks, reconciliation jobs, and durable event/outbox processing so the system can recover and eventually update order state.
-
-## Common Mistakes
-
-- No idempotency in checkout.
-- No inventory reservation expiration.
-- Treating payment provider callback as always reliable.
-- No reconciliation.
-- Distributed transaction across services without clear strategy.
-- No audit log for order state changes.
 
 ## Practice Task
 

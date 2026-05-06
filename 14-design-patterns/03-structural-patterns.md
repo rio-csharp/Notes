@@ -12,15 +12,6 @@ They are useful when you need to:
 - represent trees;
 - control access to another object.
 
-Chinese notes:
-
-- `structural pattern`: 结构型模式.
-- `adapter`: 适配器.
-- `decorator`: 装饰器.
-- `facade`: 外观.
-- `proxy`: 代理.
-- `composite`: 组合.
-
 ## Adapter
 
 Adapter converts one interface to another.
@@ -401,18 +392,3 @@ Do we need to control access to an object?
 Are we representing a tree structure?
 Does the wrapper add clarity or just another layer?
 ```
-
-## Knowledge Checks
-
-### Adapter vs facade?
-
-Adapter changes an interface to match what the application expects. Facade simplifies a complex subsystem behind a higher-level interface.
-
-### Decorator vs inheritance?
-
-Decorator uses composition and can add behavior without changing the original class or creating deep inheritance chains.
-
-### Proxy vs decorator?
-
-Proxy focuses on controlling access or representing another object. Decorator focuses on adding behavior around an object.
-

@@ -4,12 +4,6 @@
 
 Stack and queue are linear data structures with different access rules.
 
-Chinese notes:
-
-- `stack`: 栈, last-in-first-out.
-- `queue`: 队列, first-in-first-out.
-- `monotonic stack`: 单调栈.
-
 ## Stack
 
 ```csharp
@@ -309,27 +303,6 @@ public sealed class MyQueue
 ```
 
 Each element moves from `_input` to `_output` at most once, so operations are amortized `O(1)`.
-
-## Knowledge Checks
-
-### Stack vs queue?
-
-Stack is last-in-first-out. Queue is first-in-first-out.
-
-### When use monotonic stack?
-
-Use monotonic stack when finding next greater/smaller elements or maintaining a monotonic sequence while scanning.
-
-### Why does BFS usually use a queue?
-
-BFS explores nodes in the order they are discovered, level by level. A queue naturally preserves that first-in-first-out order.
-
-## Common Mistakes
-
-- Pop from empty stack.
-- Forgetting to process remaining stack.
-- Using DFS when shortest path needs BFS.
-- Not tracking level size in BFS.
 
 ## Practice Problems
 

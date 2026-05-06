@@ -4,13 +4,6 @@
 
 JavaScript is the language runtime of the browser and the foundation of React and TypeScript.
 
-Chinese notes:
-
-- `primitive`: 原始类型.
-- `object`: 对象.
-- `scope`: 作用域.
-- `hoisting`: 提升.
-
 ## Primitive Types
 
 ```ts
@@ -245,8 +238,6 @@ import formatDate from "./formatDate";
 
 Named exports are often easier to refactor because import names stay explicit.
 
-## Review Questions
-
 ### let vs const vs var?
 
 > `var` is function-scoped and hoisted. `let` and `const` are block-scoped. `const` prevents reassignment but does not make objects deeply immutable.
@@ -258,11 +249,3 @@ Named exports are often easier to refactor because import names stay explicit.
 ### Why use strict equality?
 
 > Strict equality avoids implicit type coercion and makes comparisons more predictable.
-
-## Common Mistakes
-
-- Using `var` in modern code.
-- Mutating React state objects directly.
-- Confusing `const` with immutability.
-- Using `==` unexpectedly.
-- Not understanding object reference equality.

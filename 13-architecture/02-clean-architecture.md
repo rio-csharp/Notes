@@ -4,13 +4,6 @@
 
 Clean Architecture is an approach that keeps business logic independent from frameworks, databases, and UI details.
 
-Chinese notes:
-
-- `domain`: 领域.
-- `use case`: 用例.
-- `dependency rule`: 依赖规则.
-- `infrastructure`: 基础设施.
-
 The dependency rule:
 
 ```text
@@ -464,29 +457,6 @@ public static class OrderRequestMapper
 ```
 
 Do not expose EF entities directly as API contracts. API contracts change for clients; entities change for persistence and business rules.
-
-## Knowledge Checks
-
-### What is Clean Architecture?
-
-Clean Architecture organizes code so business rules are independent from frameworks and infrastructure. Dependencies point inward, with domain at the center and infrastructure at the outside.
-
-### How is it different from layered architecture?
-
-Traditional layered architecture often allows upper layers to depend directly on lower technical layers like data access. Clean Architecture emphasizes that inner business layers define interfaces and outer infrastructure layers implement them.
-
-### Is Repository pattern always needed with EF Core?
-
-Not always. EF Core already provides repository-like behavior through `DbSet` and unit-of-work behavior through `DbContext`. A repository can be useful when it protects domain logic, hides complex persistence, or supports testing, but it can be unnecessary abstraction for simple CRUD.
-
-## Common Mistakes
-
-- Putting EF Core attributes everywhere in domain without thinking.
-- Creating generic repositories that add no value.
-- Making every use case overly abstract.
-- Putting business logic in controllers.
-- Putting business rules in SQL only.
-- Confusing Clean Architecture with folder structure only.
 
 ## Practice Task
 

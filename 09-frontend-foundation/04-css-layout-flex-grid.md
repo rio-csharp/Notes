@@ -4,12 +4,6 @@
 
 Flexbox and Grid are the main modern CSS layout systems.
 
-Chinese notes:
-
-- `Flexbox`: 一维布局.
-- `Grid`: 二维布局.
-- `responsive layout`: 响应式布局.
-
 ## Flexbox
 
 Flexbox is best for one-dimensional layout: row or column.
@@ -248,8 +242,6 @@ Two-column form:
 }
 ```
 
-## Review Questions
-
 ### Flexbox vs Grid?
 
 > Flexbox is best for one-dimensional layouts. Grid is best for two-dimensional layouts with rows and columns.
@@ -267,14 +259,6 @@ Two-column form:
 ### What does `minmax(240px, 1fr)` do?
 
 > It creates a grid column that is at least 240px and can grow to share available space.
-
-## Common Mistakes
-
-- Using flex for complex two-dimensional layout.
-- Forgetting `gap`.
-- Not handling small screens.
-- Missing `min-width: 0` in flex children.
-- Hardcoding too many widths.
 
 ## Practice Task
 

@@ -2,13 +2,6 @@
 
 This is a complete project case note you can adapt for engineering practice.
 
-Chinese notes:
-
-- `case study`: 案例研究.
-- `trade-off`: 权衡.
-- `ownership`: 主动负责.
-- `production incident`: 生产事故.
-
 ## 1. Project Summary
 
 Project:

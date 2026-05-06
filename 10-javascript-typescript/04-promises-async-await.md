@@ -4,12 +4,6 @@
 
 Promises represent asynchronous operations. `async/await` provides readable syntax over promises.
 
-Chinese notes:
-
-- `Promise`: 承诺，异步结果.
-- `resolve`: 成功完成.
-- `reject`: 失败.
-
 ## Promise Example
 
 ```ts
@@ -215,8 +209,6 @@ const result = await Promise.race([
 
 For fetch cancellation, prefer `AbortController` so the request is actually cancelled.
 
-## Review Questions
-
 ### What is a Promise?
 
 > A Promise represents a future asynchronous result that can be fulfilled or rejected.
@@ -228,14 +220,6 @@ For fetch cancellation, prefer `AbortController` so the request is actually canc
 ### Promise.all vs allSettled?
 
 > `Promise.all` rejects when any promise rejects. `Promise.allSettled` waits for all promises and returns each result status.
-
-## Common Mistakes
-
-- Forgetting to handle rejected promises.
-- Awaiting independent requests sequentially.
-- No cancellation for obsolete requests.
-- Not checking `response.ok` after fetch.
-- Swallowing errors silently.
 
 ## Practice Task
 

@@ -4,13 +4,6 @@
 
 Design a notification system that can send email, SMS, push, and in-app notifications.
 
-Chinese notes:
-
-- `notification`: 通知.
-- `provider`: 第三方服务商.
-- `retry`: 重试.
-- `dead-letter queue`: 死信队列.
-
 ## Requirements
 
 Functional:
@@ -252,30 +245,6 @@ Do:
 - avoid logging message body;
 - apply retention policy;
 - audit admin access.
-
-## Knowledge Checks
-
-### Why use queue?
-
-> Sending notifications depends on external providers and may be slow or unreliable. A queue decouples API latency from delivery and allows retry, buffering, and scaling workers independently.
-
-### How do you avoid duplicate notifications?
-
-> Use idempotency keys at API level and idempotent processing at worker level. Store delivery attempts and unique external message identifiers where possible.
-
-### How do you monitor it?
-
-> Track queue depth, delivery success rate, provider latency, retry count, dead-letter count, and per-channel failure rate.
-
-## Common Mistakes
-
-- Sending directly inside request path.
-- No retry limit.
-- No idempotency.
-- No user preference check.
-- No provider failure handling.
-- Logging sensitive message content.
-- No monitoring for dead-letter queue.
 
 ## Practice Task
 

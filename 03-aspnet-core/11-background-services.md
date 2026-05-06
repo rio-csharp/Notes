@@ -2,35 +2,13 @@
 
 ## Core Idea
 
-Background services run work outside the HTTP request path.
+Not all useful application work belongs on the HTTP request path. ASP.NET Core also hosts long-running or repeating processes that operate beside the request pipeline: queue consumers, outbox publishers, cleanup workers, schedulers, and similar background activities.
 
-Chinese notes:
+This chapter treats background services as part of the application's hosting model rather than as an afterthought. Once work moves outside the request path, the operational concerns change. Lifetime management, cancellation, retries, idempotency, multi-instance behavior, and visibility become central.
 
-- `BackgroundService`: 后台服务.
-- `IHostedService`: 托管服务.
-- `worker`: 后台工作进程.
-- `graceful shutdown`: 优雅关闭.
-- `outbox`: 发件箱模式, used to reliably publish messages after database changes.
-- `idempotency`: 幂等性, meaning repeated execution has the same final effect.
+## Hosted Services As Long-Lived Application Components
 
-Use background services for:
-
-- queue consumers;
-- scheduled cleanup;
-- outbox publishers;
-- email sending;
-- report generation;
-- file processing;
-- cache warmup;
-- periodic health checks.
-
-Key takeaway:
-
-> I use background services for work that should not block the HTTP request, but I design them with cancellation, retry, idempotency, monitoring, and multi-instance safety.
-
-## IHostedService And BackgroundService
-
-`IHostedService` is the low-level interface:
+ASP.NET Core supports hosted services through `IHostedService` and the more commonly used `BackgroundService` base type.
 
 ```csharp
 public interface IHostedService
@@ -40,8 +18,6 @@ public interface IHostedService
 }
 ```
 
-`BackgroundService` is a helper base class for long-running services:
-
 ```csharp
 public abstract class BackgroundService : IHostedService, IDisposable
 {
@@ -49,9 +25,11 @@ public abstract class BackgroundService : IHostedService, IDisposable
 }
 ```
 
-Most application workers use `BackgroundService`.
+The important idea is not the interface shape alone. Hosted services are long-lived parts of the host. They are closer to application infrastructure than to ordinary request-scoped objects. That difference drives much of the design guidance that follows.
 
-## Basic BackgroundService Example
+## A Typical Worker Loop
+
+A background worker often follows a loop of "create a unit of work, process it, handle failures, wait or continue."
 
 ```csharp
 public sealed class OutboxPublisher : BackgroundService
@@ -97,44 +75,31 @@ public sealed class OutboxPublisher : BackgroundService
 }
 ```
 
-Registration:
-
 ```csharp
 builder.Services.AddHostedService<OutboxPublisher>();
 ```
 
-## Scoped Services In BackgroundService
+This example already illustrates several deeper themes: worker loops must be cancellation-aware, should usually create scoped units of work, and must survive ordinary processing failures without silently disappearing.
 
-Hosted services are long-lived. They are effectively singleton-like.
+## Scoped Dependencies In Long-Lived Workers
 
-Do not inject scoped services directly:
+One of the most frequent design errors in background-service code is injecting scoped services directly into the long-lived worker object.
 
 ```csharp
 public sealed class BadWorker : BackgroundService
 {
-    private readonly AppDbContext _dbContext; // bad
+    private readonly AppDbContext _dbContext;
 
     public BadWorker(AppDbContext dbContext)
     {
         _dbContext = dbContext;
     }
-
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        return Task.CompletedTask;
-    }
 }
 ```
 
-Why it is wrong:
+This is risky because the worker is long-lived while `DbContext` is scoped and not thread-safe. Even if the code appears to run, it often creates stale state, excessive tracking, disposal problems, or subtle concurrency issues.
 
-- `DbContext` is scoped;
-- `DbContext` is not thread-safe;
-- a long-lived `DbContext` can track too many entities;
-- dependencies may be disposed incorrectly;
-- data can become stale.
-
-Better:
+The usual pattern is to create a scope per batch or per unit of work:
 
 ```csharp
 public sealed class GoodWorker : BackgroundService
@@ -161,51 +126,29 @@ public sealed class GoodWorker : BackgroundService
 }
 ```
 
-Practical explanation:
+This aligns dependency lifetime with actual work lifetime instead of stretching scoped infrastructure across the entire process lifetime.
 
-> I create a DI scope per unit of work or per batch, then resolve scoped services inside that scope.
+## Cancellation And Graceful Shutdown
 
-## Graceful Shutdown
-
-Background services must respect `CancellationToken`.
-
-Good:
+Background services must respect host shutdown. Cloud platforms, orchestrators, and deployment systems rely on cooperative shutdown rather than hard process termination whenever possible.
 
 ```csharp
 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 await processor.ProcessAsync(stoppingToken);
 ```
 
-Bad:
+Ignoring the supplied cancellation token produces brittle workers:
 
 ```csharp
 Thread.Sleep(TimeSpan.FromSeconds(5));
 await processor.ProcessAsync(CancellationToken.None);
 ```
 
-Why it matters:
+This is more than etiquette. Shutdown-aware workers can stop predictably, reduce data corruption risk, and avoid delaying deployments because the host is waiting for uncooperative background code to end.
 
-- deployments need to stop the app cleanly;
-- Kubernetes and cloud platforms send shutdown signals;
-- in-flight work may need to finish or stop safely;
-- ignoring cancellation can delay shutdown or cause data corruption.
+## Failure Handling Inside The Loop
 
-Pattern:
-
-```csharp
-try
-{
-    await DoWorkAsync(stoppingToken);
-}
-catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-{
-    // Expected during shutdown.
-}
-```
-
-## Error Handling In Worker Loops
-
-A common bug:
+A background worker that exits on the first ordinary exception is often operationally weak.
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -218,9 +161,7 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 }
 ```
 
-If `ProcessAsync` throws, the worker can stop permanently.
-
-Better:
+If `ProcessAsync` throws here, the worker may stop entirely. A more robust structure isolates failures and continues operating:
 
 ```csharp
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -249,17 +190,11 @@ protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 }
 ```
 
-This uses simple backoff.
+Backoff is especially important when the failure source is a downstream system. Without it, the worker may become a loop that continuously hammers an already-failing dependency.
 
-Chinese note:
+## Queue Consumers And At-Least-Once Reality
 
-> `backoff` means waiting longer after repeated failures to avoid hammering a failing dependency.
-
-## Queue Consumer Example
-
-Background services are often used as queue consumers.
-
-Conceptual interface:
+Many background services are queue consumers.
 
 ```csharp
 public interface IMessageQueue
@@ -269,8 +204,6 @@ public interface IMessageQueue
     Task AbandonAsync(QueueMessage message, CancellationToken cancellationToken);
 }
 ```
-
-Consumer:
 
 ```csharp
 public sealed class EmailQueueWorker : BackgroundService
@@ -322,39 +255,26 @@ public sealed class EmailQueueWorker : BackgroundService
 }
 ```
 
-Key point:
+Queue consumers must be designed with the assumption that the same message may arrive more than once. At-least-once delivery is a normal reliability model, not an exceptional edge case.
 
-> Queue systems often provide at-least-once delivery, which means the same message may be delivered more than once. Consumers must be idempotent.
+## Idempotency As A Worker Requirement
 
-## Idempotent Processing
-
-Problem:
+Duplicate delivery becomes dangerous when side effects are not idempotent.
 
 ```text
-Worker sends an email.
-Worker crashes before acknowledging the queue message.
-Queue redelivers the same message.
-Worker sends the email again.
+worker sends email
+worker crashes before acknowledging message
+queue redelivers message
+worker sends email again
 ```
 
-Solutions:
+Typical responses include:
 
-- store processed message IDs;
-- use business unique keys;
-- design operations to be naturally idempotent;
-- use database constraints;
-- use outbox/inbox patterns;
-- make external calls with idempotency keys if supported.
-
-Example:
-
-```csharp
-public sealed class InboxMessage
-{
-    public string MessageId { get; init; } = "";
-    public DateTime ProcessedAtUtc { get; init; }
-}
-```
+- storing processed message IDs;
+- using business-level unique keys;
+- relying on external idempotency-key support;
+- using inbox or outbox patterns;
+- designing the operation itself to be naturally repeat-safe.
 
 ```csharp
 public async Task ProcessMessageAsync(QueueMessage message, CancellationToken cancellationToken)
@@ -379,13 +299,11 @@ public async Task ProcessMessageAsync(QueueMessage message, CancellationToken ca
 }
 ```
 
-Caveat:
+Even here, the ordering of the side effect and the inbox record matters. If the external effect happens first and the process crashes before the record is stored, duplicates remain possible. Idempotency is therefore not a checkbox. It is a property of the full workflow.
 
-> If the side effect happens before saving the inbox record, a crash can still duplicate the side effect. For external calls, prefer idempotency keys when available.
+## Multi-Instance Coordination
 
-## Avoiding Duplicate Background Jobs Across Instances
-
-In production, you may run multiple app instances:
+In production, an application often runs on more than one instance. That changes the worker problem.
 
 ```text
 api-1
@@ -393,19 +311,15 @@ api-2
 api-3
 ```
 
-If each instance runs the same cleanup job, it may execute three times.
+If all three instances run the same scheduled cleanup or outbox poller without coordination, work may be duplicated or race-prone.
 
-Solutions:
+Common coordination strategies include:
 
-| Solution | When to use |
-| --- | --- |
-| Queue competing consumers | Work can be split into messages |
-| Database row claiming | Jobs are stored in DB and workers claim rows |
-| Distributed lock | Only one instance should run a job |
-| Leader election | One active scheduler at a time |
-| External scheduler | Cloud scheduler, Hangfire, Quartz, Kubernetes CronJob |
-
-Database row claiming idea:
+- competing consumers on a queue;
+- row-claiming in a database;
+- distributed locks;
+- leader election;
+- external schedulers such as Hangfire, Quartz, or platform cron systems.
 
 ```sql
 UPDATE TOP (10) OutboxMessages
@@ -416,37 +330,31 @@ WHERE Status = 'Pending'
   AND (LockedUntilUtc IS NULL OR LockedUntilUtc < SYSUTCDATETIME());
 ```
 
-The goal:
+The point of such a pattern is not database cleverness for its own sake. It is to turn a multi-instance race into an explicit coordination protocol.
 
-> Multiple workers can run safely because each worker claims a different set of rows.
+## The Outbox Pattern
 
-## Outbox Pattern
+One of the most important reliability patterns for background processing is the outbox.
 
-Problem:
-
-```text
-1. Save order to database.
-2. Publish OrderCreated message to Kafka.
-```
-
-What if the database save succeeds but publishing fails?
-
-The system becomes inconsistent.
-
-Outbox solution:
+The underlying problem is straightforward:
 
 ```text
-In the same database transaction:
-  1. Save order.
-  2. Save OutboxMessage(OrderCreated).
-
-Background worker:
-  1. Reads pending outbox messages.
-  2. Publishes them to Kafka/message broker.
-  3. Marks them as published.
+1. save order in database
+2. publish OrderCreated to message broker
 ```
 
-Example entity:
+If the database transaction succeeds but message publication fails, the system becomes inconsistent. The outbox pattern solves this by storing the outgoing message in the same database transaction as the business change, then letting a background worker publish it later.
+
+```text
+transaction:
+  save order
+  save outbox message
+
+background worker:
+  read pending outbox rows
+  publish them
+  mark them as sent
+```
 
 ```csharp
 public sealed class OutboxMessage
@@ -460,8 +368,6 @@ public sealed class OutboxMessage
     public string? LastError { get; set; }
 }
 ```
-
-Processor sketch:
 
 ```csharp
 public sealed class OutboxProcessor
@@ -504,13 +410,11 @@ public sealed class OutboxProcessor
 }
 ```
 
-Production caveat:
+The outbox is not just a data-access pattern. It is a coordination pattern between transactional data and eventually delivered side effects.
 
-> In multi-instance systems, this simple query can allow two workers to pick the same rows. Production implementations need row claiming, locks, or broker semantics.
+## Periodic Work And Scheduling Choices
 
-## Scheduling
-
-For simple periodic work, `BackgroundService` with `PeriodicTimer` is clearer than manual `Task.Delay`.
+For simple repeating work, `PeriodicTimer` often expresses intent more clearly than manually managed delay loops.
 
 ```csharp
 public sealed class CleanupWorker : BackgroundService
@@ -540,28 +444,22 @@ public sealed class CleanupWorker : BackgroundService
 }
 ```
 
-For complex scheduling, use:
+Once scheduling becomes more complex, specialized infrastructure often becomes the better choice. ASP.NET Core hosting can run workers, but it is not always the best scheduler for every workload. Cron-driven jobs, externally orchestrated scheduled tasks, or dedicated job frameworks may offer stronger guarantees and clearer operational visibility.
 
-- Hangfire;
-- Quartz.NET;
-- cloud scheduler;
-- Kubernetes CronJob;
-- Azure WebJobs / Functions.
+## Visibility And Operational Safety
 
-## Monitoring Background Services
+Background services can fail quietly if the application emits no signal about their health.
 
-Track:
+Useful signals often include:
 
 - last successful run time;
 - failure count;
 - retry count;
-- processing latency;
 - queue backlog;
-- dead-letter count;
-- items processed per minute;
-- worker health status.
-
-Example log:
+- processing latency;
+- dead-letter volume;
+- items processed per interval;
+- explicit worker health status.
 
 ```csharp
 _logger.LogInformation(
@@ -570,105 +468,4 @@ _logger.LogInformation(
     elapsedMilliseconds);
 ```
 
-Important:
-
-> A background service can fail silently if no one monitors it. Production worker design should include logs, metrics, health signals, and clear failure handling.
-
-## Review Questions
-
-### When use a background service?
-
-Use it when work should happen outside the request path, such as queue processing, scheduled cleanup, outbox publishing, report generation, or file processing.
-
-### Why not inject `DbContext` directly?
-
-Hosted services are long-lived. `DbContext` is scoped and not thread-safe. Create a scope for each unit of work and resolve `DbContext` inside that scope.
-
-### How do you avoid duplicate background processing across instances?
-
-Use queue competing consumers, database row claiming, distributed locks, leader election, or an external scheduler depending on the job.
-
-### How do you handle failures in a worker?
-
-Catch exceptions inside the loop, log them, use retry/backoff, move poison messages to a dead-letter queue, and expose metrics or health checks.
-
-### Why is idempotency important for queue consumers?
-
-Most queue systems provide at-least-once delivery. A message may be processed more than once after crashes, timeouts, or acknowledgement failures. Idempotent consumers prevent duplicate side effects.
-
-### What is the outbox pattern?
-
-The outbox pattern saves business data and an outgoing message in the same database transaction. A background worker later publishes the message and marks it as published. This avoids losing messages when database writes and message publishing cannot share one transaction.
-
-## Common Mistakes
-
-### Mistake: Ignoring cancellation token
-
-Why it is wrong:
-
-> The app may fail to shut down cleanly during deployments or scale-in events.
-
-Better answer:
-
-> Pass `CancellationToken` to async APIs and handle expected cancellation.
-
-### Mistake: Injecting scoped service directly
-
-Why it is wrong:
-
-> Hosted services are long-lived, while scoped services are designed for a scope such as a request or batch.
-
-Better answer:
-
-> Inject `IServiceScopeFactory` and create a scope per unit of work.
-
-### Mistake: No error handling in loop
-
-Why it is wrong:
-
-> One exception can stop the worker permanently.
-
-Better answer:
-
-> Catch exceptions inside the loop, log them, and use retry/backoff.
-
-### Mistake: Tight loop with no delay or backoff
-
-Why it is wrong:
-
-> It can consume CPU and overload a failing dependency.
-
-Better answer:
-
-> Use `PeriodicTimer`, queue blocking reads, or delay with backoff.
-
-### Mistake: No monitoring for failed jobs
-
-Why it is wrong:
-
-> Background failures may not affect HTTP health immediately, but business workflows can silently stop.
-
-Better answer:
-
-> Track worker metrics, logs, last success time, and dead-letter queues.
-
-### Mistake: Running heavy jobs inside API request
-
-Why it is wrong:
-
-> It increases request latency and makes user-facing operations fragile.
-
-Better answer:
-
-> Persist the request, enqueue work, and process it asynchronously when appropriate.
-
-## Practice Task
-
-Implement:
-
-1. a `BackgroundService` using `PeriodicTimer`;
-2. scoped `DbContext` resolution with `IServiceScopeFactory`;
-3. error handling with backoff;
-4. an idempotent queue consumer using processed message IDs;
-5. a simple outbox publisher;
-6. metrics/logs for success count, failure count, and last successful run.
+This is another place where observability and architecture meet. A worker that technically runs but cannot be monitored is often harder to trust in production than one whose behavior is explicit and measurable.

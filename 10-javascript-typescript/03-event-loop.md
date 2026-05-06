@@ -4,13 +4,6 @@
 
 JavaScript runs on a single main thread in the browser, but it handles asynchronous work through the event loop.
 
-Chinese notes:
-
-- `event loop`: 事件循环.
-- `call stack`: 调用栈.
-- `microtask`: 微任务.
-- `macrotask`: 宏任务.
-
 ## Key Parts
 
 - Call stack;
@@ -324,8 +317,6 @@ For frontend engineering practice, focus on browser event loop, rendering, micro
 
 For full-stack engineering practice, it is useful to know that Node's event loop has additional phases, but do not mix Node-specific behavior into browser answers unless asked.
 
-## Review Questions
-
 ### Is JavaScript single-threaded?
 
 > JavaScript execution on the browser main thread is single-threaded, but the browser provides Web APIs and the event loop to handle async work. Web Workers can run JavaScript on background threads.
@@ -341,15 +332,6 @@ For full-stack engineering practice, it is useful to know that Node's event loop
 ### Why can heavy JavaScript freeze the page?
 
 > Long synchronous work blocks the main thread, preventing rendering and input handling.
-
-## Common Mistakes
-
-- Thinking `setTimeout(..., 0)` runs immediately.
-- Forgetting promises run before timers.
-- Blocking main thread with heavy loops.
-- Doing expensive work during React render.
-- Creating an infinite microtask chain that prevents rendering.
-- Confusing browser event loop behavior with Node.js-specific phases.
 
 ## Practice Task
 

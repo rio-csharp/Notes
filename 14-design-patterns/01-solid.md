@@ -4,18 +4,6 @@
 
 SOLID is a set of object-oriented design principles for keeping code understandable, changeable, and testable.
 
-SOLID is not a rule that every class must be tiny or every dependency must have an interface. It is a way to notice unhealthy coupling（耦合）, unclear responsibility, and fragile change.
-
-Chinese notes:
-
-- `Single Responsibility Principle`: 单一职责原则.
-- `Open/Closed Principle`: 开闭原则.
-- `Liskov Substitution Principle`: 里氏替换原则.
-- `Interface Segregation Principle`: 接口隔离原则.
-- `Dependency Inversion Principle`: 依赖倒置原则.
-- `cohesion`: 内聚.
-- `coupling`: 耦合.
-
 ## S: Single Responsibility Principle
 
 A class should have one reason to change.
@@ -501,18 +489,3 @@ Do consumers depend only on methods they need?
 Does high-level policy depend on low-level technical details?
 Does the abstraction remove real coupling, or only add ceremony?
 ```
-
-## Knowledge Checks
-
-### Which SOLID principle is most related to DI?
-
-Dependency Inversion. DI is a technique for providing dependencies, while Dependency Inversion is the design principle of depending on abstractions rather than concrete implementations.
-
-### Can SOLID be overused?
-
-Yes. Too many abstractions can make code harder to understand. SOLID should reduce complexity, not create ceremony.
-
-### Why is `NotSupportedException` often a Liskov warning?
-
-Because it may mean the subtype does not actually support behavior promised by the base type or interface.
-

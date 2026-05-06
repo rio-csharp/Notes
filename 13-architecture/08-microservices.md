@@ -4,13 +4,6 @@
 
 Microservices architecture structures a system as independently deployable services around business capabilities.
 
-Chinese notes:
-
-- `service boundary`: 服务边界.
-- `distributed transaction`: 分布式事务.
-- `eventual consistency`: 最终一致性.
-- `operational complexity`: 运维复杂度.
-
 Microservices are not automatically better than monoliths.
 
 They trade code-level simplicity for organizational and operational scalability.
@@ -384,30 +377,6 @@ Microservices require:
 - service health checks.
 
 Without observability, microservices become very hard to operate.
-
-## Knowledge Checks
-
-### Microservices vs monolith?
-
-A monolith is simpler to build, deploy, and transact within. Microservices provide independent deployment and scaling but introduce distributed systems complexity. The right choice depends on team size, domain boundaries, scaling needs, and operational maturity.
-
-### How do services share data?
-
-Ideally they do not share databases directly. They communicate through APIs or events, and may maintain read models from published events.
-
-### How do you handle transactions across services?
-
-Usually through saga, outbox, idempotent consumers, and compensating actions rather than distributed database transactions.
-
-## Common Mistakes
-
-- Microservices from day one without need.
-- Entity-based service boundaries.
-- Shared database across services.
-- No tracing.
-- No retry/circuit breaker strategy.
-- Ignoring idempotency.
-- Underestimating deployment complexity.
 
 ## Practice Task
 

@@ -4,12 +4,6 @@
 
 React tests should verify user-visible behavior, not implementation details.
 
-Chinese notes:
-
-- `component test`: 组件测试.
-- `mock`: 模拟.
-- `user event`: 用户事件.
-
 ## Tools
 
 Common:
@@ -229,8 +223,6 @@ Avoid testing:
 - third-party library internals;
 - snapshots for complex UIs without purpose.
 
-## Review Questions
-
 ### What does React Testing Library encourage?
 
 > It encourages testing components the way users interact with them: by text, role, label, and visible behavior rather than implementation details.
@@ -242,15 +234,6 @@ Avoid testing:
 ### Why use MSW?
 
 > MSW mocks network requests at the request layer, making tests closer to real application behavior than mocking every API function manually.
-
-## Common Mistakes
-
-- Testing implementation details.
-- No tests for error state.
-- Overusing snapshots.
-- Mocking too deeply.
-- Tests that depend on CSS class names.
-- No accessible labels, making tests harder.
 
 ## Practice Task
 

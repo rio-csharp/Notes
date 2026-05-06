@@ -2,15 +2,43 @@
 
 ## Core Idea
 
-Exceptions represent unexpected or exceptional conditions in code.
+Exceptions are the mechanism C# uses to represent failures that interrupt normal control flow. They are not merely an error-reporting convenience. They are part of the contract between code that detects failure and code that decides whether the failure can be handled, translated, retried, or allowed to terminate the operation.
 
-Chinese notes:
+This chapter focuses on engineering discipline around exceptions: when to throw them, where to catch them, how to preserve diagnostic value, and how to map failures cleanly across domain, application, infrastructure, and API boundaries.
 
-- `exception`: 异常.
-- `stack trace`: 堆栈跟踪.
-- `custom exception`: 自定义异常.
+## Exceptions Are For Broken Normal Flow
 
-## Basic Try/Catch
+An exception should indicate that the current path cannot proceed normally. That may be because required data is missing, an invariant has been violated, a dependency call failed, or an unexpected runtime condition occurred.
+
+This is different from ordinary branching logic. If a user supplies invalid input and the application is intentionally validating that input, a result object, model-state error, or explicit conditional branch may be clearer than throwing and catching exceptions as part of routine flow. If a domain rule is violated inside a rich model, however, an exception may be the cleanest way to stop the operation immediately and prevent invalid state from spreading.
+
+```csharp
+public void Submit()
+{
+    if (Status == OrderStatus.Submitted)
+    {
+        throw new OrderAlreadySubmittedException(Id);
+    }
+
+    Status = OrderStatus.Submitted;
+}
+```
+
+The main distinction is whether the failure is part of expected conversational flow with the caller or whether it represents a broken operation that should unwind the current execution path.
+
+## Catch Only When You Can Improve The Outcome
+
+The presence of a `catch` block should usually answer a clear question: what useful thing happens here that would not happen if the exception simply continued upward?
+
+Useful reasons to catch include:
+
+- adding business or diagnostic context to logs;
+- translating an infrastructure exception into an application-level error;
+- compensating for partial work;
+- retrying a transient dependency failure;
+- mapping an exception to an API response or UI result.
+
+What usually does not help is catching an exception only to hide it or to log it repeatedly at every layer.
 
 ```csharp
 try
@@ -19,28 +47,16 @@ try
 }
 catch (NotFoundException ex)
 {
-    _logger.LogWarning(ex, "Order {OrderId} was not found", orderId);
+    _logger.LogWarning(ex, "Order {OrderId} was not found.", orderId);
     throw;
 }
 ```
 
-Catching should have a purpose.
+This catch is defensible because it adds request-specific context and still preserves the failure for higher layers that may need to translate it further. A catch block that simply logs "error happened" and swallows the exception usually destroys information while leaving the system in a less predictable state.
 
-Good reasons to catch:
+## Preserving The Original Stack Trace
 
-- add useful context to logs;
-- translate exception to an API response;
-- retry a transient failure;
-- compensate or roll back a workflow;
-- convert infrastructure errors into domain/application errors at a boundary.
-
-Bad reason:
-
-> Catching only because "exceptions look scary" usually hides real failures.
-
-## throw vs throw ex
-
-Good:
+When rethrowing, the difference between `throw;` and `throw ex;` is critical.
 
 ```csharp
 catch (Exception)
@@ -49,8 +65,6 @@ catch (Exception)
 }
 ```
 
-Bad:
-
 ```csharp
 catch (Exception ex)
 {
@@ -58,9 +72,11 @@ catch (Exception ex)
 }
 ```
 
-`throw ex` resets stack trace.
+`throw;` preserves the original stack trace. `throw ex;` resets it to the rethrow location. In layered applications, that lost stack information can turn a straightforward diagnosis into a frustrating reconstruction exercise. Unless the code is intentionally wrapping the exception in a new one, preserving the original stack should be the default.
 
-## Custom Exceptions
+## Custom Exceptions And Semantic Meaning
+
+Custom exceptions are useful when the application needs to communicate a failure category that matters to business logic, API mapping, or operational handling.
 
 ```csharp
 public sealed class DomainException : Exception
@@ -71,14 +87,7 @@ public sealed class DomainException : Exception
 }
 ```
 
-Use custom exceptions for meaningful application errors:
-
-- validation;
-- not found;
-- conflict;
-- domain rule violation.
-
-Example:
+More specific exceptions often improve clarity further:
 
 ```csharp
 public sealed class OrderAlreadySubmittedException : DomainException
@@ -93,23 +102,11 @@ public sealed class OrderAlreadySubmittedException : DomainException
 }
 ```
 
-Usage:
+This helps in three ways. It makes domain rules easier to understand in code, enables targeted handling at boundaries, and avoids collapsing every failure into `InvalidOperationException` or `Exception`. The goal is not to create dozens of novelty exception types. The goal is to give genuinely different failure modes names that the surrounding system can reason about.
 
-```csharp
-public void Submit()
-{
-    if (Status == OrderStatus.Submitted)
-    {
-        throw new OrderAlreadySubmittedException(Id);
-    }
+## Exception Filters And Selective Handling
 
-    Status = OrderStatus.Submitted;
-}
-```
-
-This makes the failure meaningful and easier to map to an API response.
-
-## Exception Filters
+Exception filters make handling more precise because they allow the code to catch only the cases it truly understands.
 
 ```csharp
 catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -118,8 +115,6 @@ catch (OperationCanceledException) when (ct.IsCancellationRequested)
 }
 ```
 
-Another example:
-
 ```csharp
 catch (SqlException ex) when (IsUniqueConstraintViolation(ex))
 {
@@ -127,13 +122,11 @@ catch (SqlException ex) when (IsUniqueConstraintViolation(ex))
 }
 ```
 
-Why filters are useful:
+This is better than catching a broad exception and then branching inside the catch block because exceptions that do not match the filter continue up the stack untouched. Filters are especially helpful when one framework exception type can represent several operational situations but only some of them should be translated.
 
-> They let you catch only the cases you can handle while allowing other exceptions of the same type to continue upward.
+## Asynchronous Exceptions And Observation
 
-## Async Exceptions
-
-Exceptions in async methods are captured in returned `Task`.
+Asynchronous methods do not throw to the caller in the same way synchronous methods do once execution has crossed an `await`. Instead, the exception is captured in the returned task and rethrown when that task is awaited.
 
 ```csharp
 try
@@ -142,157 +135,23 @@ try
 }
 catch (Exception ex)
 {
-    _logger.LogError(ex, "Work failed");
+    _logger.LogError(ex, "Work failed.");
 }
 ```
 
-Important:
+This behavior makes one pitfall especially important:
 
 ```csharp
 var task = DoWorkAsync();
 ```
 
-If you never await or observe `task`, exceptions may not be handled where you expect.
+If the task is never awaited or otherwise observed, the exception may surface too late, in the wrong place, or only through generic failure hooks. In production systems, detached asynchronous work should usually run under a durable execution model such as a background worker, job scheduler, or message consumer rather than as an unobserved task.
 
-Better:
+## Domain, Application, Infrastructure, And API Boundaries
 
-```csharp
-await DoWorkAsync();
-```
+Exception design improves when different layers of the system play distinct roles.
 
-For background jobs, let the job framework or worker catch, log, retry, and dead-letter failures.
-
-## API Error Mapping
-
-In ASP.NET Core, do not expose raw exception details to clients.
-
-Example mapping:
-
-```text
-ValidationException -> 400 Bad Request
-NotFoundException -> 404 Not Found
-ConflictException -> 409 Conflict
-UnauthorizedAccessException -> 403 Forbidden
-Unexpected Exception -> 500 Internal Server Error
-```
-
-Example shape:
-
-```csharp
-public sealed class GlobalExceptionHandler : IExceptionHandler
-{
-    private readonly ILogger<GlobalExceptionHandler> _logger;
-
-    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
-    {
-        _logger = logger;
-    }
-
-    public async ValueTask<bool> TryHandleAsync(
-        HttpContext httpContext,
-        Exception exception,
-        CancellationToken cancellationToken)
-    {
-        var statusCode = exception switch
-        {
-            ValidationException => StatusCodes.Status400BadRequest,
-            NotFoundException => StatusCodes.Status404NotFound,
-            ConflictException => StatusCodes.Status409Conflict,
-            _ => StatusCodes.Status500InternalServerError
-        };
-
-        if (statusCode == StatusCodes.Status500InternalServerError)
-        {
-            _logger.LogError(exception, "Unhandled exception.");
-        }
-
-        httpContext.Response.StatusCode = statusCode;
-
-        await httpContext.Response.WriteAsJsonAsync(new
-        {
-            title = statusCode == 500 ? "Unexpected error" : exception.Message,
-            status = statusCode,
-            traceId = httpContext.TraceIdentifier
-        }, cancellationToken);
-
-        return true;
-    }
-}
-```
-
-Key point:
-
-> Client responses should be safe and consistent. Logs should contain full diagnostic details.
-
-## Exceptions vs Validation Results
-
-Use validation results for expected user input problems.
-
-```csharp
-if (request.Quantity <= 0)
-{
-    return BadRequest("Quantity must be greater than zero.");
-}
-```
-
-Use exceptions for unexpected failures or domain rules that should interrupt the workflow.
-
-```csharp
-if (Status != OrderStatus.Draft)
-{
-    throw new DomainException("Only draft orders can be changed.");
-}
-```
-
-The boundary matters:
-
-> Inside domain code, exceptions can protect invariants. At the API boundary, map them to clear HTTP responses.
-
-## Complete Example: Domain Exception To API Response
-
-This example shows one full path:
-
-```text
-domain rule fails
-  -> domain exception is thrown
-  -> application/API boundary catches it
-  -> client receives safe ProblemDetails response
-  -> logs keep diagnostic details
-```
-
-Domain exception base type:
-
-```csharp
-public abstract class AppException : Exception
-{
-    protected AppException(string message) : base(message)
-    {
-    }
-}
-
-public sealed class NotFoundException : AppException
-{
-    public NotFoundException(string message) : base(message)
-    {
-    }
-}
-
-public sealed class ConflictException : AppException
-{
-    public ConflictException(string message) : base(message)
-    {
-    }
-}
-
-public sealed class DomainException : AppException
-{
-    public DomainException(string message) : base(message)
-    {
-    }
-}
-```
-
-Domain object:
+Inside the domain model, exceptions often protect invariants and stop invalid transitions:
 
 ```csharp
 public sealed class Order
@@ -321,17 +180,9 @@ public sealed class Order
         Status = OrderStatus.Cancelled;
     }
 }
-
-public enum OrderStatus
-{
-    Draft,
-    Submitted,
-    Shipped,
-    Cancelled
-}
 ```
 
-Application service:
+In application services, exceptions often represent missing entities, coordination failures, or propagated business failures:
 
 ```csharp
 public sealed class CancelOrderService
@@ -359,20 +210,23 @@ public sealed class CancelOrderService
 }
 ```
 
-ASP.NET Core endpoint:
+At infrastructure boundaries, low-level exceptions may need translation so that the rest of the application is not tightly coupled to vendor-specific failure details.
 
-```csharp
-app.MapPost("/orders/{id:int}/cancel", async (
-    int id,
-    CancelOrderService service,
-    CancellationToken ct) =>
-{
-    await service.CancelAsync(id, ct);
-    return Results.NoContent();
-});
+At API boundaries, exceptions should be converted into safe and consistent client responses rather than leaked directly.
+
+This layered view keeps rich internal semantics while preventing infrastructure noise or raw stack traces from becoming part of the external contract.
+
+## Mapping Exceptions To API Responses
+
+In ASP.NET Core, centralized exception handling is usually the cleanest place to translate exceptions into HTTP semantics.
+
+```text
+ValidationException -> 400 Bad Request
+NotFoundException -> 404 Not Found
+ConflictException -> 409 Conflict
+UnauthorizedAccessException -> 403 Forbidden
+Unexpected Exception -> 500 Internal Server Error
 ```
-
-Central exception handler:
 
 ```csharp
 public sealed class GlobalExceptionHandler : IExceptionHandler
@@ -399,14 +253,7 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
         if (statusCode == StatusCodes.Status500InternalServerError)
         {
-            _logger.LogError(exception, "Unhandled exception");
-        }
-        else
-        {
-            _logger.LogInformation(
-                exception,
-                "Handled application exception with status {StatusCode}",
-                statusCode);
+            _logger.LogError(exception, "Unhandled exception.");
         }
 
         httpContext.Response.StatusCode = statusCode;
@@ -426,24 +273,35 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 }
 ```
 
-Registration:
+This keeps internal diagnostics rich while ensuring clients receive stable and non-sensitive response shapes. It also prevents controllers and endpoints from duplicating exception-to-response mapping logic repeatedly.
+
+## Exceptions Versus Validation Results
+
+One of the more subtle design choices is deciding whether a failure should be represented as an exception or as a normal result.
+
+For boundary validation, explicit results are often clearer:
 
 ```csharp
-builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
-builder.Services.AddProblemDetails();
-
-var app = builder.Build();
-
-app.UseExceptionHandler();
+if (request.Quantity <= 0)
+{
+    return BadRequest("Quantity must be greater than zero.");
+}
 ```
 
-Key point:
+For internal rule enforcement, exceptions often preserve stronger invariants:
 
-> Exceptions can be rich and specific inside the application, while HTTP responses stay safe, consistent, and easy for clients to handle.
+```csharp
+if (Status != OrderStatus.Draft)
+{
+    throw new DomainException("Only draft orders can be changed.");
+}
+```
 
-## Complete Example: Retry Only Transient Failures
+The difference is largely about ownership. At the system boundary, the application is often negotiating with imperfect caller input. Inside the model, it is preserving correctness. Those are related but distinct concerns, and using one mechanism for both can blur intent.
 
-Do not retry every exception. Retry only failures that are likely to succeed later.
+## Retrying Only Transient Failures
+
+Retries belong to exception handling, but only for failures that are likely to succeed later.
 
 ```csharp
 public async Task<string> GetWithSimpleRetryAsync(
@@ -473,83 +331,17 @@ public async Task<string> GetWithSimpleRetryAsync(
 }
 ```
 
-Important:
+This works because the handled failures are plausibly transient. Validation failures, authorization failures, and invariant violations are different. Retrying them only repeats a guaranteed failure. In production systems, resilience libraries such as Polly often provide a stronger and more observable approach, but the design principle remains the same: retry based on failure semantics, not on the mere existence of an exception.
 
-- do not retry validation errors;
-- do not retry authorization failures;
-- make writes idempotent before retrying them;
-- use a library such as Polly for production-grade retry, timeout, and circuit breaker policies.
+## Cancellation Is Not The Same As Failure
 
-## Review Questions
+Cancellation deserves separate treatment from ordinary failure because it often indicates that the system behaved correctly in response to caller intent or shutdown.
 
-### When should you catch exceptions?
+```csharp
+catch (OperationCanceledException) when (ct.IsCancellationRequested)
+{
+    _logger.LogInformation("Operation was cancelled.");
+}
+```
 
-> Catch exceptions when you can add meaningful handling: translate to user response, retry, compensate, log with context, or recover. Do not catch just to hide errors.
-
-### Why is `throw;` better than `throw ex;`?
-
-> `throw;` preserves the original stack trace. `throw ex;` resets it and makes debugging harder.
-
-### Should exceptions be used for normal control flow?
-
-> Usually no. Exceptions are expensive and should represent exceptional conditions, not expected branches.
-
-### How should APIs handle unexpected exceptions?
-
-> Log the full exception internally, return a safe `500` response with a trace ID, and avoid leaking stack traces or connection strings to the client.
-
-### How do you handle cancellation exceptions?
-
-> Treat expected cancellation differently from failure. If the request was cancelled, log at a lower level or not at all depending on policy, and avoid reporting it as an application error.
-
-## Common Mistakes
-
-### Mistake: Swallowing exceptions.
-
-Why it is wrong:
-
-> The system fails silently, making production issues hard to detect and debug.
-
-Better answer:
-
-> Handle the exception meaningfully or let it bubble to centralized error handling.
-
-### Mistake: Catching all exceptions and returning success.
-
-Why it is wrong:
-
-> It lies to callers and can corrupt workflows. A failed payment, file upload, or database write should not look successful.
-
-Better answer:
-
-> Return the correct error response or retry/compensate when appropriate.
-
-### Mistake: Logging and rethrowing everywhere causing duplicate logs.
-
-Why it is wrong:
-
-> The same error appears many times, making incidents noisy and harder to understand.
-
-Better answer:
-
-> Log where useful context exists or at the top-level handler, not blindly at every layer.
-
-### Mistake: Exposing internal exception details to clients.
-
-Why it is wrong:
-
-> Stack traces, SQL details, paths, and configuration values can leak implementation or security-sensitive information.
-
-Better answer:
-
-> Return safe error messages with trace IDs; keep details in logs.
-
-### Mistake: Using exceptions for common validation flow.
-
-Why it is wrong:
-
-> Expected input errors are normal control flow and can be represented clearly as validation results.
-
-Better answer:
-
-> Use validation for predictable user mistakes; use exceptions for exceptional or invariant-breaking situations.
+Treating all cancellations as errors can distort logs, metrics, and alerts. In asynchronous systems especially, distinguishing between "the work failed" and "the work was no longer needed" is operationally important.

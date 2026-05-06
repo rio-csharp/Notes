@@ -4,13 +4,6 @@
 
 Elasticsearch and OpenSearch are search engines built around inverted indexes.
 
-Chinese notes:
-
-- `inverted index`: 倒排索引.
-- `document`: 文档.
-- `shard`: 分片.
-- `analyzer`: 分词器.
-
 ## Use Cases
 
 - full-text search;
@@ -98,12 +91,6 @@ Search engines can also store metadata such as:
 - term positions;
 - offsets for highlighting;
 - doc values for sorting and aggregations.
-
-Chinese notes:
-
-- `term frequency`: 词频.
-- `document frequency`: 文档频率.
-- `doc values`: 面向排序/聚合的列式存储结构.
 
 Engineering perspective:
 
@@ -252,8 +239,6 @@ But too many shards hurt:
 
 Chinese note:
 
-- `replica`: 副本.
-
 Practical explanation:
 
 > Shards are not free. I choose shard count based on data size, query load, growth, and operational constraints. Too few shards limit scale; too many shards create overhead.
@@ -263,8 +248,6 @@ Practical explanation:
 Elasticsearch is near real-time, not instantly consistent.
 
 Chinese note:
-
-- `near real-time`: 近实时.
 
 Simplified write path:
 
@@ -306,8 +289,6 @@ You do not need to derive the formula in most full-stack engineering practice, b
 
 BM25 considers:
 
-- how often the term appears in the document;
-- how rare the term is across all documents;
 - document length normalization.
 
 Example:
@@ -645,50 +626,6 @@ Check:
 - phrase queries;
 - business ranking signals;
 - spelling/fuzzy settings.
-
-## Knowledge Checks
-
-### Why use Elasticsearch instead of SQL LIKE?
-
-> Elasticsearch is designed for full-text search, relevance scoring, analyzers, inverted indexes, fuzzy search, and aggregations at scale. SQL LIKE is limited and often inefficient for complex search.
-
-### Is Elasticsearch source of truth?
-
-> Usually no. It is typically a derived read model. The primary database remains the source of truth.
-
-### How do you keep search index updated?
-
-> Use events/outbox, CDC, or scheduled indexing. Accept eventual consistency and provide reindex capability.
-
-### What is the difference between `text` and `keyword`?
-
-> `text` is analyzed and used for full-text search. `keyword` is kept as an exact value and used for filtering, sorting, aggregations, IDs, status, and category fields.
-
-### Why should you avoid deep `from/size` pagination?
-
-> Deep pagination forces the engine to gather and sort many skipped results, often across shards. For deep user pagination, `search_after` with stable sorting is usually better. For batch export, scroll or point-in-time style approaches are more appropriate.
-
-### Why is Elasticsearch near real-time?
-
-> Newly indexed documents become visible to search after a refresh creates searchable segments. This usually happens quickly, but not necessarily immediately after the write.
-
-### How do you change a mapping safely?
-
-> I create a new versioned index with the new mapping, backfill from the source of truth, keep it updated, validate it, then switch an alias. This gives a rollback path.
-
-## Common Mistakes
-
-- Treating search index as transactional source of truth.
-- Wrong field mapping.
-- Deep pagination.
-- No reindex strategy.
-- No alias strategy.
-- Indexing sensitive data unnecessarily.
-- Using `term` query on analyzed `text` fields.
-- Forgetting tenant filters in backend search queries.
-- Forcing refresh after every write.
-- Choosing too many shards.
-- Ignoring indexing lag and failed indexing events.
 
 ## Practice Task
 

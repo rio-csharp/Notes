@@ -4,15 +4,6 @@
 
 ASP.NET Core is built on HTTP. Good backend engineering requires understanding HTTP semantics, not just framework attributes.
 
-Chinese notes:
-
-- `request`: 请求.
-- `response`: 响应.
-- `header`: 请求/响应头.
-- `status code`: 状态码.
-- `TCP sticky packet`: TCP 粘包.
-- `TCP half packet`: TCP 半包.
-
 ## TCP, HTTP, And Application Protocols
 
 HTTP is an application-layer protocol. TCP is a transport-layer protocol.
@@ -27,9 +18,7 @@ HTTP request/response
   -> parsed back into HTTP messages
 ```
 
-Important Key point:
-
-> TCP is a byte stream, not a message protocol.
+TCP is a byte stream, not a message protocol.
 
 This means TCP does not preserve your application-level "message boundaries".
 
@@ -128,9 +117,6 @@ Production notes:
 
 These names are common in Chinese engineering practice:
 
-- sticky packet（粘包）: multiple application messages arrive together in one read;
-- half packet（半包）: one application message arrives split across multiple reads.
-
 More precise English wording:
 
 - TCP stream coalescing;
@@ -190,8 +176,6 @@ Key idea:
 > The network is allowed to split or combine bytes. Your application protocol must define how to find complete messages.
 
 ## How To Solve Sticky/Half Packet Problems
-
-Use message framing（消息边界设计）.
 
 Common framing strategies:
 
@@ -259,9 +243,7 @@ Prefer existing protocols when possible:
 - gRPC uses HTTP/2 framing;
 - Kafka has its own binary protocol framing.
 
-Engineering perspective:
-
-> TCP sticky and half packet problems are not bugs in TCP. They happen because TCP is a byte stream. The solution is to design proper message framing, such as delimiter, length-prefix, fixed-length, or using an existing framed protocol like HTTP/WebSocket/gRPC.
+TCP sticky and half-packet problems are not bugs in TCP. They happen because TCP is a byte stream. The solution is to design proper message framing, such as delimiter-based framing, length-prefix framing, fixed-length messages, or using an existing framed protocol such as HTTP, WebSocket, or gRPC.
 
 ## Simple Length-Prefix Parser Mental Model
 
@@ -291,8 +273,6 @@ while (true)
     }
 }
 ```
-
-Important:
 
 - keep an accumulated buffer;
 - parse only complete messages;
@@ -436,8 +416,6 @@ Safe:
 - should not change server state.
 - `GET` should be safe.
 
-Idempotent（幂等）:
-
 - repeated requests have same effect.
 - `GET`, `PUT`, and `DELETE` are generally idempotent by design.
 
@@ -462,9 +440,7 @@ POST /api/payments
 Idempotency-Key: payment-user-42-cart-99
 ```
 
-Key point:
-
-> HTTP method semantics are not just style. They affect retries, caching, browser behavior, proxies, and client expectations.
+HTTP method semantics are not just stylistic conventions. They affect retries, caching, browser behavior, proxies, and client expectations.
 
 ## Status Codes
 
@@ -595,108 +571,16 @@ builder.Services.AddCors(options =>
 app.UseCors("Frontend");
 ```
 
-Important:
+CORS protects browsers. It is not a replacement for authentication or authorization, and it does not block server-to-server calls.
 
-> CORS protects browsers. It is not a replacement for authentication or authorization. Server-to-server calls are not blocked by browser CORS.
+## HTTP Design Notes
 
-## Review Questions
+HTTP status codes should communicate server intent precisely. `401 Unauthorized` means the request is not authenticated or presents invalid credentials. `403 Forbidden` means the user is authenticated but still not permitted to perform the requested action.
 
-### 401 vs 403?
+`POST` is typically used to create resources or trigger non-idempotent actions. `PUT` usually replaces a resource representation and should be idempotent. That distinction matters when clients retry requests and when APIs communicate resource semantics clearly.
 
-> 401 means the user is not authenticated or token is invalid. 403 means the user is authenticated but not allowed.
+CORS preflight is the browser's `OPTIONS` probe that checks whether a cross-origin request is allowed before the real request is sent. Because CORS is enforced by browsers rather than by the API protocol itself, it should never be treated as the application's true security boundary. APIs still need authentication, authorization, rate limiting, and input validation.
 
-### POST vs PUT?
+Validation failures commonly return `400 Bad Request` or, in some API styles, `422 Unprocessable Entity`. In ASP.NET Core APIs using `[ApiController]`, invalid model state usually maps to `400`, which makes that status code the most common default.
 
-> POST is commonly used to create resources or trigger non-idempotent actions. PUT usually replaces a resource and should be idempotent.
-
-### What is CORS preflight?
-
-> A browser sends an OPTIONS request before certain cross-origin requests to check whether the real request is allowed.
-
-### What are TCP sticky packet and half packet problems?
-
-> TCP is a byte stream, so one application message may be split across multiple reads, or multiple application messages may arrive in one read. The fix is message framing, such as delimiter-based framing, length-prefix framing, fixed-length messages, or using an existing protocol like HTTP, WebSocket, or gRPC.
-
-### Why does ASP.NET Core usually not expose sticky packet problems?
-
-> Kestrel parses HTTP for you. HTTP defines message boundaries with headers, content length, chunking, and framing. You usually face sticky/half packet issues only when implementing custom socket protocols or lower-level networking.
-
-### What status code should validation failure return?
-
-> Common choices are `400 Bad Request` or `422 Unprocessable Entity`, depending on API style. In ASP.NET Core with `[ApiController]`, invalid model state commonly returns `400`.
-
-### Is CORS an API security boundary?
-
-> No. CORS is enforced by browsers. APIs still need authentication, authorization, rate limiting, and input validation.
-
-## Common Mistakes
-
-### Mistake: Using GET for state-changing actions.
-
-Why it is wrong:
-
-> `GET` is expected to be safe. Browsers, crawlers, proxies, and caches may treat it differently.
-
-Better answer:
-
-> Use `POST`, `PUT`, `PATCH`, or `DELETE` for state changes based on operation semantics.
-
-### Mistake: Returning 200 for every result.
-
-Why it is wrong:
-
-> Clients cannot reliably distinguish validation errors, auth failures, conflicts, and server errors.
-
-Better answer:
-
-> Use meaningful HTTP status codes and consistent error responses.
-
-### Mistake: Ignoring idempotency.
-
-Why it is wrong:
-
-> Retries can create duplicate payments, orders, or messages.
-
-Better answer:
-
-> Design retry-sensitive operations with idempotency keys or natural idempotent semantics.
-
-### Mistake: Not setting content type correctly.
-
-Why it is wrong:
-
-> The server may not bind or parse the request body correctly.
-
-Better answer:
-
-> Set `Content-Type` for request bodies and `Accept` when the client expects a specific response format.
-
-### Mistake: Confusing browser CORS with server-to-server security.
-
-Why it is wrong:
-
-> CORS is enforced by browsers. A malicious script outside a browser or a server-to-server client is not stopped by CORS.
-
-Better answer:
-
-> Use CORS for browser access control and real auth controls for API security.
-
-### Mistake: Assuming one socket read equals one complete application message.
-
-Why it is wrong:
-
-> TCP is a byte stream. Reads can split or combine application messages.
-
-Better answer:
-
-> Use message framing or an existing protocol.
-
-### Mistake: Building a custom TCP protocol without message framing.
-
-Why it is wrong:
-
-> The receiver cannot reliably know where one message ends and the next begins.
-
-Better answer:
-
-> Use delimiter, length-prefix, fixed-size framing, or a mature framed protocol.
+TCP sticky-packet and half-packet problems exist because TCP is a byte stream rather than a message protocol. One logical message may span several reads, and several logical messages may arrive in one read. ASP.NET Core applications usually do not face this directly because Kestrel handles HTTP framing, including content length, chunking, and header parsing. Those lower-level concerns matter more when implementing custom socket protocols or transport layers directly.

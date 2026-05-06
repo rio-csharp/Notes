@@ -4,14 +4,6 @@
 
 Docker packages an application and its runtime dependencies into an image that can run consistently across environments.
 
-Chinese notes:
-
-- `image`: 镜像.
-- `container`: 容器.
-- `multi-stage build`: 多阶段构建.
-- `layer`: 镜像层.
-- `volume`: 卷.
-
 ## Image vs Container
 
 Image:
@@ -204,28 +196,3 @@ docker build -t myregistry/orders-api:git-abc1234 .
 ```
 
 Avoid deploying `latest` to production because it is ambiguous.
-
-## Common Mistakes
-
-- Putting secrets into images.
-- Running as root unnecessarily.
-- Huge images.
-- No health checks.
-- Not using `.dockerignore`.
-- Different config between local and production.
-- Using `latest` as the production deployment tag.
-- Assuming `depends_on` means the dependency is ready without health checks.
-
-## Knowledge Checks
-
-### Why use multi-stage builds?
-
-Multi-stage builds keep the final image smaller and safer by using SDK/build tools only during build, then copying published output into a runtime image.
-
-### Container vs virtual machine?
-
-Containers share the host OS kernel and package application dependencies. VMs include a full guest OS. Containers are usually lighter and faster to start.
-
-### Why avoid secrets in images?
-
-Images are stored, copied, scanned, and cached. A secret baked into an image can leak even if later removed from a container environment.

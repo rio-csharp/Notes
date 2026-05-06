@@ -4,13 +4,6 @@
 
 React rendering is the process of turning component state and props into UI.
 
-Chinese notes:
-
-- `render`: 渲染.
-- `reconciliation`: 协调，比较新旧 UI 树.
-- `commit`: 提交到真实 DOM.
-- `stale closure`: 陈旧闭包.
-
 ## Render Does Not Always Mean DOM Update
 
 When a component renders, React calls the component function again.
@@ -454,8 +447,6 @@ function OrdersPage() {
 }
 ```
 
-## Review Questions
-
 ### What causes a React component to re-render?
 
 > A component re-renders when its state changes, its parent renders and passes new props, context it consumes changes, or an external store subscription updates.
@@ -475,19 +466,6 @@ function OrdersPage() {
 ### How do you optimize React rendering?
 
 > First measure. Then reduce unnecessary state changes, keep state close to where it is used, split components, use stable keys, memoize expensive calculations, use `React.memo` carefully, virtualize large lists, and avoid recreating heavy objects unnecessarily.
-
-## Common Mistakes
-
-- Side effects during render.
-- Missing dependencies in `useEffect`.
-- Overusing `useEffect` for derived state.
-- Using index as key for dynamic lists.
-- Putting all state in global state.
-- Overusing memoization.
-- Not handling loading, error, and empty states.
-- Copying props into state without a synchronization strategy.
-- Assuming concurrent rendering means multi-threaded JavaScript.
-- Performing expensive work during render without measuring.
 
 ## Practice Task
 

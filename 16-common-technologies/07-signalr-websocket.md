@@ -4,13 +4,6 @@
 
 SignalR is a .NET library for real-time communication. It uses WebSocket when available and falls back to other transports when needed.
 
-Chinese notes:
-
-- `real-time`: 实时.
-- `WebSocket`: 双向通信协议.
-- `hub`: SignalR 通信中心.
-- `backplane`: 背板，用于多实例消息广播.
-
 ## Under The Hood: WebSocket Handshake
 
 WebSocket starts as an HTTP request and upgrades the connection.
@@ -337,29 +330,6 @@ Reliable notification pattern:
 ```
 
 This combines durable storage with real-time delivery.
-
-## Knowledge Checks
-
-### WebSocket vs HTTP?
-
-> HTTP is request-response. WebSocket provides persistent bidirectional communication, useful for real-time updates.
-
-### What does SignalR add?
-
-> SignalR abstracts real-time transports, provides hubs, groups, automatic reconnect support, and integration with ASP.NET Core.
-
-### How do you scale SignalR?
-
-> Use a backplane like Redis or a managed service like Azure SignalR so messages can reach clients connected to different server instances.
-
-## Common Mistakes
-
-- Using SignalR for everything instead of normal HTTP.
-- Not handling reconnect.
-- No scale-out plan.
-- No authorization for hub methods.
-- Sending sensitive data to wrong group.
-- No message persistence for important events.
 
 ## Practice Task
 
