@@ -125,6 +125,17 @@ async function extractTitle(filePath, fallbackTitle) {
   return match ? match[1].trim() : fallbackTitle;
 }
 
+async function readFileForBook(file) {
+  let content = await readFile(file.fullPath, "utf8");
+  // Files with END_BOOK marker only contribute their book-relevant portion.
+  const marker = "<!-- END_BOOK -->";
+  const idx = content.indexOf(marker);
+  if (idx !== -1) {
+    content = content.slice(0, idx).trimEnd();
+  }
+  return content;
+}
+
 async function buildCombinedMarkdown(files) {
   const sections = [];
 
@@ -141,7 +152,7 @@ async function buildCombinedMarkdown(files) {
   }
 
   for (const file of files) {
-    const content = await readFile(file.fullPath, "utf8");
+    const content = await readFileForBook(file);
     sections.push("");
     sections.push("\\newpage");
     sections.push("");

@@ -1,11 +1,5 @@
 # .NET Platform Overview
 
-This is a book about building production software with .NET. It covers the full stack: the .NET platform and C# language fundamentals, ASP.NET Core for web services, Entity Framework Core for data access, SQL and database design, API engineering, security, frontend development with React and TypeScript, software architecture and design patterns, data structures and algorithms, common middleware and technologies, performance and scalability, system design, DevOps and cloud infrastructure, testing and quality assurance, production troubleshooting, and engineering decision-making.
-
-The chapters are organized to build on each other. The .NET platform and C# chapters establish the foundation. ASP.NET Core, dependency injection, and data access build the backend. SQL, API design, and security round out the service layer. The frontend chapters cover HTML, CSS, JavaScript/TypeScript, and React. Architecture, design patterns, and system design connect code structure to system qualities. DevOps, testing, troubleshooting, and business scenarios prepare the reader for production reality. Each section ends with a recap that connects the material to the broader engineering picture.
-
-This book is written for professional software engineers who want to understand not only how .NET features work, but why they are designed the way they are and when to choose one approach over another. The focus is on mechanism, trade-offs, and operational consequences — not on API reference lists.
-
 The .NET platform is a modern, cross-platform development stack that spans web APIs, desktop applications, cloud services, background workers, mobile apps, games, and command-line tools. This chapter establishes the platform map: what each major component does, how they relate, and why the boundaries between them matter for both development and production operation.
 
 ## Platform Layers

@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IGNORE = {".git", ".github", ".claude", "node_modules", "dist", "tools"}
+SKIP_FILES = {"README.md", "BOOK_EDITING_STANDARD.md"}
 
 DELETE_FILES: set[str] = set()
 
@@ -49,6 +50,8 @@ def iter_markdown_files() -> list[Path]:
     files = []
     for path in sorted(ROOT.rglob("*.md")):
         if any(part in IGNORE for part in path.parts):
+            continue
+        if path.name in SKIP_FILES:
             continue
         files.append(path)
     return files
