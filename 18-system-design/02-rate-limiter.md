@@ -151,8 +151,6 @@ Requests leave at a steady rate.
 
 Good for smoothing traffic.
 
-Trade-off:
-
 - can add queueing delay;
 - may reject when queue is full.
 

@@ -250,6 +250,6 @@ These trade-offs mean deployment mode is both an engineering decision and an ope
 
 None of these choices is universally correct. The right deployment mode depends on the operational context: who patches the runtime, how containers are built and deployed, what cold-start budgets exist, and whether multiple applications share a single host.
 
---- 
+---
 
 The SDK builds and publishes the application. The host locates and starts the runtime. The CLR takes over once managed execution begins. The BCL provides the API surface. Deployment choices determine how much of that execution environment travels with the application and how much is expected to already exist on the target machine.

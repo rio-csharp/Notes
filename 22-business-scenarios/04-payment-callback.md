@@ -406,5 +406,3 @@ _logger.LogInformation(
     evt.EventId,
     payment.Id);
 ```
-
-

@@ -174,7 +174,6 @@ WHERE CreatedAt >= '2026-01-01'
   AND CreatedAt < '2027-01-01';
 ```
 
-
 ## EF Core Query Shape
 
 Risky query:
@@ -515,5 +514,3 @@ Depending on cause:
 - use pagination or reduce payload.
 
 Do not increase timeout blindly. Longer timeout can make saturation worse.
-
-

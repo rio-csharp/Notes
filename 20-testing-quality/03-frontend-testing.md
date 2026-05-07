@@ -395,5 +395,3 @@ High-value frontend tests:
 - accessible labels and roles;
 - disabled/enabled states;
 - optimistic update rollback.
-
-

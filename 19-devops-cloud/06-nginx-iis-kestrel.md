@@ -456,5 +456,3 @@ Health endpoints should not expose secrets, stack traces, or internal dependency
 | WebSocket disconnects | missing upgrade headers or idle timeout |
 | SPA route refresh returns 404 | no `try_files` fallback to `index.html` |
 | Auth callback fails | wrong host/scheme behind proxy |
-
-

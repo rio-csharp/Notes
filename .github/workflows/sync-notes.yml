@@ -50,7 +50,7 @@ jobs:
         run: |
           ARCHIVE="$RUNNER_TEMP/notes-${GITHUB_SHA}.tgz"
           REMOTE_DIR="/tmp/notes-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test"
-          tar --exclude='.git' --exclude='.github' --exclude='README.md' -czf "$ARCHIVE" .
+          tar --exclude='.git' --exclude='.github' --exclude='.claude' --exclude='node_modules' --exclude='dist' --exclude='README.md' --exclude='BOOK_EDITING_STANDARD.md' -czf "$ARCHIVE" .
           ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
           scp -P "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$ARCHIVE" "$SSH_USER@$SSH_HOST:$REMOTE_DIR/notes.tgz"
           ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \
@@ -126,7 +126,7 @@ jobs:
         run: |
           ARCHIVE="$RUNNER_TEMP/notes-${GITHUB_SHA}.tgz"
           REMOTE_DIR="/tmp/notes-sync-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production"
-          tar --exclude='.git' --exclude='.github' --exclude='README.md' -czf "$ARCHIVE" .
+          tar --exclude='.git' --exclude='.github' --exclude='.claude' --exclude='node_modules' --exclude='dist' --exclude='README.md' --exclude='BOOK_EDITING_STANDARD.md' -czf "$ARCHIVE" .
           ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" "mkdir -p '$REMOTE_DIR'"
           scp -P "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$ARCHIVE" "$SSH_USER@$SSH_HOST:$REMOTE_DIR/notes.tgz"
           ssh -p "$SSH_PORT" -o StrictHostKeyChecking=accept-new "$SSH_USER@$SSH_HOST" \

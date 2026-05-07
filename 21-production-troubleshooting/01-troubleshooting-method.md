@@ -463,5 +463,3 @@ Weak action item:
 ```text
 Be more careful next time.
 ```
-
-

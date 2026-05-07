@@ -444,5 +444,3 @@ The reviewer should:
 - separate blocking issues from suggestions;
 - approve only when comfortable with the risk;
 - ask for context when unclear.
-
-

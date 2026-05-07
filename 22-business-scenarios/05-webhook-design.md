@@ -398,5 +398,3 @@ _logger.LogInformation(
 ```
 
 Avoid logging full payloads when they may contain sensitive data.
-
-

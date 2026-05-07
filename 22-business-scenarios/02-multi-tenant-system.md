@@ -492,5 +492,3 @@ var blobName = $"tenants/{tenantId:N}/orders/{orderId}/files/{fileId:N}.pdf";
 ```
 
 (For a comprehensive treatment of authentication and authorization, see Chapter 8. For API contract patterns including pagination, filtering, and DTO design, see Chapter 7.)
-
-

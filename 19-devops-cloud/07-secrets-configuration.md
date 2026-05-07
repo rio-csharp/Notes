@@ -526,5 +526,3 @@ Can secrets be rotated?
 Are frontend values non-secret?
 Are environment-specific values documented?
 ```
-
-

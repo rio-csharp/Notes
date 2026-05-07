@@ -269,8 +269,6 @@ Segment merge:
 - reduces search overhead;
 - can consume I/O and CPU.
 
-Common misconception:
-
 > If you index a document and immediately search for it, it may not appear until refresh. That is expected behavior unless you force refresh or read by ID from the realtime get path.
 
 ## Relevance Scoring And BM25

@@ -599,5 +599,3 @@ This reduces the risk of leaked permanent credentials.
 | Rollback fails | Database changed incompatibly | Expand-contract migrations |
 | Production uses untested code | Rebuilt during deploy | Build once, promote artifact |
 | Secrets appear in logs | Echoing env vars or verbose tools | Mask secrets and reduce logging |
-
-

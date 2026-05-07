@@ -167,8 +167,6 @@ INCLUDE (OrderNumber, TotalAmount);
 
 This can avoid key lookups.
 
-Trade-off:
-
 - faster reads for that query;
 - more storage;
 - slower writes;

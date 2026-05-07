@@ -532,5 +532,3 @@ Large exports should use streaming and permission checks.
 - debounce search;
 - avoid unnecessary frontend re-renders;
 - use virtualization only when truly needed.
-
-

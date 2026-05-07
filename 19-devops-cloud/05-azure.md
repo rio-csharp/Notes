@@ -34,8 +34,6 @@ Good for:
 - simple scaling;
 - built-in TLS, deployment slots, health checks, and app settings.
 
-Trade-off:
-
 - less control than Kubernetes;
 - not ideal for complex multi-container orchestration.
 
@@ -47,8 +45,6 @@ Good for:
 - scale-to-zero or event-driven scaling;
 - simpler operations than AKS;
 - background processing with container jobs.
-
-Trade-off:
 
 - fewer low-level controls than Kubernetes;
 - requires container image build and registry.
@@ -62,8 +58,6 @@ Good for:
 - many services with shared platform patterns;
 - teams already able to operate Kubernetes.
 
-Trade-off:
-
 - more operational complexity;
 - cluster upgrades, networking, policies, and monitoring require discipline.
 
@@ -75,8 +69,6 @@ Good for:
 - integrated global hosting;
 - simple GitHub-based deployment;
 - optional serverless APIs.
-
-Trade-off:
 
 - dynamic server behavior must live elsewhere.
 
@@ -582,5 +574,3 @@ Practical habits:
 - define log retention;
 - move old blobs to cool/archive tiers;
 - delete temporary resources.
-
-

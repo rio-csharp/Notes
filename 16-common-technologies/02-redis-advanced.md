@@ -65,8 +65,6 @@ Common approaches:
 - event-driven invalidation;
 - background refresh.
 
-Trade-off:
-
 - stronger consistency means more complexity;
 - simpler cache often means temporary stale data.
 
@@ -210,8 +208,6 @@ Benefits:
 - avoids many requests hitting database at once;
 - keeps hot key available;
 - improves user experience.
-
-Trade-off:
 
 - users may receive stale data briefly;
 - refresh logic is more complex.

@@ -493,5 +493,3 @@ Possible:
 - increase memory only when the workload legitimately needs it.
 
 Increasing memory can be valid, but it should not hide an unbounded leak.
-
-

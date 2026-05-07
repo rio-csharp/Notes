@@ -129,8 +129,6 @@ bool HasDuplicateFast(int[] nums)
 }
 ```
 
-Trade-off:
-
 - faster time;
 - more memory.
 

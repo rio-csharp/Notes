@@ -421,5 +421,3 @@ High-value integration tests:
 - JSON shape;
 - query filtering and pagination;
 - idempotency behavior.
-
-

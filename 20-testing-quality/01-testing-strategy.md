@@ -332,5 +332,3 @@ Good names describe:
 - the system behavior;
 - the condition;
 - the expected result.
-
-

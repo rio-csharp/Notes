@@ -521,5 +521,3 @@ Common symptoms:
 | 502/503 at ingress | no ready endpoints, backend timeout, ingress config |
 | Random restarts | OOMKilled, liveness too strict, app crash |
 | Slow under load | CPU throttling, DB bottleneck, connection pool exhaustion |
-
-

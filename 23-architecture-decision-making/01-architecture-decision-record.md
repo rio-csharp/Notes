@@ -588,5 +588,3 @@ Redis cache ADR implementation checks:
 ```
 
 This turns architecture into practical engineering behavior.
-
-

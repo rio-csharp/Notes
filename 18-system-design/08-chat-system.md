@@ -227,7 +227,7 @@ When all connections for a user expire, the user is considered offline. A pub/su
 // Client sends heartbeat every 30 seconds
 public async Task Heartbeat()
 {
-    await _redis.KeyExpireAsync($"presence:user:{userId}:connections", 
+    await _redis.KeyExpireAsync($"presence:user:{userId}:connections",
         TimeSpan.FromSeconds(60));
 }
 ```

@@ -134,8 +134,6 @@ Common strategies:
 - background refresh;
 - local cache plus distributed cache.
 
-Trade-off:
-
 - stronger freshness increases complexity;
 - simple TTL accepts temporary stale reads.
 

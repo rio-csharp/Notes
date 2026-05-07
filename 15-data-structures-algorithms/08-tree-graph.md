@@ -225,8 +225,6 @@ matrix[1, 2] = true;
 matrix[2, 1] = true;
 ```
 
-Trade-off:
-
 | Representation | Space | Check Edge | Iterate Neighbors |
 |---|---:|---:|---:|
 | adjacency list | `O(V + E)` | `O(degree)` | efficient |

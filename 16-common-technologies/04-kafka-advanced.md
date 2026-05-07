@@ -18,8 +18,6 @@ key = orderId
 
 This sends events for the same order to the same partition.
 
-Trade-off:
-
 - good per-order ordering;
 - hot order/customer keys can create partition imbalance.
 
@@ -166,8 +164,6 @@ Benefits:
 
 - all events for one order go to the same partition;
 - order is preserved for that order.
-
-Trade-off:
 
 - hot keys can create hot partitions;
 - global ordering is still not guaranteed.

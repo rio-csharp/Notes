@@ -97,7 +97,7 @@ private sealed class <GetValueAsync>d__0 : IAsyncStateMachine
                     goto case 1;
 
                 case 1:
-                    // Resuming after GetBAsync completed  
+                    // Resuming after GetBAsync completed
                     <>1__state = -1;
                     <b>5__2 = <>u__2.GetResult();
                     // Compute result and complete

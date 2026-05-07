@@ -21,12 +21,9 @@ const combinedMarkdownFile = path.join(tempDir, "notes.md");
 const pdfHtmlFile = path.join(tempDir, "notes-for-pdf.html");
 const epubCssFile = path.join(tempDir, "epub.css");
 
-const ignoredDirs = new Set([".git", ".github", "node_modules", "dist", "tools"]);
+const ignoredDirs = new Set([".git", ".github", ".claude", "node_modules", "dist", "tools"]);
 const preferredFrontMatter = [
-  "01-README.md",
-  "02-learning-path.md",
   "README.md",
-  "05-fullstack-engineering-checklist.md",
 ];
 
 const bookTitle = ".NET + Fullstack Engineering Notes";
@@ -156,11 +153,13 @@ async function buildCombinedMarkdown(files) {
 }
 
 function buildMetadata() {
+  const date = new Date().toISOString().slice(0, 10);
   return [
     `title: "${bookTitle}"`,
-    'author: "Codex"',
+    'author: "Rio"',
+    `date: "${date}"`,
     'lang: "en-US"',
-    'rights: "Personal learning notes export"',
+    'rights: "All rights reserved."',
   ].join("\n");
 }
 
@@ -189,7 +188,7 @@ pre {
 }
 
 code {
-  font-family: "Cascadia Code", "Consolas", monospace;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", "Menlo", monospace;
 }
 
 p code, li code, td code, th code, blockquote code {
@@ -231,7 +230,7 @@ function buildPdfCss() {
 }
 
 body {
-  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: #202124;
   line-height: 1.62;
   margin: 0;
@@ -286,7 +285,7 @@ pre {
 }
 
 code {
-  font-family: "Cascadia Code", "Consolas", monospace;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", "Menlo", monospace;
 }
 
 p code, li code, td code, th code, blockquote code {

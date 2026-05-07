@@ -193,7 +193,7 @@ For recurring exports (daily sales summary, weekly inventory report), a schedule
 public async Task GenerateScheduledReportsAsync(CancellationToken ct)
 {
     var schedules = await _dbContext.ReportSchedules
-        .Where(x => x.IsEnabled 
+        .Where(x => x.IsEnabled
             && x.NextRunAt <= DateTimeOffset.UtcNow)
         .ToListAsync(ct);
 
@@ -201,7 +201,7 @@ public async Task GenerateScheduledReportsAsync(CancellationToken ct)
     {
         var jobId = await _exportService.CreateExportJobAsync(
             schedule.ToRequest(), ct);
-        
+
         schedule.LastRunAt = DateTimeOffset.UtcNow;
         schedule.NextRunAt = CalculateNextRun(schedule.CronExpression);
     }
