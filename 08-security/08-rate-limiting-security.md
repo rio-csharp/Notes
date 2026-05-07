@@ -67,3 +67,7 @@ This is one reason rate limiting belongs in security design. It is not only an a
 Strong rate limiting begins with endpoint risk classification, chooses keys that match real abuse patterns, returns predictable throttling responses, and accounts for distributed deployment. It is most effective when combined with other controls such as generic login responses, lockout strategy, monitoring, and audit visibility.
 
 Once designed that way, rate limiting becomes a meaningful security boundary rather than a checkbox middleware feature.
+
+## ASP.NET Core Built-In Support
+
+ASP.NET Core includes built-in rate limiting middleware through `Microsoft.AspNetCore.RateLimiting` and the `System.Threading.RateLimiting` namespace. It supports fixed window, sliding window, token bucket, and concurrency limiters. Policies are registered during startup and applied per endpoint through the `RequireRateLimiting` extension method or the `[EnableRateLimiting]` attribute. The middleware integrates with the request pipeline and should be placed after `UseRouting` when endpoint-specific policies are used.

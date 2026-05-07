@@ -305,3 +305,14 @@ function formatId(id: string | null): string {
 ```
 
 **Discriminated unions** (shown in the Advanced Types chapter): Uses a literal property (the "discriminant") to narrow each branch. This is the most scalable narrowing pattern for complex state machines and API responses.
+
+**Inferred type predicates (TypeScript 5.5+)**: Starting with TypeScript 5.5, the compiler can automatically infer type predicates from array filter callbacks without an explicit return type annotation:
+
+```ts
+const values: (string | null)[] = ["a", null, "b", null];
+const strings = values.filter(x => x !== null);
+// TypeScript 5.5+: inferred as string[] automatically
+// Before 5.5: inferred as (string | null)[]
+```
+
+Previously, achieving this required a manual type predicate annotation (`value is T`). The automatic inference reduces boilerplate for the common "filter out null/undefined" pattern. It also works for `Array.prototype.filter` and other methods the compiler recognizes as filtering operations.

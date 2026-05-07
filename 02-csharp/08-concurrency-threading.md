@@ -36,16 +36,16 @@ worker returns to the pool
 
 This pooled model is one reason thread misuse has system-wide consequences. When worker threads are blocked or monopolized, unrelated work may suffer too.
 
-**ThreadPool architecture.** The .NET ThreadPool manages two distinct categories of threads:
+**ThreadPool architecture.** The .NET thread pool manages two distinct categories of threads:
 
 - **Worker threads** — handle CPU-bound work queued via `Task.Run`, `ThreadPool.QueueUserWorkItem`, timer callbacks, and continuations. These threads execute managed code.
 - **I/O completion threads** — handle completions from the OS I/O completion port mechanism. When an overlapped I/O operation (network read, file read) finishes, the OS notifies the CLR via an I/O completion port, and an I/O completion thread picks up the notification. These threads are not used for CPU work and are critical for async I/O throughput.
 
 The distinction matters because starvation in one pool does not directly block the other, but the two pools interact. When worker threads are exhausted, continuations that would run on worker threads are delayed, which in turn delays processing of I/O completions that depend on those continuations.
 
-**The hill-climbing algorithm.** The ThreadPool does not use a fixed thread count. It uses an adaptive algorithm called "hill-climbing" that monitors throughput — measured as the rate of work-item completion — and adjusts the thread count to maximize it. When new work items are queued and threads are busy, the algorithm introduces new threads at a controlled rate (typically one every 500 ms after an initial burst), measuring whether throughput improves. If adding threads increases throughput, it continues; if throughput plateaus or declines (suggesting contention), it stops. This is why the ThreadPool can appear slow to react under sudden load spikes: the injection rate is deliberately conservative to avoid overshooting into contention territory.
+**The hill-climbing algorithm.** The thread pool does not use a fixed thread count. It uses an adaptive algorithm called "hill-climbing" that monitors throughput — measured as the rate of work-item completion — and adjusts the thread count to maximize it. When new work items are queued and threads are busy, the algorithm introduces new threads at a controlled rate (typically one every 500 ms after an initial burst), measuring whether throughput improves. If adding threads increases throughput, it continues; if throughput plateaus or declines (suggesting contention), it stops. This is why the ThreadPool can appear slow to react under sudden load spikes: the injection rate is deliberately conservative to avoid overshooting into contention territory.
 
-**`ThreadPool.SetMinThreads`.** The minimum thread count is the number of threads the ThreadPool keeps available even when idle. Setting this value at application startup is important for high-throughput servers because the hill-climbing algorithm starts from the minimum, not from zero. If the minimum is too low, the application experiences latency spikes during startup or load surges while the ThreadPool slowly injects threads. A common ASP.NET Core recommendation is to set minimum worker and I/O completion threads to values proportional to expected concurrency:
+**`ThreadPool.SetMinThreads`.** The minimum thread count is the number of threads the thread pool keeps available even when idle. Setting this value at application startup is important for high-throughput servers because the hill-climbing algorithm starts from the minimum, not from zero. If the minimum is too low, the application experiences latency spikes during startup or load surges while the ThreadPool slowly injects threads. A common ASP.NET Core recommendation is to set minimum worker and I/O completion threads to values proportional to expected concurrency:
 
 ```csharp
 ThreadPool.SetMinThreads(workerThreads: 100, completionPortThreads: 100);

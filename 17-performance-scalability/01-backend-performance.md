@@ -53,6 +53,8 @@ Good performance work is evidence-driven.
 - cache stampede;
 - unbounded concurrency.
 
+Many of these bottlenecks are prevented or made easier to fix by maintaining clear architectural boundaries. The Clean Architecture dependency rule (see Chapter 13.02) ensures that business logic can be profiled and optimized independently of infrastructure concerns, which directly supports performance investigation by narrowing the scope of each optimization effort.
+
 ## Latency vs Throughput
 
 Latency measures how long a single request takes from submission to completion. Throughput measures how many requests the system completes per unit of time.
@@ -328,6 +330,30 @@ public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
 ```
 
 `GetOrCreateAsync` performs an atomic check-and-set: if the key exists, the factory is not called. This avoids redundant database queries from concurrent cache misses within the same process.
+
+### HybridCache (L1 + L2)
+
+Starting with .NET 9, `HybridCache` combines an in-memory cache (L1) with a distributed cache (L2) behind a single API. It provides built-in cache stampede protection, automatic serialization, and a simplified `GetOrCreateAsync` method that reduces boilerplate compared to using `IMemoryCache` and `IDistributedCache` separately.
+
+```csharp
+public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
+{
+    return await _cache.GetOrCreateAsync(
+        "categories:v1",
+        async entry => await LoadCategoriesAsync(ct),
+        tags: ["categories"],
+        cancellationToken: ct
+    ) ?? [];
+}
+```
+
+HybridCache handles:
+
+- **Stampede protection** at the L1 level without requiring manual `SemaphoreSlim` locking.
+- **Tag-based invalidation**: evict multiple related entries at once (e.g., invalidate all entries tagged `"categories"` when categories are updated).
+- **Serialization pooling**: reduces allocations by reusing pooled buffers for serialized values.
+
+For applications that need both local and distributed caching, `HybridCache` is simpler and more efficient than combining `IMemoryCache` and `IDistributedCache` manually. For applications with only a single server or only one cache tier, `IMemoryCache` or `IDistributedCache` individually remain appropriate.
 
 ### When to Cache
 

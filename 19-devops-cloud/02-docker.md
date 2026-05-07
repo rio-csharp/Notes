@@ -35,7 +35,7 @@ docker exec -it <container-id> sh
 Every Dockerfile instruction that modifies the filesystem creates a new layer. Layers are stacked using overlay2 (Linux) or similar union filesystem technologies to present a single unified view.
 
 ```dockerfile
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app               # layer 1: set working directory
 COPY package*.json ./      # layer 2: add dependency manifest
 RUN npm ci                 # layer 3: install dependencies
@@ -62,7 +62,7 @@ To verify that layers are shared between images built from the same base:
 docker images --digests
 ```
 
-Images using the same base image (e.g., `mcr.microsoft.com/dotnet/aspnet:8.0`) share those base layers on disk without duplication.
+Images using the same base image (e.g., `mcr.microsoft.com/dotnet/aspnet:10.0`) share those base layers on disk without duplication.
 
 ## Container Isolation
 
@@ -81,7 +81,7 @@ Docker does not provide the same level of isolation as a hypervisor. Kernel vuln
 ## .NET Multi-stage Dockerfile
 
 ```dockerfile
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY *.sln .
@@ -94,7 +94,7 @@ RUN dotnet publish src/MyApp.Api/MyApp.Api.csproj \
     -o /app/publish \
     --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish .
@@ -116,7 +116,7 @@ With BuildKit (the default builder in modern Docker), cache mounts can speed up 
 
 ```dockerfile
 # syntax=docker/dockerfile:1
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 COPY *.sln .
@@ -137,7 +137,7 @@ The `--mount=type=cache` directive preserves the NuGet package cache between bui
 Avoid running as root when possible.
 
 ```dockerfile
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 RUN adduser --disabled-password --home /app appuser
@@ -153,7 +153,7 @@ ENTRYPOINT ["dotnet", "MyApp.Api.dll"]
 ## React Dockerfile
 
 ```dockerfile
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -255,6 +255,8 @@ Redis__ConnectionString=...
 ```
 
 Do not bake environment-specific config or secrets into images.
+
+For automated image building in CI/CD pipelines, see the [CI/CD chapter](03-ci-cd.md).
 
 ## Image Tagging
 

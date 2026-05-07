@@ -136,6 +136,8 @@ Avoid logging request bodies or secrets.
 
 ## Slow SQL Query
 
+(This section overlaps with the performance methodology in Chapter 17, "Backend Performance" and "Database Performance". The troubleshooting here focuses on investigation patterns; the performance chapters focus on optimization techniques and execution plan analysis.)
+
 Symptoms:
 
 - traces show long SQL spans;
@@ -329,6 +331,8 @@ Always dispose connections.
 
 ## Thread Pool Starvation
 
+(For a deeper explanation of thread pool starvation mechanism, hill-climbing, and mitigation patterns, see Chapter 17, "Backend Performance".)
+
 Symptoms:
 
 - CPU may be low or moderate;
@@ -445,7 +449,7 @@ Use pagination and DTO projection.
 
 ## Cache Problems
 
-Cache outage or cache stampede can slow APIs.
+Cache outage or cache stampede can slow APIs. (For cache stampede protection, in-memory cache internals, and distributed cache patterns, see Chapter 17, "Backend Performance".)
 
 Cache stampede:
 

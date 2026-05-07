@@ -180,8 +180,10 @@ dotnet-counters ps
 Monitor counters:
 
 ```powershell
-dotnet-counters monitor --process-id 1234 System.Runtime Microsoft.AspNetCore.Hosting
+dotnet-counters monitor --process-id 1234 --counters System.Runtime,Microsoft.AspNetCore.Hosting
 ```
+
+Note: in newer versions of `dotnet-counters`, provider names must be passed with the `--counters` flag as comma-separated values rather than space-separated positional arguments.
 
 Collect memory dump:
 

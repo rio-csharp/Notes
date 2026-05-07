@@ -50,7 +50,9 @@ DailySalesSummary(Date, TenantId, OrderCount, TotalAmount)
 
 Such a table can support fast reporting without forcing every dashboard request to aggregate a large operational table repeatedly. The cost is that the system must now maintain consistency between the operational source and the summary projection.
 
-A related tool is the materialized view, which is a query result stored as a table and refreshed on a schedule or on demand:
+A related tool is the materialized view, which is a query result stored as a table and refreshed on a schedule or on demand.
+
+In PostgreSQL and some other databases, this is expressed as:
 
 ```sql
 CREATE MATERIALIZED VIEW DailySalesSummary AS
@@ -61,6 +63,8 @@ SELECT
 FROM Orders
 GROUP BY CAST(CreatedAt AS DATE);
 ```
+
+SQL Server does not support `CREATE MATERIALIZED VIEW`. The closest equivalent is an indexed view, which physically stores the view's result set and is maintained automatically by the database as base table data changes. Because indexed views have strict syntax restrictions (no outer joins, subqueries, or window functions), a manual summary table refreshed by a stored procedure or scheduled job is often the more practical alternative.
 
 Materialized views shift the refresh responsibility to the database rather than the application. They are useful when the database engine supports them, but they introduce their own refresh latency and storage costs.
 

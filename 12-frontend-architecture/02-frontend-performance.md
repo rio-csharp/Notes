@@ -651,6 +651,8 @@ export function useDebouncedValue<T>(value: T, delayMs: number) {
 }
 ```
 
+(The same hook is introduced as a custom hook example in Chapter 11, Section 02.)
+
 Search example:
 
 ```tsx
@@ -962,6 +964,8 @@ elements.forEach((element, index) => {
   element.style.height = `${heights[index] + 10}px`;
 });
 ```
+
+For a deeper explanation of how reflow propagates through the render tree, the forced layout cost model, and compositor-friendly properties, see Chapter 09, Section 06 (Browser Rendering).
 
 Prefer compositor-friendly animations:
 

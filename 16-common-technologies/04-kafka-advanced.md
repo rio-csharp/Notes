@@ -4,6 +4,8 @@
 
 Advanced Kafka learning focuses on reliability, ordering, consumer groups, retries, idempotency, and operational trade-offs.
 
+For the foundational Kafka concepts including topics, partitions, producers, consumers, consumer groups, offsets, and basic delivery semantics, see the [Kafka chapter](03-kafka.md). This chapter builds on those concepts with deeper operational and reliability coverage.
+
 ## Ordering
 
 Kafka guarantees ordering only within a partition.
@@ -348,52 +350,11 @@ A retry topic changes timing and may affect strict ordering. If strict per-key o
 
 ## Idempotent Consumer
 
-Use event ID:
-
-```sql
-CREATE TABLE ProcessedMessages
-(
-    ConsumerName NVARCHAR(100) NOT NULL,
-    MessageId NVARCHAR(200) NOT NULL,
-    ProcessedAt DATETIMEOFFSET NOT NULL,
-    PRIMARY KEY (ConsumerName, MessageId)
-);
-```
-
-Inside transaction:
-
-```text
-1. Check message ID.
-2. Apply business change.
-3. Insert processed message.
-4. Commit.
-```
+This pattern is covered in detail in the [Kafka chapter](03-kafka.md#idempotent-consumer). The same approach applies: use an event ID table with a primary key constraint, and commit the business change and processed-message marker in the same transaction.
 
 ## Outbox Pattern
 
-Use when database update and Kafka publish must be reliable.
-
-```text
-API transaction:
-  save order
-  save outbox message
-
-Background publisher:
-  read outbox
-  publish to Kafka
-  mark published
-```
-
-Benefits:
-
-- avoids lost events after DB commit;
-- supports retry.
-
-Costs:
-
-- eventual publishing delay;
-- outbox cleanup;
-- duplicate publish still possible, so consumers must be idempotent.
+This pattern is covered in detail in the [Kafka chapter](03-kafka.md#outbox-pattern). The same concept -- saving both business data and an outbox event in a single database transaction, then publishing asynchronously -- applies across all Kafka-based systems.
 
 ## Consumer Lag
 

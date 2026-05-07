@@ -281,6 +281,8 @@ This code follows the ADR rules:
 
 ## Example 2: Start With Modular Monolith
 
+(For a full discussion of modular monolith structure, module boundaries, internal event buses, facade patterns, and extraction strategies, see Chapter 13, "Modular Monolith". For a comparison with microservices and conditions that favor full service separation, see Chapter 13, "Microservices".)
+
 ```markdown
 # ADR-002: Start With Modular Monolith
 
@@ -387,6 +389,8 @@ var payment = await _paymentStatusReader.GetByOrderIdAsync(orderId, ct);
 
 ## Example 3: Kafka vs Service Bus For Integration Events
 
+(For event-driven architecture patterns, event sourcing, and messaging technology considerations, see Chapter 13, "Event-Driven Architecture".)
+
 ```markdown
 # ADR-003: Use Service Bus For Workflow Messages
 
@@ -447,6 +451,8 @@ Negative:
 This ADR does not say Kafka is bad. It says Kafka is not the best fit for this specific context.
 
 ## Example 4: Token Strategy
+
+(For a detailed discussion of JWT structure, validation, refresh flows, and storage considerations, see Chapter 8, "JWT" and "OAuth 2.0 And OIDC". For permission system design and resource-level authorization, see Chapter 8, "Authorization Models, Permissions, And Resource Access".)
 
 ```markdown
 # ADR-004: Use Short-Lived JWT Access Tokens With Refresh Flow

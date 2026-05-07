@@ -121,6 +121,8 @@ GitHub Actions
   -> Application Insights collects telemetry
 ```
 
+For detailed CI/CD pipeline configuration including build, test, and deployment workflows, see the [CI/CD chapter](03-ci-cd.md).
+
 Important settings:
 
 ```text

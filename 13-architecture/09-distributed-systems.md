@@ -19,13 +19,17 @@ Networks are unreliable:
 
 ## CAP Theorem
 
-CAP:
+CAP describes three properties of distributed systems:
 
-- Consistency;
-- Availability;
-- Partition tolerance.
+- Consistency (all nodes see the same data at the same time);
+- Availability (every request receives a response);
+- Partition tolerance (the system continues operating despite network failures).
 
-In real distributed systems, network partitions can happen, so trade-offs between consistency and availability matter.
+The classical framing says you can pick at most two. In practice, this framing is misleading because network partitions are a given in distributed systems -- you do not get to choose whether to tolerate them. The real trade-off is between consistency and availability when a partition occurs.
+
+Modern systems treat this as a spectrum rather than a binary choice. Techniques include tunable consistency (Cassandra's QUORUM vs ONE, MongoDB read concerns), CRDT-based approaches that converge without coordination, and hybrid strategies that layer CP subsystems (etcd for cluster metadata) with AP subsystems (DynamoDB for user-facing workloads). The PACELC theorem extends CAP by noting that even without a partition, there is a trade-off between latency and consistency.
+
+For most business applications, eventual consistency is acceptable for read paths while strong consistency is maintained for critical write paths through idempotency, outbox patterns, and saga orchestration.
 
 ## Consistency Models
 

@@ -188,6 +188,8 @@ Controller
 
 This logs both cache hits and misses. If logging is inside caching, cache hits may not be logged.
 
+> Caching decorators with `IDistributedCache` are also discussed in Chapter 14.06 (Mediator, Strategy, And Decorator In .NET), which shows the same pattern applied to a `ProductService` interface using Scrutor for DI registration.
+
 ## Facade
 
 Facade provides a simplified interface over a complex subsystem.
@@ -248,7 +250,7 @@ Examples:
 - lazy-loading proxy;
 - remote proxy;
 - authorization proxy;
-- caching proxy;
+- caching proxy (similar to decorator but focused on access control);
 - rate-limiting proxy.
 
 ### Authorization Proxy

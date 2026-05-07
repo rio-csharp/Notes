@@ -136,7 +136,7 @@ Four mechanisms deserve close attention.
 
 **`GetAwaiter().OnCompleted` / `AwaitUnsafeOnCompleted`.** This is how the state machine subscribes to completion. Rather than polling, the compiler calls `GetAwaiter()` on the awaited expression, checks `IsCompleted`, and if the operation is not yet done, passes the state machine itself as the continuation callback via `AwaitUnsafeOnCompleted`. The awaitable's implementation — whether it wraps I/O completion ports, timer callbacks, or task continuations — eventually invokes that callback, which calls back into `MoveNext`.
 
-**Lifted locals.** Local variables that survive across an `await` — `a` and `b` in this example — become fields on the state machine struct. This is the allocation cost of async methods: the state machine struct is boxed onto the heap when the first incomplete await is hit. Locals that do not cross `await` boundaries remain on the stack and incur no allocation.
+**Lifted locals.** Local variables that survive across an `await` — `a` and `b` in this example — become fields on the state machine struct. This is the allocation cost of async methods: the state machine struct is boxed onto the heap when the first incomplete await is hit. Locals that do not cross `await` boundaries remain on the stack and incur no allocation. (See the garbage collection chapter for how these short-lived allocations interact with Gen 0 collection and GC pressure on hot paths.)
 
 Three engineering consequences follow from this transformation. First, asynchronous methods are not free of allocation; the state machine box incurs GC pressure on hot paths. Second, exceptions thrown after an `await` do not surface synchronously to the caller — they fault the returned task via `SetException`. Third, a method appears to "return" before its work is finished because what it returns is the task — the promise of eventual completion — not the final result.
 
@@ -594,7 +594,7 @@ public IActionResult Submit()
 }
 ```
 
-The `TaskScheduler.UnobservedTaskException` event provides a last-resort safety net for tasks whose exceptions were never observed, but relying on it is fragile. The event fires during garbage collection, which may be far removed from the original failure context, making diagnosis difficult.
+The `TaskScheduler.UnobservedTaskException` event provides a last-resort safety net for tasks whose exceptions were never observed, but relying on it is fragile. The event fires during garbage collection, which may be far removed from the original failure context, making diagnosis difficult. In modern .NET (Core / .NET 5+), the event still fires but no longer terminates the process by default — the exception is silently swallowed after the event handler runs, which can mask bugs that would be caught earlier in a more disciplined error-handling architecture.
 
 When work must outlive the request and survive failures, it belongs in a queue, background worker, scheduler, or message-driven system. `IHostedService` and `BackgroundService` provide the correct infrastructure for long-lived background work, with built-in support for graceful shutdown, dependency injection, and structured error handling.
 

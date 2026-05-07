@@ -55,7 +55,7 @@ public sealed class StripePaymentGateway : IPaymentGateway
 
 ## Complete Payment Port Example
 
-The application core defines a port based on what the business workflow needs.
+The application core defines a port based on what the business workflow needs. The same `IPaymentGateway` pattern appears in multiple chapters throughout this book, with interface shapes adapted to each chapter's focus -- the principle (depend on abstractions, not implementations) remains the same.
 
 ```csharp
 public interface IPaymentGateway

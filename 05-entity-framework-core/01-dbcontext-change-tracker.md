@@ -4,9 +4,11 @@
 
 `DbContext` is the operational center of EF Core. It is the object through which the application queries the database, tracks entity instances, coordinates updates, and commits a unit of work. The change tracker is not a secondary convenience attached to that process. It is one of the main reasons EF Core can translate object-level changes into relational commands. Query behavior, relationship fix-up, update patterns, concurrency handling, and performance trade-offs all depend on how long a context lives, what it tracks, and when that tracked state is converted into SQL.
 
+This chapter assumes familiarity with basic relational database concepts such as tables, keys, and SQL queries. The database SQL chapter covers those foundations in depth. Readers who prefer to learn relational concepts first may wish to read that chapter before this one.
+
 ## `DbContext` As A Unit Of Work Boundary
 
-In ASP.NET Core applications, `DbContext` is usually registered as scoped:
+In ASP.NET Core applications, `DbContext` is usually registered as scoped (the DI chapter explains scoped lifetime in more detail):
 
 ```csharp
 builder.Services.AddDbContext<AppDbContext>(options =>

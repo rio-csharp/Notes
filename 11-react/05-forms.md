@@ -295,4 +295,6 @@ Controlled forms keep values in React state and re-render the component on every
 
 Client validation improves user experience by catching errors before a network round trip. Server validation is required for security and correctness — client validation is purely a convenience layer and must not be relied upon as a security measure.
 
+For the HTML foundations of accessible forms — labels, fieldset/legend, aria attributes, modal dialogs, and keyboard navigation patterns — see Chapter 09, Section 02 (Forms And Accessibility).
+
 React Hook Form reduces unnecessary re-renders by defaulting to uncontrolled inputs. It registers each input with a ref and only triggers re-renders at the form level when validation occurs or submission state changes. Combined with a schema library such as Zod, it provides declarative validation rules, field-level error messages, and integration with dynamic field arrays through `useFieldArray`.

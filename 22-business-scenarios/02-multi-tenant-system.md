@@ -170,6 +170,8 @@ For background jobs, do not depend on `HttpContext`.
 
 ## EF Core Global Query Filter
 
+(For a deeper discussion of DbContext lifetime, change tracking, and query translation, see Chapter 5, "DbContext And The Change Tracker" and "Query Translation And Read Models".)
+
 Tenant-owned entities:
 
 ```csharp
@@ -244,7 +246,7 @@ Global filters reduce accidental leaks, but they are not a replacement for autho
 
 ## Resource-Level Authorization
 
-Checking a permission is not enough. The resource must also belong to the current tenant.
+Checking a permission is not enough. The resource must also belong to the current tenant. (For a detailed explanation of authorization models, permission policies, and resource-level handlers, see Chapter 8, "Authorization Models, Permissions, And Resource Access".)
 
 ```csharp
 public async Task<OrderDto> GetOrderAsync(long orderId, CancellationToken ct)
@@ -488,5 +490,7 @@ Blob path example:
 ```csharp
 var blobName = $"tenants/{tenantId:N}/orders/{orderId}/files/{fileId:N}.pdf";
 ```
+
+(For a comprehensive treatment of authentication and authorization, see Chapter 8. For API contract patterns including pagination, filtering, and DTO design, see Chapter 7.)
 
 

@@ -116,6 +116,8 @@ A separate outbox processor polls for unpublised records (`PublishedAt IS NULL`)
 
 The outbox pattern ensures that the notification record and the delivery message are never durably out of sync: both or neither are persisted.
 
+> The outbox pattern, consumer idempotency, and event versioning are discussed in further detail in Chapter 13.06 (Event-Driven Architecture), including complete code examples for the outbox publisher worker, inbox table, and dead-letter handling.
+
 ## Queue Message Contract
 
 ```csharp

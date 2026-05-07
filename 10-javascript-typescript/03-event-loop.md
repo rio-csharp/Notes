@@ -369,7 +369,7 @@ A "long task" is any JavaScript execution that occupies the main thread for 50ms
 
 Prevention strategies include:
 
-- Chunking CPU-heavy work with `setTimeout` or `scheduler.postTask` (as shown in the chunking example above).
+- Chunking CPU-heavy work with `setTimeout` or `scheduler.postTask` (as shown in the chunking example above). Note: `scheduler.postTask` is not supported in Safari as of 2025 -- prefer `setTimeout` for cross-browser chunking or use the [scheduler-polyfill](https://github.com/GoogleChromeLabs/scheduler-polyfill).
 - Offloading computation to Web Workers.
 - Using `requestIdleCallback` for non-urgent background work.
 - Avoiding forced synchronous layouts by batching DOM reads and writes.

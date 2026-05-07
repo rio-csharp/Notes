@@ -138,16 +138,16 @@ var handler = Activator.CreateInstance(type!);
 
 The second pattern is not incorrect, but it shifts design toward runtime discovery and away from publish-time predictability. Native AOT requires the application code to be explicit enough that the build tooling can trace every code path and preserve every required type.
 
-### NativeAOT Limitations in .NET 9
+### Native AOT Limitations in .NET 9
 
 Native AOT in .NET 9 has specific constraints beyond the general reflection limitation:
 
 - **No `Assembly.Load`** — assemblies cannot be loaded dynamically from files or byte arrays. All code must be known at publish time.
 - **No `System.Reflection.Emit`** — `DynamicMethod`, `MethodBuilder`, `TypeBuilder`, and expression-tree compilation to delegates all depend on runtime IL generation. `Expression<T>.Compile()` falls back to interpretation mode, which is significantly slower than JIT-compiled delegates.
 - **Limited `MakeGenericType`/`MakeGenericMethod`** — generic instantiation works for type parameters that the static analysis can trace. A `Dictionary<string, T>` instantiated for a type `T` resolved at runtime via `Type.GetType` may fail because the AOT compiler did not pre-generate that instantiation.
-- **`Assembly.Location` returns empty string** — the concept of "the assembly file on disk" does not exist in a native executable.
+- **`Assembly.Location` returns null** — assemblies no longer map to individual files in a native executable. The empty-string behavior applies only to single-file publish; NativeAOT returns `null` because the logical assembly has no on-disk file path.
 
-The NativeAOT publish output includes trim warnings that identify code patterns the compiler cannot prove are safe. Running with `<PublishAot>true</PublishAot>` and `<TrimmerSingleWarn>false</TrimmerSingleWarn>` produces per-location warnings:
+The Native AOT publish output includes trim warnings that identify code patterns the compiler cannot prove are safe. Running with `<PublishAot>true</PublishAot>` and `<TrimmerSingleWarn>false</TrimmerSingleWarn>` produces per-location warnings:
 
 ```xml
 <PropertyGroup>

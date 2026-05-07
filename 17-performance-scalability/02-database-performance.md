@@ -469,7 +469,7 @@ Before scaling reads horizontally, ensure queries are already optimized -- addin
 1. **Optimize queries and indexes first.** Many read-performance problems are solved by better indexing, not by adding infrastructure.
 2. **Caching**: in-memory cache for hot data, distributed cache for cross-instance sharing (see the Caching section in Chapter 1 of this topic).
 3. **Read replicas**: asynchronous secondary copies of the primary database. Queries are routed to the replica, keeping the primary free for writes. Requires careful connection routing and tolerance for replication lag (typically sub-second in the same region, but can grow under high write load).
-4. **CQRS read models**: a separate read-optimized database populated by events from the write side. The read schema can differ entirely from the write schema (denormalized, pre-joined, with precomputed aggregates). This adds event processing infrastructure but provides the most flexibility.
+4. **CQRS read models**: a separate read-optimized database populated by events from the write side. The read schema can differ entirely from the write schema (denormalized, pre-joined, with precomputed aggregates). This adds event processing infrastructure but provides the most flexibility. See Chapter 13.05 for a detailed discussion of CQRS with separate read models and projection workers.
 5. **Materialized / summary tables**: precomputed aggregations refreshed on a schedule or via triggers. Useful for dashboards and reports that query large fact tables.
 6. **Search index**: Elasticsearch, Azure Cognitive Search, or similar for full-text search, faceted navigation, and complex filtering that would be awkward or slow in a relational database.
 

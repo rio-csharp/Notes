@@ -347,7 +347,7 @@ Key questions to address:
 
 ## ADR Example
 
-Architecture Decision Records keep decisions understandable later.
+Architecture Decision Records keep decisions understandable later. Chapter 23.01 (Architecture Decision Records) provides a complete template, lifecycle guidance, and real-world examples.
 
 ```md
 # ADR-003: Use Asynchronous Notification Delivery

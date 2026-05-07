@@ -4,6 +4,8 @@
 
 Generics allow APIs to abstract over families of types without collapsing everything into `object`, manual casts, or runtime type checks. They shape collections, dependency injection, equality, high-performance library code, and many of the framework abstractions used throughout .NET. They keep reusable code precise rather than vague.
 
+Unlike Java's type-erasure approach, .NET generics are **reified**: the CLR preserves generic type information in metadata and IL, and the JIT generates specialized native code for each value-type instantiation — sharing native code only across reference-type instantiations. This is why `typeof(List<int>)` returns a runtime type distinct from `typeof(List<string>)`, why constraints are enforced at both compile time and load time, and why value-type instantiations avoid boxing. The CLR chapter covers the runtime infrastructure behind this model.
+
 ## Reuse Without Losing Type Information
 
 Without generics, reusable APIs tend to lose type information at exactly the point where correctness matters most.

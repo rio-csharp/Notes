@@ -315,6 +315,8 @@ app.UseExceptionHandler(errorApp =>
 });
 ```
 
+This older pattern uses `UseExceptionHandler` with a lambda to define error-handling middleware inline. In .NET 8 and later, the recommended pattern uses `AddExceptionHandler<T>()` to register a dedicated exception handler class, combined with `app.UseExceptionHandler()` without a lambda. That approach is covered in the request pipeline chapter.
+
 This design gives clients a safe diagnostic handle that operators can use to find the corresponding server-side evidence without exposing internal exception detail directly.
 
 ## Investigation As A Workflow

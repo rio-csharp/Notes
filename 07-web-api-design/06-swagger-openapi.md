@@ -69,7 +69,7 @@ This is why structured error contracts such as `ProblemDetails` matter twice: on
 
 Security requirements should also be part of the documented contract. Swagger configuration for bearer authentication is useful not only because it enables testing from the UI, but because it makes the authentication shape explicit in the generated specification.
 
-An undocumented authentication requirement is still a contract requirement. OpenAPI simply makes it visible and tool-friendly.
+An undocumented authentication requirement is still a contract requirement. OpenAPI simply makes it visible and tool-friendly. The security chapters cover token design, OAuth flows, and authorization models in detail, and those chapters should be consulted when deciding what authentication mechanisms the API needs to document.
 
 ## XML Comments, Examples, And Readability
 

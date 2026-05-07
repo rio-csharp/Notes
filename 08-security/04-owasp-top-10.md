@@ -2,7 +2,7 @@
 
 ## Core Idea
 
-Security engineering improves when teams stop treating vulnerabilities as disconnected trivia and start seeing them as recurring failure patterns. Lists such as the OWASP Top 10 are useful not because every engineer must memorize category names, but because they teach the kinds of mistakes that repeatedly appear in production systems.
+Security engineering improves when teams stop treating vulnerabilities as disconnected trivia and start seeing them as recurring failure patterns. Lists such as the OWASP Top 10 are useful not because every engineer must memorize category names, but because they teach the kinds of mistakes that repeatedly appear in production systems. The categories below are informed by the OWASP Top 10 2025 edition.
 
 ## Broken Access Control
 
@@ -82,6 +82,20 @@ Observability is part of the security posture because undetectable failure is op
 Server-side request forgery is an especially good example of modern trust-boundary failure. The server is persuaded to make a network request on behalf of attacker-controlled input, potentially reaching internal or otherwise protected destinations.
 
 The key defense idea is that outbound requests are also a trust boundary. Allowlisting, egress controls, redirect control, and cautious URL handling matter because the server's network position is more privileged than the attacker's browser.
+
+## Mishandling Of Exceptional Conditions
+
+Exceptional conditions such as unexpected inputs, system failures, or unusual state combinations are a recurring source of security exposure. Systems that fail closed under error are often safer than systems that leave resources accessible, allow unintended state transitions, or expose diagnostic details under abnormal conditions.
+
+Common failure patterns include:
+
+- fail-open authorization checks when a policy handler throws;
+- returning verbose error pages or stack details in production;
+- leaving orphaned operations in an incomplete, non-auditable state;
+- continuing processing after validation failures instead of aborting;
+- ignoring error return values from security-critical dependencies.
+
+The defense pattern is consistent: exceptional conditions should preserve the system's security posture rather than bypass it. Error paths should be tested with the same discipline as happy paths, because attackers often trigger failures specifically to observe how the system behaves outside its normal assumptions.
 
 ## Design Consequences
 

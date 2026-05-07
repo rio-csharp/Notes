@@ -90,6 +90,8 @@ Common levels include:
 
 Higher isolation is not automatically better. It usually trades increased correctness guarantees for more locking, more blocking, or more version-store cost depending on the engine.
 
+(The database chapter on transactions and isolation covers these levels from the SQL Server perspective, including their locking behavior and concurrency trade-offs.)
+
 ```csharp
 await using var transaction = await _dbContext.Database.BeginTransactionAsync(
     IsolationLevel.Serializable,

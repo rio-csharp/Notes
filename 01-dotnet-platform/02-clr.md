@@ -35,7 +35,7 @@ The CLR provides a set of interdependent services that together form the managed
 
 **Exception handling** uses a two-pass unwinding model. The first pass walks the stack looking for a handler whose catch clause matches the exception type. The second pass unwinds frames, executing `finally` blocks and releasing resources. This two-pass design means `finally` blocks execute even when no matching catch is found — the stack unwinds completely, which is why `using` statements and `Dispose` calls in finally blocks are reliable cleanup mechanisms.
 
-**Thread management** centers on the thread pool — a work-stealing pool of worker threads managed by the runtime. `Task.Run`, `Timer` callbacks, and async continuations all dispatch to the thread pool. The pool grows and shrinks based on demand, but it is not unbounded: the injection rate is governed by the Hill Climbing algorithm, which adds threads slowly to avoid oversubscription. Long-running or blocking work on thread-pool threads starves other work; dedicated threads or `TaskCreationOptions.LongRunning` avoid this.
+**Thread management** centers on the thread pool — a work-stealing pool of worker threads managed by the runtime. `Task.Run`, `Timer` callbacks, and async continuations all dispatch to the thread pool. The pool grows and shrinks based on demand, but it is not unbounded: the injection rate is governed by the hill-climbing algorithm, which adds threads slowly to avoid oversubscription. Long-running or blocking work on thread-pool threads starves other work; dedicated threads or `TaskCreationOptions.LongRunning` avoid this.
 
 **Assembly loading** (Chapter 6) resolves and loads compiled assemblies through `AssemblyLoadContext`. The default context handles project references and NuGet packages. Custom contexts enable plugin isolation and unloadable extensions. The runtime enforces that each assembly identity (name + version + culture + public key token) resolves to one assembly per context; loading incompatible versions of the same library requires separate contexts.
 
@@ -134,7 +134,7 @@ Every managed object carries its type identity in its method table pointer, and 
 
 ## Exception Handling
 
-The CLR manages exception propagation through the managed call stack using a two-pass model. When an exception is thrown, the first pass walks the stack searching for a handler whose catch clause matches the exception type. If no handler is found, the exception escapes the thread and the process terminates. If a handler is found, the second pass unwinds the stack to that frame, executing `finally` blocks and releasing resources along the way.
+The CLR manages exception propagation through the managed call stack using a two-pass model. When an exception is thrown, the first pass walks the stack searching for a handler whose catch clause matches the exception type. Exception filters are evaluated during this first pass, before any stack unwinding occurs — which means a filter can inspect the full failure context at the throw site. If no handler is found, the exception escapes the thread and the process terminates. If a handler is found, the second pass unwinds the stack to that frame, executing `finally` blocks and releasing resources along the way. The detailed exception handling chapter covers filters, `ExceptionDispatchInfo`, and cross-layer exception design in depth.
 
 ```csharp
 try

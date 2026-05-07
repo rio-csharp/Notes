@@ -445,7 +445,7 @@ The `readonly` modifier on `record struct` is important. An unadorned `record st
 
 ## Resource Lifetime And Deterministic Cleanup
 
-Garbage collection manages managed memory, but it does not guarantee prompt release of external resources such as file handles, sockets, database connections, or timers. That is why `IDisposable` and `IAsyncDisposable` remain important language-level patterns.
+Garbage collection manages managed memory, but it does not guarantee prompt release of external resources such as file handles, sockets, database connections, or timers (see the dedicated garbage collection chapter for the runtime model). That is why `IDisposable` and `IAsyncDisposable` remain important language-level patterns.
 
 ```csharp
 using var stream = File.OpenRead("orders.csv");

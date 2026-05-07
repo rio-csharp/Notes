@@ -239,6 +239,8 @@ Events:
 
 Use outbox to publish reliably.
 
+> The outbox pattern, CQRS with separate read models, and event-driven integration are discussed in detail in Chapters 13.05 (CQRS) and 13.06 (Event-Driven Architecture). The decision between a modular monolith and microservices for an e-commerce system is covered in Chapters 13.07 and 13.08.
+
 ## Verification
 
 Key aspects to verify:

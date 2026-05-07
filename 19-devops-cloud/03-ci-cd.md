@@ -46,6 +46,8 @@ Pull request
   -> frontend tests
   -> security/dependency checks
 
+For guidance on writing effective tests at each level, see the [Testing Strategy](../20-testing-quality/01-testing-strategy.md) chapter, the [Integration Testing](../20-testing-quality/02-integration-testing-dotnet.md) chapter, and the [E2E Testing](../20-testing-quality/04-e2e-testing.md) chapter.
+
 Main branch
   -> repeat verification
   -> publish .NET artifact
@@ -125,11 +127,11 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - name: Restore
         run: dotnet restore
@@ -155,9 +157,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: src/Web/package-lock.json
 
@@ -211,18 +213,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: src/Api/Dockerfile
@@ -247,7 +249,7 @@ Not every system needs containers. App Service and IIS deployments often use pub
   run: dotnet publish src/Api/Api.csproj --configuration Release --output ./artifacts/api
 
 - name: Upload API artifact
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: api
     path: ./artifacts/api
@@ -259,7 +261,7 @@ Not every system needs containers. App Service and IIS deployments often use pub
     npm run build
 
 - name: Upload web artifact
-  uses: actions/upload-artifact@v4
+  uses: actions/upload-artifact@v7
   with:
     name: web
     path: src/Web/dist
@@ -279,7 +281,7 @@ Restoring NuGet packages on every CI run is wasteful when the dependency set has
 
 ```yaml
 - name: Cache NuGet packages
-  uses: actions/cache@v4
+  uses: actions/cache@v5
   with:
     path: ~/.nuget/packages
     key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj') }}
@@ -295,7 +297,7 @@ For frontend dependencies:
 
 ```yaml
 - name: Cache npm
-  uses: actions/cache@v4
+  uses: actions/cache@v5
   with:
     path: ~/.npm
     key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}

@@ -312,6 +312,8 @@ public sealed class MaintenanceModeMiddleware
 
 These patterns demonstrate the main strengths of middleware: broad applicability, early interception, and control over both request and response flow.
 
+The correlation ID pattern also appears in the logging and observability chapter, where its role in preserving request context across log entries is discussed in more depth.
+
 ## Middleware Versus Filters
 
 Middleware and filters are related but belong to different layers.

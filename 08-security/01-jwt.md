@@ -66,17 +66,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidAudience = "api://orders-service",
             ValidateLifetime = true,
             ClockSkew = TimeSpan.FromMinutes(1),
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
-            {
-                // Fetch signing keys from the authority's well-known endpoint
-                return FetchSigningKeysAsync(kid).GetAwaiter().GetResult();
-            }
+            ValidateIssuerSigningKey = true
+            // Signing keys are resolved automatically by the middleware
+            // through OpenID Connect discovery when Authority is set.
+            // Key rotation is handled transparently without a custom resolver.
         };
     });
 ```
 
-The configuration is framework-specific, but the architectural lesson is broader: a token is only meaningful if the receiving API proves that it was issued by the right authority, for the right audience, within the right lifetime, and with claims appropriate to the requested action.
+The configuration is framework-specific, but the architectural lesson is broader: a token is only meaningful if the receiving API proves that it was issued by the right authority, for the right audience, within the right lifetime, and with claims appropriate to the requested action. The ASP.NET Core authentication chapter covers the broader authentication pipeline, scheme selection, and policy-based authorization in more detail.
 
 ## Statelessness And Revocation Limits
 

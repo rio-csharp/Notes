@@ -377,3 +377,5 @@ Microservices require:
 Without observability, microservices become very hard to operate.
 
 Microservices offer organizational and operational scaling at the cost of distributed complexity. They are most effective when bounded by business capabilities, each owning its data and communicating through well-defined contracts. The decision to adopt microservices should be driven by concrete needs for independent deployment, team autonomy, or specialized scaling, not by architectural fashion. For most systems, starting with a modular monolith and extracting services only when the boundaries are proven and operational maturity is established leads to better outcomes.
+
+> Architecture decisions at this scale benefit from formal documentation. Chapter 23.01 (Architecture Decision Records) provides a template and methodology for recording why a particular architectural style was chosen, what alternatives were considered, and when the decision should be revisited.

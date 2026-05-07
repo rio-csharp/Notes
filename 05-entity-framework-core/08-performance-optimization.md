@@ -15,7 +15,7 @@ The first rule of EF Core performance work is to measure before changing behavio
 5. determine whether the issue is query shape, data volume, indexing, round trips, or tracking overhead;
 6. re-measure after the change.
 
-This matters because EF Core is often blamed for problems that are really schema, indexing, or query-design problems.
+This matters because EF Core is often blamed for problems that are really schema, indexing, or query-design problems. (The database SQL chapter covers indexing and query optimization from the database engine perspective, which provides context for the EF-specific tuning discussed here.)
 
 ## Data Shape Matters More Than ORM Overhead
 

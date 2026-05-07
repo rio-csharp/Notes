@@ -382,3 +382,23 @@ public sealed class RateLimitMiddleware
     }
 }
 ```
+
+## ASP.NET Core Built-in Rate Limiting
+
+Since .NET 7, ASP.NET Core includes a built-in rate limiting middleware (`Microsoft.AspNetCore.RateLimiting`) that supports fixed window, sliding window, token bucket, and concurrency limiter algorithms. This reduces the need for custom middleware in many applications.
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 10;
+    });
+});
+
+app.UseRateLimiter();
+```
+
+The built-in middleware integrates with ASP.NET Core's policy infrastructure, supports partition-based limiting (by user, IP, or custom key), and works with `IDistributedCache` for multi-instance deployments. For most applications, the built-in middleware is preferred over a custom implementation. The custom approach shown earlier in this chapter is useful when you need Redis-backed distributed rate limiting with specific algorithmic control (token bucket with Lua scripting) or when rate limiting must be deployed at the API gateway level rather than in the application layer.

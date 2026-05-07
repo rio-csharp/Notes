@@ -157,7 +157,7 @@ Use all three together. Logs without metrics can over-focus on one error. Metric
 
 ## Correlation IDs
 
-Correlation IDs connect a user request across logs, traces, and service calls.
+Correlation IDs connect a user request across logs, traces, and service calls. (For a deeper discussion of logging, observability, and OpenTelemetry, see Chapter 3, "Logging And Observability In ASP.NET Core".)
 
 ASP.NET Core middleware example:
 
@@ -257,10 +257,12 @@ browser console/network info for frontend issues
 For .NET:
 
 ```powershell
-dotnet-counters monitor --process-id 1234
+dotnet-counters monitor --process-id 1234 --counters System.Runtime
 dotnet-dump collect --process-id 1234 --output app.dmp
 dotnet-gcdump collect --process-id 1234 --output app.gcdump
 ```
+
+Note: in newer versions of `dotnet-counters`, provider names must be passed with the `--counters` flag as comma-separated values rather than space-separated positional arguments.
 
 In containers/Kubernetes:
 

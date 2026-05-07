@@ -109,7 +109,7 @@ public sealed class Payment
 
 ## Webhook Endpoint
 
-The endpoint needs the raw request body for signature verification.
+The endpoint needs the raw request body for signature verification. (For a broader discussion of webhook receiver and sender design, including retry strategies and observability, see Chapter 22, "Webhook Design". The payment-specific webhook pattern below focuses on the unique requirements of payment providers.)
 
 ```csharp
 [ApiController]
@@ -211,7 +211,7 @@ Failed
 
 ## Idempotent Handler
 
-Providers retry callbacks. The handler must be idempotent.
+Providers retry callbacks. The handler must be idempotent. (For a general treatment of idempotency keys, race-safe storage, and request identity detection, see Chapter 7, "Idempotency, Retries, And Duplicate-Safe Operations".)
 
 ```csharp
 public async Task HandleAsync(

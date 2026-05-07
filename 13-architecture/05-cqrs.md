@@ -49,17 +49,18 @@ public sealed record ApproveOrderCommand(int OrderId, int ApproverId);
 
 public sealed class ApproveOrderHandler
 {
-    private readonly AppDbContext _dbContext;
+    private readonly IOrderRepository _orders;
+    private readonly IUnitOfWork _unitOfWork;
 
-    public ApproveOrderHandler(AppDbContext dbContext)
+    public ApproveOrderHandler(IOrderRepository orders, IUnitOfWork unitOfWork)
     {
-        _dbContext = dbContext;
+        _orders = orders;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task Handle(ApproveOrderCommand command, CancellationToken ct)
     {
-        var order = await _dbContext.Orders
-            .FirstOrDefaultAsync(o => o.Id == command.OrderId, ct);
+        var order = await _orders.GetByIdAsync(command.OrderId, ct);
 
         if (order is null)
         {
@@ -68,10 +69,12 @@ public sealed class ApproveOrderHandler
 
         order.Approve(command.ApproverId);
 
-        await _dbContext.SaveChangesAsync(ct);
+        await _unitOfWork.SaveChangesAsync(ct);
     }
 }
 ```
+
+The handler depends on abstractions (`IOrderRepository`, `IUnitOfWork`), not directly on EF Core. This keeps the application layer consistent with the Clean Architecture dependency rule described in Chapter 13.02: inner layers define interfaces; outer layers implement them.
 
 ## Query Example
 
@@ -83,43 +86,27 @@ public sealed record SearchOrdersQuery(
 
 public sealed class SearchOrdersHandler
 {
-    private readonly AppDbContext _dbContext;
+    private readonly IOrderRepository _orders;
 
-    public SearchOrdersHandler(AppDbContext dbContext)
+    public SearchOrdersHandler(IOrderRepository orders)
     {
-        _dbContext = dbContext;
+        _orders = orders;
     }
 
     public async Task<PagedResult<OrderListItemDto>> Handle(
         SearchOrdersQuery query,
         CancellationToken ct)
     {
-        var orders = _dbContext.Orders.AsNoTracking();
-
-        if (!string.IsNullOrWhiteSpace(query.Status))
-        {
-            orders = orders.Where(o => o.Status == query.Status);
-        }
-
-        var total = await orders.CountAsync(ct);
-
-        var items = await orders
-            .OrderByDescending(o => o.CreatedAt)
-            .Skip((query.Page - 1) * query.PageSize)
-            .Take(query.PageSize)
-            .Select(o => new OrderListItemDto
-            {
-                Id = o.Id,
-                Status = o.Status,
-                Total = o.Total,
-                CreatedAt = o.CreatedAt
-            })
-            .ToListAsync(ct);
-
-        return new PagedResult<OrderListItemDto>(items, total, query.Page, query.PageSize);
+        return await _orders.SearchAsync(
+            query.Status,
+            query.Page,
+            query.PageSize,
+            ct);
     }
 }
 ```
+
+The query handler also depends on an abstraction. The repository interface exposes methods that express query intent rather than generic `IQueryable` access (see Chapter 14.05 for more on repository design).
 
 ## CQRS With Separate Read Model
 

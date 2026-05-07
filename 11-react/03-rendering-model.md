@@ -98,6 +98,8 @@ Each fiber represents work for a component or host element.
 
 Fiber is React's internal unit-of-work architecture. It allows React to split rendering work, prioritize updates, and separate calculating the next UI from committing changes to the DOM.
 
+React's rendering model sits on top of the browser's own rendering pipeline. See Chapter 09, Section 06 (Browser Rendering) for the critical rendering path, DOM/CSSOM construction, layout, paint, and compositing at the browser level.
+
 ## Trigger, Render, Commit
 
 The rendering cycle:
@@ -433,4 +435,6 @@ function OrdersPage() {
 
 A component re-renders when its state changes, its parent renders and passes new props, context it consumes changes, or an external store subscription updates. Reconciliation is React's process of comparing the previous UI tree with the new UI tree through type and key heuristics, then committing only the necessary changes to the real DOM. Fiber, React's internal unit-of-work architecture, enables this by splitting rendering work into incremental units, supporting prioritization and concurrent rendering, and cleanly separating the render phase (calculating the next UI) from the commit phase (applying DOM mutations and running effects). Keys help React preserve identity of list items across renders; stable keys prevent incorrect state reuse when items are reordered, inserted, or removed.
 
-Performance optimization in React follows a principle of measuring before acting: identify unnecessary state changes, keep state close to where it is used, split large components, use stable keys, memoize expensive calculations with `useMemo`, apply `React.memo` selectively after measurement, virtualize large lists, and avoid recreating heavy objects and function references unnecessarily during render.
+React 19 introduces Server Components as an alternative rendering model. Server Components run exclusively on the server and do not contribute to the client-side JavaScript bundle. They can use `async/await` directly for data access and stream their output to the client via Suspense boundaries. The `use()` hook allows Client Components to consume a promise passed from a Server Component, integrating the two rendering models within a single tree. The client-side rendering model described in this chapter (render, reconcile, commit) applies to Client Components and Server Component output once it reaches the browser.
+
+Performance optimization in React follows a principle of measuring before acting: identify unnecessary state changes, keep state close to where it is used, split large components, use stable keys, memoize expensive calculations with `useMemo`, apply `React.memo` selectively after measurement, virtualize large lists, and avoid recreating heavy objects and function references unnecessarily during render. See Chapter 12, Section 02 (Frontend Performance) for a deeper treatment of INP, bundle optimization, code splitting, and Web Workers.

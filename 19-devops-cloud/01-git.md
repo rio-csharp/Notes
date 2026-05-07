@@ -294,7 +294,7 @@ Cherry-pick is useful for hotfixes and backporting, but overuse can create dupli
 
 ## Pull Request Quality
 
-A well-structured pull request (PR) helps reviewers focus on behavior and risk:
+A well-structured pull request (PR) helps reviewers focus on behavior and risk. For detailed guidance on code review practices including PR descriptions, reviewer responsibilities, and common review patterns, see the [Code Review Quality](../20-testing-quality/05-code-review-quality.md) chapter.
 
 - Test evidence and coverage details
 - Screenshots for UI changes

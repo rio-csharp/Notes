@@ -46,6 +46,8 @@ The sender should be reliable and observable.
 
 ## Example Receiver Endpoint
 
+(For the payment-specific variant of this pattern, including signature verification and idempotent handling in a payment context, see Chapter 22, "Payment Callback Design".)
+
 ```csharp
 [ApiController]
 [Route("api/webhooks/payments")]
@@ -116,7 +118,7 @@ Validate timestamp to reduce replay attack risk.
 
 ## Idempotency
 
-Providers may retry webhooks. Receivers must not process the same event twice.
+Providers may retry webhooks. Receivers must not process the same event twice. (For a detailed discussion of idempotency key design, race-safe storage, and request identity detection, see Chapter 7, "Idempotency, Retries, And Duplicate-Safe Operations".)
 
 Store event ID:
 
@@ -310,7 +312,7 @@ public async Task SendAsync(WebhookDelivery delivery, string secret, Cancellatio
 
 ## Retry Strategy
 
-Retries should use backoff and jitter.
+Retries should use backoff and jitter. (For a broader discussion of retry patterns, circuit breakers, and resilience engineering in .NET, see Chapter 17, "Backend Performance".)
 
 ```csharp
 private static TimeSpan ComputeBackoff(int attempt)

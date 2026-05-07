@@ -15,6 +15,8 @@ Important topics include:
 - clustering;
 - consistency trade-offs.
 
+For foundational Redis concepts including data types, basic patterns, and StackExchange.Redis setup, see the [Redis chapter](01-redis.md). This chapter builds on those concepts with deeper coverage of production concerns.
+
 ## Cache Aside Deep Dive
 
 Read:

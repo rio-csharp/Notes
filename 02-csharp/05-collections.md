@@ -558,4 +558,4 @@ var fast = orders
     .ToList();
 ```
 
-The code is almost identical at the surface. The important difference is that one version repeatedly performs linear membership checks while the other expresses the lookup requirement directly in the data structure.
+The code is almost identical at the surface. The important difference is that one version repeatedly performs linear membership checks while the other expresses the lookup requirement directly in the data structure. The LINQ chapter covers how these collection-backed queries compose and how materialization boundaries affect performance.

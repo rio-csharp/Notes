@@ -476,7 +476,7 @@ Good logs include:
 
 ## Testing As Maintainability
 
-Tests make future changes safer.
+Tests make future changes safer. (For a detailed discussion of testing strategy, the test pyramid, test double types, and risk-based testing, see Chapter 20, "Testing Strategy". For integration testing patterns in .NET, see Chapter 20, "Integration Testing In .NET".)
 
 Unit test domain rule:
 

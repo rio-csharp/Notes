@@ -332,6 +332,8 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.Decorate<IProductService, CachedProductService>();
 ```
 
+> The Decorator pattern is also discussed in Chapter 14.03 (Structural Patterns), which covers the general pattern with logging and caching decorator examples using `IProductReader`. The structural pattern chapter focuses on the difference between Decorator, Proxy, and Adapter, while this chapter focuses on DI registration strategies.
+
 ## Combining The Three
 
 A realistic request can use all three:

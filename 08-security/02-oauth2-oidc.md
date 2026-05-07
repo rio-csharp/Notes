@@ -147,7 +147,7 @@ Refresh-token rotation and reuse detection are common hardening techniques that 
 
 How a browser application stores or avoids storing tokens is a major security choice. Local storage is convenient but exposed to XSS. In-memory storage reduces persistence but complicates refresh behavior. Backend-for-frontend patterns move tokens server-side and leave the browser holding only a same-site session cookie.
 
-There is no universally perfect answer. The correct choice depends on threat model, deployment model, and operational complexity tolerance. What matters is that token storage is treated as an architectural security decision rather than as a frontend convenience detail.
+There is no universally perfect answer, but current industry consensus (RFC 9700, OAuth 2.1) strongly recommends the BFF pattern for production SPAs. By moving all token handling server-side, BFF eliminates the most critical attack vectors around token theft and session hijacking from browser JavaScript. The correct choice depends on threat model, deployment model, and operational complexity tolerance, but for applications handling personal or sensitive data, BFF should be the default starting point. What matters most is that token storage is treated as an architectural security decision rather than as a frontend convenience detail.
 
 ## Design Consequences
 

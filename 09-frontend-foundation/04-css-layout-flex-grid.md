@@ -119,6 +119,8 @@ App shell:
 
 `minmax(0, 1fr)` and `min-width: 0` prevent overflowing content from forcing the main column wider than the viewport.
 
+Note: on mobile browsers with dynamic toolbars, `100vh` can be taller than the visible viewport. Consider `100dvh` (dynamic viewport height) for app-shell layouts to avoid content being hidden behind browser chrome. The `dvh`, `svh`, and `lvh` units are Baseline Widely Available as of 2025.
+
 Responsive cards:
 
 ```css

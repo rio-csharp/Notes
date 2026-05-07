@@ -61,7 +61,7 @@ Features:
 - backend policy checks;
 - audit log for sensitive operations.
 
-A key security principle for this system was that frontend permission checks were used only for user experience. Backend policies were the real security boundary.
+A key security principle for this system was that frontend permission checks were used only for user experience. Backend policies were the real security boundary. (For JWT token design, OIDC provider integration, and permission system implementation, see Chapter 8, "JWT", "OAuth 2.0 And OIDC", and "Authorization Models".)
 
 ### Order Management
 
@@ -190,6 +190,8 @@ Upload document:
 ```http
 POST /api/orders/123/files/upload-requests
 ```
+
+(For API contract design, pagination, sorting, filtering, and idempotency, see Chapter 7, "REST API Design", "API Contracts And DTOs", and "Idempotency".)
 
 ## 6. Backend Implementation Highlights
 
@@ -393,6 +395,8 @@ Reason:
 - transactions were simpler;
 - deployment was easier;
 - modules could later be extracted if needed.
+
+(For a detailed discussion of modular monolith architecture, module boundaries, and extraction strategies, see Chapter 13, "Modular Monolith".)
 
 ### Redis Cache
 

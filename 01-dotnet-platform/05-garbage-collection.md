@@ -94,7 +94,7 @@ Pinned objects restrict the GC's ability to move objects during compaction. They
 
 **Workstation GC** is optimized for client applications and lower resource usage. It is the default for desktop and non-server workloads. Workstation GC uses a single heap and collects on the thread that triggered the collection (concurrent with other managed threads for Gen 2 background collections, but Gen 0 and Gen 1 collections are blocking). This mode minimizes memory footprint and thread count at the cost of lower throughput under sustained allocation.
 
-**Server GC** is optimized for throughput on multi-core machines. It creates a separate heap and a dedicated GC thread per logical processor, enabling parallel collection across all heaps simultaneously. Server GC is the default for ASP.NET Core applications. Server GC threads run at `THREAD_PRIORITY_HIGHEST`, and collections happen in parallel across all heaps, reducing pause time for a given allocation rate compared to workstation mode.
+**Server GC** is optimized for throughput on multi-core machines. Server GC is the default for ASP.NET Core applications. In .NET 9 and later, Server GC uses the Dynamic Adaptation to Application Sizes (DATAS) strategy: it starts with a single heap and dynamically adds or removes heaps based on load, reducing memory usage in containerized environments. Before DATAS (and still configurable via `GCHeapCount`), Server GC creates one heap per logical processor, each with a dedicated GC thread, enabling parallel collection across all heaps. Server GC threads run at `THREAD_PRIORITY_HIGHEST`, and collections happen in parallel, reducing pause time for a given allocation rate compared to workstation mode.
 
 Configuration typically lives in the project file:
 

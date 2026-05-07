@@ -288,3 +288,34 @@ The `withTimeout` and `getJson` examples earlier in this chapter demonstrate `as
 | `Promise.any` | Settles on first fulfillment; rejects only if all reject | Redundant requests (race multiple sources) |
 
 `Promise.allSettled` is particularly useful for batch operations where partial failure is acceptable, such as sending notifications to multiple users where some deliveries may fail independently.
+
+### Promise.withResolvers (ES2024)
+
+`Promise.withResolvers()` is a static method introduced in ECMAScript 2024 that simplifies creating a promise alongside its resolve and reject functions. Before this method, the pattern required a workaround via the executor callback:
+
+```ts
+// Before ES2024 -- resolve/reject captured through closure
+let resolve: (value: string) => void;
+let reject: (reason: unknown) => void;
+const promise = new Promise<string>((res, rej) => {
+  resolve = res;
+  reject = rej;
+});
+```
+
+With `Promise.withResolvers`, the same outcome is more explicit:
+
+```ts
+const { promise, resolve, reject } = Promise.withResolvers<string>();
+
+// Use in event-driven scenarios where external code must settle the promise
+function waitForUserAction(button: HTMLButtonElement): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+
+  button.addEventListener("click", () => resolve(), { once: true });
+
+  return promise;
+}
+```
+
+The method is particularly useful for bridging callback-based APIs with promise-based code, implementing retry loops, and managing async queues. It is available in all modern browsers and Node.js 22+.

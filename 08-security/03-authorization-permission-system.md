@@ -97,7 +97,7 @@ public sealed class OrdersController : ControllerBase
 
 ### Resource-Level Authorization
 
-When authorization depends on properties of the specific resource being accessed, policy attributes on the controller are insufficient. The system must evaluate the resource at runtime. ASP.NET Core supports this through `IAuthorizationService` and custom `AuthorizationHandler<TRequirement, TResource>`:
+When authorization depends on properties of the specific resource being accessed, policy attributes on the controller are insufficient. The system must evaluate the resource at runtime. ASP.NET Core supports this through `IAuthorizationService` and custom `AuthorizationHandler<TRequirement, TResource>`. (The ASP.NET Core authentication chapter introduces the handler pattern and the `IAuthorizationService` in more detail; this section builds on that foundation to focus on the permission model.)
 
 ```csharp
 // Requirement type

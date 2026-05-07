@@ -659,7 +659,7 @@ The .NET team has moved in this direction: `record struct` types cannot be inher
 
 ### JIT Devirtualization
 
-In .NET 8 and later, `sealed` provides a measurable runtime benefit through JIT devirtualization. When the JIT compiler sees a virtual method call on an instance of a sealed type, it can sometimes resolve the call at compile time and emit a direct call instruction rather than a virtual dispatch.
+In .NET 8 and later, `sealed` provides a measurable runtime benefit through JIT devirtualization (covered in the IL, JIT, and Native AOT chapter). When the JIT compiler sees a virtual method call on an instance of a sealed type, it can sometimes resolve the call at compile time and emit a direct call instruction rather than a virtual dispatch.
 
 ```csharp
 public interface IPaymentClient

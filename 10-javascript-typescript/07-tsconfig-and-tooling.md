@@ -9,7 +9,7 @@
 ```json
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
@@ -303,3 +303,5 @@ export default defineConfig({
 ```
 
 The most common failure mode is an alias mismatch: TypeScript resolves imports correctly in the editor, but the bundler cannot find the modules at build time. This produces "module not found" errors that only surface in CI. Using a shared alias configuration (e.g., reading from `tsconfig.json` paths into the bundler config) prevents this class of bug.
+
+See Chapter 12, Section 01 (Frontend Project Structure) for a complete discussion of dependency direction, feature-based structure, and how path aliases integrate with a modular frontend architecture.
