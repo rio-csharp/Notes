@@ -1,14 +1,6 @@
 # C# Type System
 
-## Core Idea
-
-C# has a strong, static type system.
-
-Understanding the type system helps you reason about memory, equality, null safety, generics, and API design.
-
-This chapter focuses on the type system itself: value semantics, reference semantics, nullability, equality, and the way type design shapes correctness. Generics are important to that story, but their deeper design rules belong to the dedicated generics chapter later in the chapter sequence.
-
-In practice, this chapter matters because many bugs that appear to be "business logic bugs" are actually type-design bugs. A model that allows contradictory states, ambiguous equality, or accidental nulls often shifts too much correctness work from the compiler into runtime conventions. The type system is one of the main tools C# offers for moving that work back into the design.
+C# has a strong, static type system. Understanding value semantics, reference semantics, nullability, equality, and type design shapes correctness at compile time rather than leaving it entirely to runtime conventions. Generics are part of this story, but their deeper design rules belong to the dedicated generics chapter.
 
 ## Value Types
 
@@ -22,17 +14,7 @@ Examples:
 - `struct`
 - `enum`
 
-Value types usually contain the data directly.
-
-The simplest mental model is:
-
-```text
-int a = 10;
-int b = a;
-
-a and b are two independent values.
-Changing b does not change a.
-```
+Value types contain data directly. Copying a value type copies the value:
 
 ```csharp
 int a = 10;
@@ -41,8 +23,6 @@ b = 20;
 
 Console.WriteLine(a); // 10
 ```
-
-Copying a value type copies the value.
 
 Struct example:
 
@@ -65,7 +45,7 @@ var copy = price;
 
 `copy` is a separate value. The `Currency` property is still a reference to a string object, but the struct value itself is copied.
 
-That last nuance is important. A value type is copied as a value, but the fields inside it still keep their own semantics. If a struct contains references, those references are copied too. This is one reason immutable structs are usually easier to reason about than mutable ones: copy semantics remain predictable even when the struct contains references to immutable objects.
+A value type is copied as a value, but the fields inside it retain their own semantics. If a struct contains references, those references are copied as well. Immutable structs are generally easier to reason about than mutable ones because copy semantics remain predictable even when the struct contains references to immutable objects.
 
 ## Reference Types
 
@@ -77,14 +57,7 @@ Examples:
 - delegates;
 - interfaces.
 
-Reference variables point to objects.
-
-The simplest mental model is:
-
-```text
-user1 -> User object on managed heap
-user2 -> same User object
-```
+Reference variables point to objects on the managed heap. Both variables can reference the same object:
 
 ```csharp
 var user1 = new User { Name = "Alice" };
@@ -95,9 +68,7 @@ user2.Name = "Bob";
 Console.WriteLine(user1.Name); // Bob
 ```
 
-Both variables reference the same object.
-
-This is why changing through `user2` is visible through `user1`.
+Both variables reference the same object, so mutation through either variable is visible to both:
 
 Example with method call:
 
@@ -114,7 +85,7 @@ Console.WriteLine(user.Name); // Charlie
 
 The reference is passed by value, but the copied reference still points to the same object.
 
-One important nuance is that:
+A method that reassigns its own parameter does not affect the caller:
 
 ```csharp
 public static void Replace(User user)
@@ -129,11 +100,11 @@ Console.WriteLine(user.Name); // Alice
 
 The method changed its local copy of the reference. It did not change the caller's variable.
 
-This distinction becomes especially important in API design. Many developers initially describe reference types as "passed by reference," but the more accurate statement is that the reference value is passed by value unless `ref` is explicitly used. That mental model explains why a method can mutate an object but cannot rebind the caller's variable just by assigning a new object to its parameter.
+Reference types are commonly described as "passed by reference," but the more accurate description is that the reference value is passed by value unless `ref` is explicitly used. That model explains why a method can mutate an object but cannot rebind the caller's variable by assigning a new object to its parameter.
 
 ## Boxing And Unboxing
 
-Boxing converts a value type to `object` or interface.
+Boxing converts a value type to `object` or an interface it implements.
 
 ```csharp
 int number = 42;
@@ -141,31 +112,14 @@ object boxed = number;     // boxing
 int unboxed = (int)boxed;  // unboxing
 ```
 
-Boxing allocates an object on the heap.
-
-Avoid boxing in hot paths.
-
-Example:
-
-```csharp
-var numbers = new List<int>(); // no boxing for int values
-```
-
-But:
-
-```csharp
-var objects = new ArrayList();
-objects.Add(42); // boxing
-```
-
-Boxing diagram:
+Boxing allocates a heap object whose layout consists of three regions: a sync block (used for locking and GC bookkeeping), a method table pointer (identifying the type at runtime), and the raw bytes of the value itself. The value is copied from its current location into that heap allocation, and the resulting reference points to the managed heap like any other reference type.
 
 ```text
 int number = 42
   -> value stored as int
 
 object boxed = number
-  -> new heap object containing copied int value
+  -> new heap object containing [sync block | method table ptr | int 42]
   -> boxed reference points to heap object
 ```
 
@@ -178,22 +132,42 @@ int ok = (int)boxed;
 // long fail = (long)boxed; // InvalidCastException
 ```
 
-Why performance can suffer:
+When boxing occurs inside a hot loop, the cumulative allocation cost becomes measurable. The following comparison uses `List<int>` (no boxing) against `ArrayList` (boxes every `int` on `Add`):
 
-- boxing allocates;
-- unboxing casts;
-- repeated boxing in hot loops creates GC pressure.
+```csharp
+// Representative BenchmarkDotNet results on .NET 8:
+// | Method         | Mean      | Allocated  |
+// |--------------- |----------:|-----------:|
+// | ListAdd        |  2.3 ns   |         -- |
+// | ArrayListAdd   | 11.8 ns   |      32 B  |
+```
 
-Boxing is not always a disaster, but it is often a sign that the type system is being forced through a less precise abstraction than the code really wants. Modern generic APIs exist partly to avoid that cost while keeping the call sites strongly typed.
+Each boxed `int` consumes 24 bytes of heap space on a 64-bit runtime (16 bytes of object header and 8 bytes for the payload, aligned), and each allocation contributes to gen-0 collection frequency. In a loop processing millions of elements, the difference between zero allocations and millions of short-lived heap objects is often the difference between stable throughput and visible GC pauses.
 
-Common hidden boxing:
+Generic APIs avoid this cost entirely by preserving the concrete value type at every step:
+
+```csharp
+var numbers = new List<int>();  // stores raw ints, no boxing
+```
+
+The older non-generic collection APIs do not:
+
+```csharp
+var objects = new ArrayList();
+objects.Add(42); // boxes int to object on every Add
+```
+
+Occasional boxing in cold paths is negligible, but boxing in hot paths is often a signal that a type is being forced through a less precise abstraction than the code requires. Modern generic APIs exist partly to eliminate that cost while keeping the call sites strongly typed.
+
+Common hidden boxing locations include interface dispatch on value types and APIs that accept `object`:
 
 ```csharp
 int value = 10;
-Console.WriteLine(value.ToString()); // no boxing needed for ToString
+Console.WriteLine(value.ToString());    // no boxing: int overrides ToString
 
-object obj = value; // boxing
-IComparable comparable = value; // boxing
+object obj = value;                     // boxing
+IComparable comparable = value;         // boxing: value type to interface
+string s = string.Format("{0}", value); // boxing: Format accepts object[]
 ```
 
 ## Class vs Struct vs Record
@@ -302,9 +276,7 @@ var right = new UserClass { Id = 1, Name = "Alice" };
 Console.WriteLine(left == right); // false by default
 ```
 
-This is why records are nice for DTOs but should be used carefully for domain entities.
-
-The underlying design question is whether the type is identified by who it is or by what data it contains. DTOs, commands, settings objects, and immutable projections often fit value-based equality naturally. Domain entities usually do not, because two separate customers with the same visible data are not the same customer.
+Records suit DTOs, commands, and read models for this reason. Domain entities, whose identity persists across data changes, should be designed carefully when using records — the underlying question is whether the type is identified by identity or by the data it carries.
 
 ## Nullable Reference Types
 
@@ -312,6 +284,17 @@ Enable:
 
 ```xml
 <Nullable>enable</Nullable>
+```
+
+A fuller project example looks like this:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+</Project>
 ```
 
 Example:
@@ -341,6 +324,14 @@ public sealed class User
 
 With nullable enabled, the compiler warns because `Name` is non-nullable but not initialized.
 
+A standard build surfaces nullable warnings directly:
+
+```bash
+dotnet build
+```
+
+When nullable reference types are enabled, the compiler emits warnings for code paths that may violate the declared nullability contract. The feature is not merely conceptual — it changes the feedback the codebase receives during ordinary compilation, making nullability mistakes visible before any test runs or deployment happens.
+
 Good options:
 
 ```csharp
@@ -369,7 +360,60 @@ public static int GetLength(string? text)
 
 Nullable reference types are a static analysis feature. They reduce null-related bugs, but runtime input still needs validation.
 
-This is one of the healthiest changes in modern C#. Before nullable reference types, many codebases treated nullability as a social convention. With nullable enabled, null becomes part of the documented type contract. That does not eliminate null bugs entirely, but it makes careless API design far easier to spot.
+Before nullable reference types, many codebases treated nullability as a social convention — team agreements, code review norms, and naming patterns carried the burden. With nullable enabled, null becomes part of the documented type contract and the compiler holds every code path to that contract. The feature does not eliminate null bugs entirely, but it makes careless API design far easier to spot during ordinary compilation.
+
+One related feature deserves careful handling:
+
+```csharp
+string name = possiblyNull!;
+```
+
+The null-forgiving operator tells the compiler to suppress a nullable warning at that location. It does not make the value non-null at runtime. The `!` operator should represent genuine knowledge the code has already established, not a routine way to silence analysis that the design should address more honestly.
+
+### Nullable Reference Types And JSON Deserialization
+
+Nullable reference types operate at compile time, but JSON deserialization happens at runtime. This gap is a recurring source of unexpected nulls in production code. Consider a typical request model:
+
+```csharp
+public sealed class CreateOrderRequest
+{
+    public required string CustomerName { get; init; }
+    public required string? Notes { get; init; }
+    public decimal Discount { get; init; }
+}
+```
+
+`System.Text.Json` deserializes JSON into this type without consulting nullable annotations. If the incoming JSON omits `CustomerName`, the deserializer assigns `null` to a property the type declares as non-nullable. No exception is thrown during deserialization — the null propagates to later code that accesses `CustomerName`, where a `NullReferenceException` appears far from the original input boundary:
+
+```csharp
+var request = JsonSerializer.Deserialize<CreateOrderRequest>("""{"Discount":5}""");
+Console.WriteLine(request!.CustomerName.Length); // NullReferenceException
+```
+
+The `required` keyword prevents callers from constructing the type in C# without supplying `CustomerName`, but `required` is also a compile-time constraint. The deserializer bypasses it unless the JSON source generator or a custom converter enforces the requirement.
+
+The `[JsonRequired]` attribute from `System.Text.Json` changes deserialization behavior: the deserializer throws a `JsonException` when the annotated property is missing from the JSON payload. This provides a runtime safety net that aligns with the intent expressed by the non-nullable annotation:
+
+```csharp
+using System.Text.Json.Serialization;
+
+public sealed class CreateOrderRequest
+{
+    [JsonRequired]
+    public required string CustomerName { get; init; }
+    public required string? Notes { get; init; }
+    public decimal Discount { get; init; }
+}
+```
+
+The deserialization now fails at the boundary:
+
+```csharp
+// JsonException: JSON property 'CustomerName' is required.
+var request = JsonSerializer.Deserialize<CreateOrderRequest>("""{"Discount":5}""");
+```
+
+The broader principle is that nullable reference types describe a static contract, but data from external systems — JSON payloads, database rows, message queues — enters the process at runtime and must be validated at that boundary. Treating deserialized objects as trusted without validation is the most common way nullable reference types fail to deliver their intended benefit.
 
 ## Pattern Matching
 
@@ -418,9 +462,9 @@ It also encourages a style of code where the shape of the data is expressed dire
 
 ## Modeling State With Types
 
-A useful habit in C# is to model impossible states as impossible, or at least harder to create.
+Modeling types so that invalid states are difficult or impossible to create is one of the type system's most practical engineering benefits.
 
-Bad model:
+A common anti-pattern uses multiple independent booleans to track state:
 
 ```csharp
 public sealed class Payment
@@ -432,7 +476,7 @@ public sealed class Payment
 }
 ```
 
-Problem:
+This design permits contradictory combinations without compiler feedback:
 
 ```text
 IsPaid = true
@@ -441,9 +485,9 @@ PaidAt = null
 FailureReason = null
 ```
 
-The type allows contradictory states. Every caller must remember extra rules.
+The type allows states that make no business sense, and every caller must remember rules the type itself does not enforce.
 
-Better model with records:
+A clearer representation uses records to express alternatives:
 
 ```csharp
 public abstract record PaymentStatus
@@ -469,11 +513,45 @@ public static string Describe(PaymentStatus status)
 }
 ```
 
-This is not a full algebraic data type system, but it is a practical C# way to express alternatives.
+This is not a complete algebraic data type system, but it is a practical way to express alternatives in C#. Good type design narrows the set of invalid programs the rest of the system can accidentally write.
 
-Good type design reduces the number of runtime checks needed later. The compiler becomes part of the design feedback loop.
+A richer application-style example makes the contrast clearer:
 
-This is one of the central professional uses of the type system. Good type design does not merely store data neatly. It narrows the set of invalid programs that the rest of the system can accidentally write.
+```csharp
+public sealed class Payment
+{
+    public int Id { get; init; }
+    public PaymentStatus Status { get; private set; } = new PaymentStatus.Pending();
+
+    public void MarkPaid(DateTimeOffset paidAt)
+    {
+        Status = new PaymentStatus.Paid(paidAt);
+    }
+
+    public void MarkFailed(string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("Failure reason is required.", nameof(reason));
+        }
+
+        Status = new PaymentStatus.Failed(reason);
+    }
+}
+
+public static string BuildAuditMessage(Payment payment)
+{
+    return payment.Status switch
+    {
+        PaymentStatus.Pending => $"Payment {payment.Id} is still pending.",
+        PaymentStatus.Paid paid => $"Payment {payment.Id} succeeded at {paid.PaidAt:O}.",
+        PaymentStatus.Failed failed => $"Payment {payment.Id} failed: {failed.Reason}.",
+        _ => throw new ArgumentOutOfRangeException(nameof(payment))
+    };
+}
+```
+
+This example shows how the type choice affects both write-side state transitions and read-side logic that consumes the model later.
 
 ## Type Parameters As Part Of Type Design
 
@@ -489,9 +567,7 @@ public sealed record Result<T>(bool IsSuccess, T? Value, string? Error)
 
 Here the compiler knows that `Value` is a `UserDto?`, not just `object`, which means the type system continues to protect the API all the way to the call site.
 
-The dedicated generics chapter later in this part of the book goes deeper into constraints, variance, boxing avoidance, open generics, and generic design trade-offs. At this stage, the important idea is simply that generics are part of the type system's ability to keep APIs precise without giving up reuse.
-
-That precision matters operationally as well as aesthetically. Once an API falls back to `object`, strings, loosely structured dictionaries, or parallel booleans for concepts that could have been modeled precisely, the codebase often compensates with more runtime checks, more documentation burden, and more fragile integration code.
+The dedicated generics chapter goes deeper into constraints, variance, boxing avoidance, open generics, and generic design trade-offs. At the type-system level, generics keep APIs precise without giving up reuse. Once an API falls back to `object`, strings, or loose dictionaries for concepts that could have been modeled precisely, the codebase compensates with more runtime checks and more fragile integration code.
 
 ## Equality
 
@@ -554,17 +630,51 @@ public sealed class ProductId : IEquatable<ProductId>
 }
 ```
 
-Why `GetHashCode` matters:
+Collections such as `Dictionary` and `HashSet` depend on equality and hash codes. An incorrect equality override breaks lookup behavior silently.
 
-> Collections such as `Dictionary` and `HashSet` depend on equality and hash codes. If you override equality incorrectly, lookups can behave incorrectly.
+Equality design has real downstream consequences. It affects hash-based collections, caching, deduplication, set operations, testing semantics, and sometimes persistence behavior. Equality should be treated as part of the type's meaning, not as a mechanical override required by tooling.
 
-Equality design has real downstream consequences. It affects hash-based collections, caching, deduplication, set operations, testing semantics, and sometimes persistence behavior. That is why equality should be treated as part of the type's meaning, not just as a mechanical override required by tooling.
+Records receive structural equality through compiler-generated overrides of `Equals(object)`, `GetHashCode`, `==`, `!=`, and `IEquatable<T>.Equals`. Each generated method compares every instance field or positional property for equality. The compiler also overrides `EqualityContract` to ensure that two records of different types (even derived ones) are never equal. This generation is what makes `record class` and `record struct` behave differently from plain `class` and `struct` by default.
+
+The `EqualityComparer<T>.Default` property reflects this distinction:
+
+```csharp
+var classComparer = EqualityComparer<UserClass>.Default;
+var recordComparer = EqualityComparer<UserDto>.Default;
+
+// For UserClass: calls Object.Equals (reference equality unless overridden)
+// For UserDto: calls the generated IEquatable<UserDto>.Equals
+```
+
+Hash-based collections depend on the contract that equal objects produce equal hash codes — and that hash codes remain stable while an object is a key. A `record` or `record struct` used as a dictionary key is vulnerable to silent corruption if a property that participates in equality is mutated after insertion:
+
+```csharp
+var dict = new Dictionary<UserDto, string>();
+var key = new UserDto(1, "Alice");
+dict[key] = "value";
+
+// UserDto is mutable by default (no init-only, no readonly).
+// If UserDto were defined without init-only properties, this would compile:
+// key.Name = "Bob";
+
+// The key's hash code changes, but the dictionary indexed by the old hash.
+// dict.TryGetValue(key, out _) now returns false — the entry is orphaned.
+```
+
+Positional records using `init`-only properties or `readonly record struct` avoid this problem because the compiler prevents post-construction mutation. For mutable records, the danger is real and the compiler offers no warning.
 
 ## Type Design Notes
 
 Value types generally contain data directly and are copied by value. Reference types store references to objects, and copying the variable copies the reference rather than the object itself.
 
-Value types are not guaranteed to live on the stack. Placement depends on context. A value type can appear inside an object on the heap, inside an array, boxed, captured by a closure, or optimized by the JIT in other ways.
+Value types are not guaranteed to live on the stack. Their storage location depends on the enclosing context:
+
+- **Local variable in a non-async method**: typically on the stack, though the JIT may enregister the value entirely.
+- **Field of a class**: on the managed heap, inside the containing object.
+- **Element of an array**: on the managed heap, inlined into the array's payload (arrays are heap-allocated reference types).
+- **Boxed value type**: a new heap object wrapping a copy of the value.
+- **Captured by a lambda or async state machine**: lifted to a field on the compiler-generated closure class, and therefore on the heap.
+- **Static field**: on the heap as part of the type's static data region, regardless of whether the enclosing type is a class or struct.
 
 Boxing wraps a value type in an object so it can be treated as `object` or an interface. That introduces heap allocation and can matter in hot paths.
 
@@ -575,3 +685,33 @@ By default, C# passes a reference value by value. A method receives a copy of th
 Nullable reference types provide compile-time warnings about possible null misuse. They improve local correctness, but they do not guarantee that runtime data from JSON, databases, or external systems is valid.
 
 Several booleans often permit invalid combinations. Separate types or discriminated state shapes usually express valid alternatives more clearly and make business rules easier to enforce.
+
+## The `default` Keyword And Nullability
+
+The `default` expression and `default(T)` produce the zero-initialized value for any type. For reference types, the default is `null`. For value types, it is the struct with all fields zeroed:
+
+```csharp
+string? name = default;          // null
+int count = default;             // 0
+DateTime date = default;         // DateTime.MinValue (0001-01-01)
+UserDto? dto = default;          // null (UserDto is a reference type)
+Money money = default;           // Amount=0, Currency=null
+```
+
+The interaction with nullable reference types is subtle. `default(string)` produces `null`, but the compiler does not warn when assigning it to a non-nullable `string` variable if the variable is uninitialized at the point of assignment — the flow analysis tracks definite assignment, not value correctness. Explicit use of `default!` (null-forgiving) suppresses warnings for reference types:
+
+```csharp
+string name = default!; // Compiler is silenced, but name is null at runtime.
+```
+
+The `default` keyword is most useful in generic code, where the type parameter may be either a value type or a reference type and the code must produce a neutral starting value:
+
+```csharp
+public sealed record Result<T>(bool IsSuccess, T? Value, string? Error)
+{
+    public static Result<T> Failure(string error) => new(false, default, error);
+    // default produces null for reference types and the zero value for value types.
+}
+```
+
+In non-generic code, explicit initialization with a meaningful value is generally clearer than relying on `default`.

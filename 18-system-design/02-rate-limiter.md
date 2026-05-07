@@ -33,8 +33,6 @@ Example:
 100 requests per minute
 ```
 
-Problem:
-
 Boundary burst. A client can send 100 requests at 12:00:59 and 100 at 12:01:00.
 
 ### Sliding Window
@@ -66,7 +64,7 @@ Limit: 100 requests/minute
 Window: 12:00:00 - 12:00:59
 ```
 
-Problem:
+However:
 
 ```text
 100 requests at 12:00:59
@@ -105,16 +103,39 @@ Cons:
 
 ### Sliding Window Counter
 
-Approximate current usage by combining current and previous fixed windows.
+The sliding window counter approximates a true sliding window by combining the weighted counts of the current and previous fixed windows. It avoids storing all individual request timestamps while providing significantly better accuracy than a pure fixed window.
+
+#### Mechanism
+
+Given a 1-minute window divided into 1-minute sub-windows:
+
+```
+Previous window (12:00:00 - 12:00:59): 80 requests
+Current window  (12:01:00 - 12:01:59): 30 requests (at 12:01:30)
+```
+
+To estimate the count for the sliding window ending at 12:01:30 (which covers 12:00:30 - 12:01:30), compute:
+
+```
+weight = elapsed_in_current_window / window_duration
+        = 30 seconds / 60 seconds
+        = 0.5
+
+estimated_count = previous_window_count * (1 - weight) + current_window_count
+                = 80 * 0.5 + 30
+                = 70
+```
+
+This estimate is checked against the limit instead of a single fixed-window counter.
 
 Pros:
 
-- more accurate than fixed window;
-- cheaper than sliding log.
+- significantly more accurate than fixed window (eliminates the boundary burst);
+- much cheaper than sliding log (only two counters per key needed).
 
 Cons:
 
-- still approximate.
+- still an approximation; at high request rates the estimate can diverge slightly from the true count.
 
 ### Token Bucket
 
@@ -135,9 +156,7 @@ Trade-off:
 - can add queueing delay;
 - may reject when queue is full.
 
-Engineering perspective:
-
-> I choose based on product behavior. Fixed window is simple but has boundary bursts. Sliding log is accurate but expensive. Token bucket is a strong default because it allows controlled burst while enforcing long-term rate.
+Fixed window is simple but has boundary bursts. Sliding log is accurate but expensive. Token bucket is a strong default because it allows controlled burst while enforcing long-term rate.
 
 ## Redis Lua For Atomicity
 
@@ -177,9 +196,7 @@ end
 return 1
 ```
 
-Key point:
-
-> For a distributed rate limiter, the check and increment must be atomic. Redis Lua or carefully chosen atomic commands prevent race conditions.
+For a distributed rate limiter, the check and increment must be atomic. Redis Lua or carefully chosen atomic commands prevent race conditions.
 
 ## Fail Open vs Fail Closed
 
@@ -206,9 +223,7 @@ Examples:
 | payment API protection | fail closed or degraded manual review |
 | internal low-risk API | fail open may be acceptable |
 
-Engineering perspective:
-
-> Rate limiter failure behavior is a product/security decision. I explicitly choose fail-open or fail-closed based on abuse risk and availability requirements.
+Rate limiter failure behavior is a product and security decision. The choice between fail-open and fail-closed depends on abuse risk and availability requirements.
 
 ## Redis Fixed Window Example
 
@@ -286,9 +301,7 @@ Options:
 - fail closed: reject requests;
 - local fallback limiter.
 
-Engineering perspective:
-
-> For public abuse protection, I may fail closed for suspicious traffic. For critical internal business APIs, I may fail open temporarily and alert, because blocking all traffic could be worse.
+For public abuse protection, failing closed for suspicious traffic may be appropriate. For critical internal business APIs, failing open temporarily with alerting may be preferable, since blocking all traffic could be worse.
 
 ## Token Bucket With Redis Lua
 

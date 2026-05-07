@@ -4,7 +4,7 @@
 
 Authentication establishes who the caller is. Authorization decides what that authenticated caller is allowed to do. In ASP.NET Core, these are distinct but closely connected parts of the request pipeline, and many security bugs come from confusing one for the other or from oversimplifying where each decision should happen.
 
-This chapter treats security as an application boundary concern rather than a collection of attributes to memorize. The goal is to understand how identity enters the system, how access decisions are evaluated, and where static policy checks stop being enough.
+Security is an application boundary concern. Understanding how identity enters the system, how access decisions are evaluated, and where static policy checks stop being enough is essential.
 
 ## Identity In The Request Pipeline
 
@@ -393,6 +393,6 @@ Even this simple example illustrates the broader principle that API keys belong 
 
 ## Security Boundary Discipline
 
-One final principle ties the chapter together: frontend checks are not the security boundary. They may improve user experience, but they do not enforce anything once a client can call the API directly.
+Frontend checks are not the security boundary. They may improve user experience, but they do not enforce anything once a client can call the API directly.
 
 The real boundary is always the server-side pipeline that validates credentials, constructs identity, evaluates policy, and verifies access against both endpoint rules and resource state. Multi-tenant systems especially must keep tenant scope, ownership checks, and resource authorization on the server, regardless of what the frontend UI suggests the user should or should not be able to do.

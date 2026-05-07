@@ -4,8 +4,6 @@
 
 How a browser application stores or avoids storing authentication state is one of the most consequential security design choices in modern web systems. There is no storage option without trade-offs. The right design depends on how the system balances XSS risk, CSRF risk, user experience, infrastructure complexity, and session lifetime requirements.
 
-This chapter focuses on those trade-offs rather than presenting one storage mechanism as universally correct.
-
 ## Memory, Browser Storage, And Cookies
 
 Common browser-side options include:
@@ -51,7 +49,7 @@ The BFF pattern is therefore a security-architecture choice, not a universal rep
 
 ## XSS Versus CSRF Pressure
 
-One of the most important browser-security insights is that session design often shifts risk rather than eliminating it.
+Session design often shifts risk rather than eliminating it.
 
 Browser-readable token storage increases XSS impact. Browser-automatically-sent cookies increase CSRF importance. The right choice depends on which risks the application can better control and what class of compromise would be most damaging.
 

@@ -131,8 +131,6 @@ app.UseAuthorization();
 app.MapReverseProxy().RequireAuthorization();
 ```
 
-Important:
-
 Service-level authorization is still needed. Gateway authentication does not replace resource checks in backend services.
 
 ## Rate Limiting
@@ -280,13 +278,4 @@ Avoid retrying non-idempotent `POST` blindly.
 - inconsistent authorization model;
 - large request/response transformations.
 
-## Practice Task
-
-Design gateway for:
-
-1. React frontend;
-2. order service;
-3. payment service;
-4. auth validation;
-5. rate limiting;
-6. request tracing.
+An effective API gateway design balances routing, authentication, rate limiting, correlation ID propagation, and resilience patterns as described throughout this chapter.

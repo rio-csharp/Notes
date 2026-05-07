@@ -1,42 +1,23 @@
 # .NET Execution Model
 
-## Core Idea
-
-The .NET execution model explains how C# code becomes running machine code.
-
-This chapter focuses on the path from source code to executing instructions. It is intentionally narrower than the next chapter. Here the concern is execution flow. The next chapter concentrates on alternative compilation and publishing strategies such as ReadyToRun, trimming, and Native AOT.
-
-High-level flow:
-
-```text
-C# source code
-  -> Roslyn compiler
-  -> IL + metadata inside assembly
-  -> CLR loads assembly
-  -> JIT compiles IL to native machine code
-  -> CPU executes native code
-```
-
-Important terms:
-
-- `Assembly`: compiled `.dll` or `.exe` containing IL and metadata.
-- `Managed code`: code executed under CLR control.
-- `Native code`: machine code executed directly by CPU.
-
-## Operational Significance
-
-Understanding the execution model helps explain runtime behavior:
-
-- why build artifacts are IL and metadata instead of final CPU-specific binaries;
-- why startup and steady-state performance can differ;
-- why runtime services such as JIT and GC affect application behavior even when the source code does not change;
-- why deployment choices can change startup characteristics.
+The .NET execution model describes the path from C# source code to executing machine instructions. This chapter covers the default compilation and execution pipeline. Alternative strategies — ReadyToRun, trimming, and Native AOT — are covered in the next chapter.
 
 ## Compilation Flow
 
-### Step 1: C# To IL
+```text
+C# source code
+  Roslyn compiler
+  IL + metadata inside assembly (.dll / .exe)
+  CLR loads assembly
+  JIT compiles IL to native machine code
+  CPU executes native code
+```
 
-Example C#:
+An **assembly** is a compiled `.dll` or `.exe` containing IL and metadata. **Managed code** executes under CLR control; **native code** runs directly on the CPU. The key structural property is that build output is IL and metadata rather than final CPU-specific binaries — which means the runtime, not the compiler, makes the final translation to machine code.
+
+### C# To IL
+
+The Roslyn compiler translates C# into IL and records metadata describing every type, method signature, attribute, referenced assembly, and generic type parameter. This metadata is what enables reflection — the runtime can inspect its own structure because the compiler preserved it.
 
 ```csharp
 public static int Add(int a, int b)
@@ -45,25 +26,7 @@ public static int Add(int a, int b)
 }
 ```
 
-The compiler does not directly create CPU-specific machine code. It creates IL and metadata.
-
-Metadata includes:
-
-- type names;
-- method signatures;
-- attributes;
-- referenced assemblies;
-- generic type information.
-
-This is why .NET supports reflection.
-
-If you inspect build output after:
-
-```bash
-dotnet build
-```
-
-you will typically see assemblies such as:
+The compiler records both the IL instructions for `Add` and metadata describing the method name, parameters, and return type. After `dotnet build -c Release`, the output directory typically contains:
 
 ```text
 bin/Release/net8.0/RuntimeDemo.dll
@@ -72,87 +35,43 @@ bin/Release/net8.0/RuntimeDemo.deps.json
 bin/Release/net8.0/RuntimeDemo.runtimeconfig.json
 ```
 
-That file set helps reinforce the model. The assembly contains IL and metadata. The `.deps.json` and `.runtimeconfig.json` files help the runtime determine dependencies and framework requirements when the application starts.
+The assembly (`RuntimeDemo.dll`) contains IL and metadata. The `.deps.json` file describes dependency assets. The `.runtimeconfig.json` file declares the target framework and runtime requirements. Release builds are preferred for understanding realistic runtime behavior — Debug builds include additional instrumentation that changes JIT optimization and startup characteristics.
 
-Try this small program:
+### Assembly Loading
 
-```csharp
-public static class Calculator
-{
-    public static int Add(int left, int right)
-    {
-        return left + right;
-    }
-}
+When the application starts, the CLR loads assemblies through `AssemblyLoadContext`. In modern .NET, the default load context resolves project references and NuGet packages automatically. Custom `AssemblyLoadContext` instances appear only in specialized scenarios: plugin systems, dependency isolation, or unloadable extensions. Managing multiple versions of the same assembly is inherently difficult; the runtime resolves one version per assembly identity by default, and deliberate isolation requires custom load contexts.
 
-Console.WriteLine(Calculator.Add(2, 3));
+### JIT Compilation
+
+JIT (Just-In-Time) compilation translates IL to native code when a method is first invoked. Several properties follow from this design:
+
+- The first invocation of a method incurs compilation cost. Subsequent calls reuse the compiled native code.
+- The JIT can optimize for the specific CPU architecture of the current machine.
+- Tiered compilation generates quick code initially, then recompiles hot methods with more aggressive optimizations later.
+
+JIT-compiled code lives inside the process. When the process exits, the generated native code is lost. A new process JITs again unless precompiled code (ReadyToRun or Native AOT) is used. Increasing CPU or memory on a VM does not cause already-compiled methods to regenerate — the new resources mainly affect parallelism, thread scheduling, and GC behavior. Restarting the process allows the runtime to initialize under the new environment.
+
+The cold-start versus warm-process difference is measurable. In a representative ASP.NET Core service on .NET 9, the first request after process start can take 200–800 ms longer than a warm request, depending on the application size and dependency graph. This overhead comes from host startup, assembly loading, first-use JIT compilation, dependency-graph initialization, and application cache warm-up. Later requests avoid most of that cost. A measurement pattern that isolates cold-start behavior:
+
+```bash
+# Cold: start process, send first request
+dotnet MyApp.dll &
+sleep 2  # allow host/runtime startup
+time curl -s http://localhost:5000/api/orders/1
+
+# Warm: repeat without restarting
+time curl -s http://localhost:5000/api/orders/1
 ```
 
-The important point is not the `Add` method itself. The important point is that the C# compiler records both executable IL and metadata describing `Calculator`, `Add`, parameters, return type, and referenced assemblies.
-
-### Step 2: Assembly Loading
-
-When the application runs, CLR loads assemblies. In modern .NET, loading is handled by `AssemblyLoadContext`.
-
-Key points:
-
-- multiple versions of assemblies can be difficult to manage;
-- extensibility scenarios may use custom `AssemblyLoadContext`;
-- dynamic loading requires careful reference management if unloadability matters.
-
-### Step 3: JIT Compilation
-
-JIT compiles IL to native code when a method is executed.
-
-Key details:
-
-- The first call may be slower because compilation happens then.
-- Subsequent calls reuse compiled native code.
-- JIT can optimize based on the current CPU architecture.
-- Tiered compilation can first generate quick code, then optimize hot methods later.
-
-JIT caching scope:
-
-> JIT-compiled native code is normally reused inside the same process. If the process exits, that generated native code is gone. A new process will JIT again unless precompiled code such as ReadyToRun or Native AOT is used.
-
-VM/container resource changes:
-
-> Increasing CPU or memory for a VM does not usually cause all already-JIT-compiled methods to be recompiled immediately. More CPU mainly affects parallelism, thread scheduling, thread pool behavior, and server GC capacity. More memory mainly affects GC pressure and memory limits. Restarting the process lets the runtime initialize under the new environment.
-
-JIT compilation is per-process. Resource changes affect runtime behavior, especially GC and scheduling, but already generated method code is not generally regenerated just because the VM now has more CPU or memory.
-
-In real services, this often appears as a cold-start versus warm-process difference. The first request after process start may pay:
-
-- host startup;
-- assembly loading;
-- first-use JIT compilation;
-- dependency graph initialization;
-- cache warm-up inside the application.
-
-Later requests usually avoid much of that first-use work, which is why startup latency and steady-state throughput should be measured separately.
+The difference between these two timings is the first-use cost. Restarting the process restores the full cost — confirming that JIT compilation is per-process, not machine-global. In CI pipelines that measure startup time, each run must start a fresh process; reusing a warm process hides the cost the production deployment will pay.
 
 ## Stack And Heap
 
-The stack is used for method calls and local value data.
+The .NET runtime partitions memory into two regions with different allocation and lifetime semantics.
 
-The heap is used for objects managed by GC.
+The **stack** stores method call frames: local variables, parameters, return addresses, and references to heap objects. Allocation and deallocation are deterministic — a stack frame is created on method entry and released on return.
 
-More precise mental model:
-
-```text
-Stack frame:
-  local variables
-  method call information
-  references to heap objects
-
-Managed heap:
-  objects created with new
-  arrays
-  boxed values
-  closure objects
-```
-
-For example:
+The **managed heap** stores objects created with `new`, arrays, boxed value types, and closure objects. Allocation is fast (a pointer bump in the common case), but deallocation is non-deterministic — the GC reclaims objects when they become unreachable, not when they go out of lexical scope.
 
 ```csharp
 public class User
@@ -162,15 +81,13 @@ public class User
 
 public static void Demo()
 {
-    int age = 30;              // value stored in stack frame
-    User user = new User();    // reference on stack, object on heap
-    user.Name = "Alice";       // string object also lives on heap
+    int age = 30;              // value stored in the stack frame
+    User user = new User();    // reference on stack, object on managed heap
+    user.Name = "Alice";       // string object also on managed heap
 }
 ```
 
-In C#, a local variable of reference type usually stores a reference in the stack frame, while the object itself is allocated on the managed heap. Value types can be stored inline, but exact placement depends on context, such as fields, arrays, closures, boxing, and JIT optimizations.
-
-Concrete examples:
+A local variable of reference type stores a reference in the stack frame; the object itself lives on the heap. Value types can be stored inline, but exact placement depends on context — fields, arrays, closures, boxing, and JIT optimizations all affect the final location:
 
 ```csharp
 public sealed class Order
@@ -180,14 +97,14 @@ public sealed class Order
 
 public static void Demo()
 {
-    int local = 10;                // usually in stack frame or optimized register
+    int local = 10;                // stack frame or register (JIT decides)
     var order = new Order();       // reference local, object on heap
     int[] numbers = [1, 2, 3];     // reference local, array object on heap
     object boxed = local;          // boxed int copied into a heap object
 }
 ```
 
-A closure makes this more concrete:
+Closures demonstrate the practical consequence of the stack/heap distinction. A lambda that captures a local variable must outlive the stack frame it was defined in:
 
 ```csharp
 public static Func<int> CreateCounter()
@@ -202,15 +119,11 @@ public static Func<int> CreateCounter()
 }
 ```
 
-The lambda can run after `CreateCounter` returns, so `count` cannot behave like an ordinary stack-only local. The compiler creates a closure object so the captured value can live longer.
+The lambda can execute after `CreateCounter` returns, so `count` cannot remain a stack-only local. The compiler lifts it into a compiler-generated closure object on the heap. The underlying principle is that variable lifetime in .NET is governed by reachability, not lexical scope.
 
 ## Object Lifetime And Reachability
 
-Object lifetime in .NET depends on reachability rather than lexical scope alone.
-
-If a reference to an object remains reachable from a GC root, the object can stay alive even after the local variable that first referenced it has gone out of scope.
-
-For example:
+An object remains alive as long as a reachable reference points to it, regardless of whether the original local variable has gone out of scope.
 
 ```csharp
 public static class UserCache
@@ -230,15 +143,11 @@ public static void Demo()
 }
 ```
 
-After `Demo` returns, the local variable `user` is gone, but the static field `UserCache.Current` still references the object. The object remains reachable and therefore stays alive.
+After `Demo` returns, the local variable `user` no longer exists, but `UserCache.Current` still references the object. The object remains reachable from a GC root (the static field) and stays alive. The garbage collection chapter covers generations, heap segments, leaks, pause behavior, and memory diagnostics in detail.
 
-The dedicated garbage collection chapter covers generations, heap segments, leaks, pause behavior, and memory diagnostics in detail.
+## Async Execution
 
-## Async As Part Of Runtime Execution
-
-`async/await` does not automatically create a new thread. Instead, it changes how the runtime schedules work and continuations.
-
-For I/O-bound work, the current thread can return to the thread pool while the operation is waiting externally, and the continuation can be scheduled later when the work completes.
+`async/await` changes how the runtime schedules work and continuations — it does not automatically create threads. For I/O-bound work, the calling thread returns to the thread pool while the operation waits externally. The continuation is scheduled when the I/O completes.
 
 ```csharp
 public async Task<string> DownloadAsync(HttpClient client, CancellationToken ct)
@@ -247,58 +156,18 @@ public async Task<string> DownloadAsync(HttpClient client, CancellationToken ct)
 }
 ```
 
-This matters in the execution model because runtime behavior is not only about native code generation. It is also about scheduling, continuation flow, and how managed execution cooperates with external I/O.
+Async execution is part of the runtime model because scheduling and continuation flow are runtime behaviors, not language features. The compiler generates a state machine; the runtime decides how continuations are dispatched.
 
-Another concrete example is file processing. Compare:
+File I/O demonstrates how execution characteristics depend on API choice:
 
 ```csharp
 var bytes = await File.ReadAllBytesAsync(path, ct);
 ```
 
-with:
+versus:
 
 ```csharp
 await using var stream = File.OpenRead(path);
 ```
 
-Both may succeed functionally, but they produce very different execution characteristics. The first tends to allocate one large buffer and can increase heap pressure. The second streams work through a disposable resource boundary and often cooperates better with memory limits.
-
-## Relationship To Publishing Strategy
-
-The model in this chapter describes the default path: source code becomes IL and metadata, assemblies are loaded, methods are compiled to native code, and the runtime executes them inside the process. The next chapter changes the question from "how does code execute?" to "how much of that work happens at runtime versus publish time?"
-
-## Practical Demo
-
-Create a console app:
-
-```bash
-dotnet new console -n RuntimeDemo
-cd RuntimeDemo
-```
-
-Program:
-
-```csharp
-using System.Diagnostics;
-
-static int Add(int a, int b) => a + b;
-
-var sw = Stopwatch.StartNew();
-for (int i = 0; i < 1_000_000; i++)
-{
-    Add(i, i);
-}
-sw.Stop();
-
-Console.WriteLine($"Elapsed: {sw.ElapsedMilliseconds}ms");
-Console.WriteLine($"Process: {Environment.ProcessId}");
-Console.WriteLine($".NET version: {Environment.Version}");
-```
-
-Run:
-
-```bash
-dotnet run -c Release
-```
-
-Then publish and compare startup behavior or output characteristics in the next chapter, which focuses specifically on JIT, ReadyToRun, and Native AOT.
+Both read the file successfully, but `ReadAllBytesAsync` allocates a single large buffer proportional to the file size and can spike heap pressure for large files — a 100 MB file produces a 100 MB byte array on the Large Object Heap. A streaming approach cooperates with memory limits by working through smaller buffers (typically 4 KB per read) and releasing them progressively. The distinction is an execution-model concern: same functional outcome, different runtime behavior.

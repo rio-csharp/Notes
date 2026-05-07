@@ -8,7 +8,7 @@ Microservices are not automatically better than monoliths.
 
 They trade code-level simplicity for organizational and operational scalability.
 
-## When Microservices Help
+## Conditions That Favor Microservices
 
 Microservices may help when:
 
@@ -19,7 +19,7 @@ Microservices may help when:
 - failure isolation matters;
 - organization is large enough to own services.
 
-## When Microservices Hurt
+## Conditions That Work Against Microservices
 
 They hurt when:
 
@@ -32,9 +32,7 @@ They hurt when:
 
 ## Modular Monolith First
 
-A strong Engineering perspective:
-
-> I often prefer starting with a modular monolith when domain boundaries are still changing. It keeps deployment and transactions simple while enforcing module boundaries. Later, modules with clear boundaries and independent scaling needs can be extracted into services.
+Starting with a modular monolith is often the right call when domain boundaries are still changing. It keeps deployment and transactions simple while enforcing module boundaries. Later, modules with clear boundaries and independent scaling needs can be extracted into services.
 
 ## Service Boundary
 
@@ -378,22 +376,4 @@ Microservices require:
 
 Without observability, microservices become very hard to operate.
 
-## Practice Task
-
-Design an e-commerce system with services:
-
-1. Catalog;
-2. Ordering;
-3. Payment;
-4. Inventory;
-5. Shipping;
-6. Notification.
-
-Explain:
-
-- service boundaries;
-- data ownership;
-- communication style;
-- failure handling;
-- consistency model;
-- monitoring plan.
+Microservices offer organizational and operational scaling at the cost of distributed complexity. They are most effective when bounded by business capabilities, each owning its data and communicating through well-defined contracts. The decision to adopt microservices should be driven by concrete needs for independent deployment, team autonomy, or specialized scaling, not by architectural fashion. For most systems, starting with a modular monolith and extracting services only when the boundaries are proven and operational maturity is established leads to better outcomes.

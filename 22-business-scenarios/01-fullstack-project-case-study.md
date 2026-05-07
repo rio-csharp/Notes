@@ -1,6 +1,6 @@
 # Full-stack Project Case Study: Order Management Platform
 
-This is a complete project case note you can adapt for engineering practice.
+This chapter describes a B2B order management platform built with ASP.NET Core, EF Core, SQL Server, React, TypeScript, Redis, and a message broker.
 
 ## 1. Project Summary
 
@@ -61,9 +61,7 @@ Features:
 - backend policy checks;
 - audit log for sensitive operations.
 
-Security principle:
-
-> Frontend permission checks were used only for user experience. Backend policies were the real security boundary.
+A key security principle for this system was that frontend permission checks were used only for user experience. Backend policies were the real security boundary.
 
 ### Order Management
 
@@ -159,7 +157,7 @@ ON Orders (TenantId, Status, CreatedAt DESC)
 INCLUDE (CustomerId, Total, CreatedByUserId);
 ```
 
-Why:
+The index supports:
 
 - tenant filtering is required;
 - status filtering is common;
@@ -318,15 +316,11 @@ Security decisions:
 - no sensitive data in logs;
 - rate limiting for login and public endpoints.
 
-Key takeaway:
-
-> I treated the frontend as untrusted. Every sensitive action was revalidated in the API using user claims, tenant context, and resource state.
+> The frontend was treated as untrusted. Every sensitive action was revalidated in the API using user claims, tenant context, and resource state.
 
 ## 9. Performance Optimization Story
 
-Problem:
-
-> The order list API became slow when the table grew.
+The order list API became slow when the table grew.
 
 Investigation:
 
@@ -348,15 +342,11 @@ Result:
 
 > The p95 latency for the order list dropped significantly in testing, and database CPU usage decreased during peak usage.
 
-Engineering principle:
-
-> I did not start by adding cache. I first fixed the query and index because caching a bad query can hide the problem but not remove it.
+An important engineering principle that guided this work was that the first response should not be to add cache. The query and index were fixed first because caching a bad query can hide the problem but not remove it.
 
 ## 10. Reliability Story
 
-Problem:
-
-> Order approval needed to send notifications, but email provider failures should not break order approval.
+Order approval needed to send notifications, but email provider failures should not break order approval.
 
 Design:
 
@@ -366,9 +356,7 @@ Design:
 - retry with backoff;
 - dead-letter after max attempts.
 
-Trade-off:
-
-> Notifications became eventually consistent, but order approval became more reliable because it no longer depended on the email provider being available during the request.
+The trade-off is that notifications became eventually consistent, but order approval became more reliable because it no longer depended on the email provider being available during the request.
 
 ## 11. Production Incident Story
 
@@ -390,15 +378,11 @@ Mitigation:
 - added integration test for approval permission;
 - added startup validation for required permissions.
 
-Learning note:
-
-> The issue was not JWT itself. It was a mismatch between policy name and permission data. The fix included both data correction and a regression test.
+The lesson from this incident was that the issue was not with JWT itself. It was a mismatch between policy name and permission data. The fix included both data correction and a regression test.
 
 ## 12. Architecture Trade-offs
 
 ### Modular Monolith vs Microservices
-
-Decision:
 
 > Start as modular monolith.
 
@@ -431,63 +415,7 @@ Used for:
 - audit processing;
 - integration events.
 
-## 13. Architecture Narrative
-
-```text
-This case study describes a B2B order management platform built with ASP.NET Core, EF Core, SQL Server, React, TypeScript, Redis, and a message broker.
-
-The platform includes order APIs, database design, React list and form pages, authorization, file upload, performance optimization, and background processing.
-
-One important challenge is order-list performance as data grows. A good engineering response is to measure latency, inspect traces, review generated SQL, inspect execution plans, reduce loaded columns through DTO projection, use AsNoTracking, enforce pagination, and add a composite covering index that matches the query pattern.
-
-Another design challenge is order approval notifications. Sending email directly inside the request path couples approval success to provider availability. The outbox pattern and background workers make approval reliable while notifications become eventually consistent.
-
-The broader lesson is that feature implementation is only one part of the system. Security, tenant isolation, performance, observability, and failure handling all shape whether the platform works well in production.
-```
-
-## 14. Knowledge Checks
-
-### Why can a modular monolith be a good starting point?
-
-> The team was not large enough to justify microservices, and the domain boundaries were still changing. A modular monolith gave us simpler deployment, simpler transactions, and clear internal boundaries while keeping a future path to extract services if needed.
-
-### How can permissions be designed?
-
-> I separated roles from permissions. Roles grouped users for administration, while permissions represented concrete actions like `orders.approve`. The backend enforced policies and resource-level checks, including tenant and order status.
-
-### How can cross-tenant data access be prevented?
-
-> Every tenant-owned table included `TenantId`, backend queries filtered by the current tenant, indexes started with `TenantId` for common queries, and authorization checks validated both permission and resource ownership.
-
-### How can a slow order-list query be optimized?
-
-> I measured the endpoint, checked traces and generated SQL, reviewed the execution plan, reduced loaded columns using DTO projection, added `AsNoTracking`, enforced pagination, and added a composite covering index matching the filter and sort pattern.
-
-### Why use outbox?
-
-> The outbox pattern makes database changes and event recording part of the same local transaction. A background publisher can retry event delivery later, which avoids losing messages if the broker is temporarily unavailable.
-
-### How can authorization be tested?
-
-> I tested allowed and denied cases: missing token, wrong role, missing permission, wrong tenant, invalid order state, and success path. I also added integration tests around the actual API policies.
-
-### What improvements are useful in a more mature version?
-
-> I would add stronger OpenTelemetry tracing, more authorization regression tests, keyset pagination for deep pages, feature flags for risky releases, and dashboards for background worker retries and dead-letter messages.
-
-### How could this system scale to 10x traffic?
-
-> First I would measure bottlenecks. Likely steps include horizontal API scaling, SQL query/index tuning, caching read-heavy reference data, moving slow work to background jobs, adding queue-based processing, optimizing frontend bundle size, and eventually considering read replicas or sharding only if proven necessary.
-
-### How can a permission-related production issue be analyzed?
-
-> Use the 403 approval issue: authentication succeeded, but authorization failed because permission seed data did not match the policy name. The fix was data correction plus integration tests and startup validation.
-
-### How can frontend state management work?
-
-> Server state such as order lists came from React Query. Local UI state handled filters, modals, and form inputs. Shared client state was kept minimal, and URL state was used for shareable filters or pagination when appropriate.
-
-## 15. What To Improve In A Real Version
+## 13. Future Improvements
 
 - add more integration tests;
 - add OpenTelemetry tracing;

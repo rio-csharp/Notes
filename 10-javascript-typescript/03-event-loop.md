@@ -26,7 +26,7 @@ Conceptually:
 5. Repeat
 ```
 
-Important:
+Key scheduling facts:
 
 - synchronous JavaScript runs to completion;
 - microtasks run after the current call stack is empty;
@@ -102,11 +102,7 @@ C
 B
 ```
 
-Why:
-
-- synchronous code runs first;
-- promise callbacks are microtasks;
-- `setTimeout` callback is a macrotask.
+The output is A, D, C, B because synchronous code runs first, promise callbacks are microtasks, and `setTimeout` callback is a macrotask.
 
 ## Microtasks
 
@@ -146,12 +142,7 @@ microtask inside promise
 timeout
 ```
 
-Why:
-
-- synchronous code first;
-- promise callbacks are microtasks;
-- a microtask can queue another microtask;
-- timer runs later as a macrotask.
+The output shows synchronous code first, then microtasks drain, and a microtask can queue another microtask that also drains before the macrotask timer runs.
 
 ## Macrotasks
 
@@ -288,11 +279,7 @@ D
 B
 ```
 
-Why:
-
-- `run()` starts synchronously;
-- `await` yields;
-- `B` runs later in a microtask.
+The output is C, A, D, B because `run()` starts synchronously, `await` yields, and `B` runs later in a microtask.
 
 ## Browser vs Node.js
 
@@ -315,30 +302,74 @@ Node.js:
 
 For frontend engineering practice, focus on browser event loop, rendering, microtasks, and macrotasks.
 
-For full-stack engineering practice, it is useful to know that Node's event loop has additional phases, but do not mix Node-specific behavior into browser answers unless asked.
+For full-stack engineering practice, it is useful to know that Node's event loop has additional phases that do not apply in browser environments.
 
-### Is JavaScript single-threaded?
+### Why Single-Threaded Execution Matters
 
-> JavaScript execution on the browser main thread is single-threaded, but the browser provides Web APIs and the event loop to handle async work. Web Workers can run JavaScript on background threads.
+JavaScript's single-threaded execution model means the call stack processes one function at a time, and each function runs to completion before the next can begin. This eliminates an entire class of concurrency bugs -- race conditions on shared state, deadlocks, and thread-safety concerns -- at the cost of requiring asynchronous programming for I/O and long computations.
 
-### Microtask vs macrotask?
+The browser itself is multi-process and multi-threaded: the rendering engine, GPU process, network stack, and storage layer each run on separate threads or processes. But JavaScript execution on a single tab runs on one main thread (per realm). Web Workers provide true parallelism for CPU-heavy work, but they communicate with the main thread only through message passing with structured cloning -- no shared memory by default (SharedArrayBuffer being the opt-in exception).
 
-> Microtasks, such as Promise callbacks, run after the current call stack and before the next macrotask. Macrotasks include timers and events.
+### Microtask Scheduling Guarantees
 
-### Why do promises run before setTimeout?
+Microtasks are not just "faster" than macrotasks -- they have a specific scheduling guarantee: all pending microtasks must be processed before the browser can proceed to the next macrotask or rendering step. This means:
 
-> Promise callbacks are microtasks. After the current synchronous code finishes, the event loop drains microtasks before taking the next macrotask such as a `setTimeout` callback.
+```ts
+setTimeout(() => console.log("timeout 1"), 0);
 
-### Why can heavy JavaScript freeze the page?
+Promise.resolve().then(() => {
+  console.log("promise 1");
+  Promise.resolve().then(() => {
+    console.log("promise 2");
+    setTimeout(() => console.log("timeout 2"), 0);
+  });
+});
+// Output: promise 1, promise 2, timeout 1, timeout 2
+```
 
-> Long synchronous work blocks the main thread, preventing rendering and input handling.
+The second promise (`promise 2`) runs before the first `setTimeout` because all microtasks in the queue are drained before any macrotask. The `timeout 2` that was queued from within a microtask becomes available only after the microtask queue is empty, so it falls into the next macrotask cycle.
 
-## Practice Task
+This microtask-first scheduling is why promise-based code (including `async/await` continuations) generally runs before timer callbacks and DOM event handlers, even when the timer delay is zero.
 
-Predict output order for:
+### Promise Execution in the Event Loop
 
-1. nested promises;
-2. setTimeout;
-3. async/await;
-4. DOM event callback;
-5. queueMicrotask.
+When a promise resolves, its `.then()` callback (or `await` continuation) is not invoked immediately. Instead, it is scheduled as a microtask. The timing difference between synchronous and promise code is visible in this pattern:
+
+```ts
+let value = "initial";
+
+Promise.resolve().then(() => {
+  value = "from promise";
+});
+
+value = "synchronous";
+console.log(value); // "synchronous" -- promise hasn't run yet
+
+// After current script completes and microtasks drain:
+// value is now "from promise"
+```
+
+This scheduling is the reason `await` yields to the event loop. When an `async` function reaches an `await` expression, the function suspends and control returns to the caller. The remainder of the function is scheduled as a microtask, running after the current synchronous batch completes.
+
+### Detecting and Preventing Main Thread Blocking
+
+A blocked main thread is detectable through user-perceptible delays: clicks do not respond, animations freeze, scrolling becomes janky, and the browser may display "page unresponsive" dialog. Programmatic detection is available through the Long Tasks API:
+
+```ts
+const observer = new PerformanceObserver((list) => {
+  for (const entry of list.getEntries()) {
+    console.warn(`Long task detected: ${entry.duration}ms`, entry.attribution);
+  }
+});
+
+observer.observe({ type: "longtask", buffered: true });
+```
+
+A "long task" is any JavaScript execution that occupies the main thread for 50ms or more. The 50ms threshold derives from the RAIL (Response, Animation, Idle, Load) model: the browser needs to respond to user input within 100ms, so any single task taking more than 50ms leaves insufficient budget for rendering and event handling.
+
+Prevention strategies include:
+
+- Chunking CPU-heavy work with `setTimeout` or `scheduler.postTask` (as shown in the chunking example above).
+- Offloading computation to Web Workers.
+- Using `requestIdleCallback` for non-urgent background work.
+- Avoiding forced synchronous layouts by batching DOM reads and writes.

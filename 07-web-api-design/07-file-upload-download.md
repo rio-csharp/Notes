@@ -4,8 +4,6 @@
 
 File upload and download endpoints are specialized API surfaces. They differ from ordinary JSON endpoints because they move binary content, impose memory and storage pressure, and create security risks that are easy to underestimate. For that reason, file transfer should be treated as a deliberate boundary in API design rather than as "just another controller action."
 
-This chapter focuses on how binary transfer changes the contract and operational design of an API.
-
 ## Small Uploads Versus Large Uploads
 
 Small file uploads can often be handled directly through the application API:
@@ -70,7 +68,7 @@ Relevant checks often include:
 - malware scanning or quarantine workflow;
 - storage quota rules.
 
-The important principle is not to trust client-supplied filename or content type as authoritative truth. A file endpoint is an input boundary with unusually high abuse potential.
+Client-supplied filename and content type should not be trusted as authoritative truth. A file endpoint is an input boundary with unusually high abuse potential.
 
 ## Download Semantics
 

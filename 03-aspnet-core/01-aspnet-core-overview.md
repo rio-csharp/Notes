@@ -4,7 +4,7 @@
 
 ASP.NET Core is the modern .NET framework for building HTTP-facing applications: web APIs, server-rendered web applications, real-time endpoints, and background-hosted processes that live alongside them. Its significance is not just that it can serve requests. It provides a coherent hosting model in which HTTP transport, endpoint dispatch, dependency injection, configuration, logging, security, and application startup all work together as one platform.
 
-This chapter begins with that platform view. Later files in the chapter examine the request pipeline, middleware, routing, endpoint styles, security, configuration, observability, and background processing in more detail. The purpose of this overview is to establish how those parts fit together before each one is treated on its own.
+The later files examine the request pipeline, middleware, routing, endpoint styles, security, configuration, observability, and background processing in more detail.
 
 ## ASP.NET Core As The Web Boundary
 
@@ -25,7 +25,7 @@ Client
 
 This boundary model matters because it clarifies where code should live. ASP.NET Core code should remain responsible for HTTP-facing concerns such as transport, routing, security metadata, request and response handling, and startup composition. Core business rules, workflow decisions, and persistence policies should usually live below that boundary in application, domain, or infrastructure layers.
 
-## What The Framework Provides
+## Framework Capabilities
 
 ASP.NET Core combines a number of capabilities that earlier frameworks or custom stacks often treated separately:
 
@@ -144,7 +144,7 @@ app.MapGet("/api/orders/{id:int}", (int id) =>
 
 Both styles ultimately participate in the same routing, authorization, dependency injection, and response pipeline. The difference is one of structure and programming model rather than platform capability.
 
-Controllers are often a good fit for larger APIs that benefit from conventions, filters, and stronger structural organization. Minimal APIs are often a good fit for smaller services, focused endpoint groups, and lower-ceremony HTTP surfaces. Later sections of the chapter examine that distinction in depth.
+Controllers are often a good fit for larger APIs that benefit from conventions, filters, and stronger structural organization. Minimal APIs are often a good fit for smaller services, focused endpoint groups, and lower-ceremony HTTP surfaces.
 
 ## Application Composition And Layering
 

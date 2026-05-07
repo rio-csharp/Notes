@@ -2,7 +2,7 @@
 
 ## Core Idea
 
-Middleware is the unit from which the ASP.NET Core request pipeline is constructed. If the previous chapter explained the pipeline as a model, this chapter focuses on middleware as the mechanism that makes that model real.
+Middleware is the unit from which the ASP.NET Core request pipeline is constructed. While the pipeline establishes the execution model, middleware is the mechanism that makes that model real.
 
 Each middleware component receives the current `HttpContext` and a delegate representing the rest of the pipeline. It may inspect state, enrich state, wrap downstream execution, or produce the response directly. That flexibility makes middleware the natural home for cross-cutting HTTP concerns that should apply broadly and do not depend on MVC-specific concepts such as action arguments or model state.
 
@@ -75,7 +75,44 @@ public static class SecurityHeadersMiddlewareExtensions
 app.UseSecurityHeaders();
 ```
 
-## When Middleware Should Short-Circuit
+The convention-based approach shown above is the more common and efficient middleware pattern, because instances are created once and reused across requests. Scoped dependencies must therefore be resolved through method injection in `InvokeAsync` rather than through constructor injection.
+
+### IMiddleware And Factory-Based Middleware
+
+ASP.NET Core also supports middleware through the `IMiddleware` interface, where instances are resolved from the DI container per request rather than being created once at startup.
+
+```csharp
+public sealed class RequestLoggingMiddleware : IMiddleware
+{
+    private readonly AppDbContext _dbContext;
+
+    public RequestLoggingMiddleware(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task InvokeAsync(HttpContext context, RequestDelegate next)
+    {
+        _dbContext.RequestLogs.Add(new RequestLog
+        {
+            Path = context.Request.Path,
+            Method = context.Request.Method,
+            Timestamp = DateTimeOffset.UtcNow
+        });
+
+        await next(context);
+    }
+}
+```
+
+```csharp
+builder.Services.AddScoped<RequestLoggingMiddleware>();
+app.UseMiddleware<RequestLoggingMiddleware>();
+```
+
+Because `IMiddleware` instances are created per scope through the DI container, scoped dependencies such as `AppDbContext` can be injected directly into the constructor. The trade-off is that factory-based middleware creates more instances under load than the convention-based approach. Convention-based middleware with method injection is therefore the better default for most scenarios. `IMiddleware` is most useful when method injection is impractical, such as when the middleware wraps behavior around many scoped dependencies that would be unwieldy as method parameters.
+
+## Short-Circuiting Middleware
 
 Middleware is allowed to end the request without calling the next delegate.
 

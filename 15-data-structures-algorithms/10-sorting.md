@@ -267,17 +267,10 @@ public string LargestNumber(int[] nums)
 }
 ```
 
-Why compare `b + a` with `a + b`?
+The comparison joins both orderings to determine which concatenation produces the larger result:
 
 ```text
 "9" before "34" because "934" > "349"
 ```
 
-## Practice Problems
-
-- Merge Intervals
-- Sort Colors
-- Meeting Rooms
-- K Closest Points
-- Largest Number
-- Contains Duplicate
+Sorting serves as a preprocessing step for problems ranging from interval merging and duplicate detection to custom ordering and multi-key optimization.

@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-Not all useful application work belongs on the HTTP request path. ASP.NET Core also hosts long-running or repeating processes that operate beside the request pipeline: queue consumers, outbox publishers, cleanup workers, schedulers, and similar background activities.
-
-This chapter treats background services as part of the application's hosting model rather than as an afterthought. Once work moves outside the request path, the operational concerns change. Lifetime management, cancellation, retries, idempotency, multi-instance behavior, and visibility become central.
+Not all useful application work belongs on the HTTP request path. ASP.NET Core also hosts long-running or repeating processes that operate beside the request pipeline: queue consumers, outbox publishers, cleanup workers, schedulers, and similar background activities. Background services are part of the application's hosting model. Once work moves outside the request path, the operational concerns change. Lifetime management, cancellation, retries, idempotency, multi-instance behavior, and visibility become central.
 
 ## Hosted Services As Long-Lived Application Components
 

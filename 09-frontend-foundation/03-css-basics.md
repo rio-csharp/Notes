@@ -222,24 +222,64 @@ This example uses:
 - focus-visible styling for keyboard users;
 - spacing and sizing that do not depend on fixed viewport width.
 
-### What is the CSS box model?
+### The Box Model in Practice
 
-> The box model describes how content, padding, border, and margin make up the size and spacing of an element.
+Every element in CSS is rendered as a rectangular box composed of four concentric areas: content, padding, border, and margin.
 
-### Why is z-index not working?
+```css
+.card {
+  width: 200px;
+  padding: 16px;
+  border: 2px solid #d1d5db;
+  margin: 8px;
+}
+```
 
-> It may be in a different stacking context, the element may not be positioned, or another ancestor creates a stacking context.
+With the default `box-sizing: content-box`, the 200px width applies only to the content area. The element's total rendered width becomes `200 + 16*2 + 2*2 = 236px`, which is often surprising when fitting elements into a layout grid.
 
-### What is specificity?
+With `box-sizing: border-box`, the 200px width includes content, padding, and border. The content area shrinks to `200 - 16*2 - 2*2 = 164px`, but the total rendered width stays 200px -- making it predictable in layout calculations.
 
-> Specificity determines which CSS rule wins when multiple rules target the same element.
+The universal reset `* { box-sizing: border-box; }` is common because it makes width declarations behave intuitively across all elements. Note that margin is never included in width calculations regardless of `box-sizing`.
 
-## Practice Task
+### Stacking Contexts and Z-Index
 
-Build:
+The `z-index` property controls which elements appear on top when they overlap, but only within the same stacking context. A stacking context is an atomic unit: elements inside one context are painted as a group relative to elements outside it.
 
-1. card layout;
-2. badge positioned top-right;
-3. button states;
-4. responsive spacing;
-5. modal overlay with correct stacking.
+New stacking contexts are created by:
+
+- A positioned element (`position` other than `static`) with a `z-index` value other than `auto`.
+- Elements with `opacity` less than 1.
+- Elements with `transform`, `filter`, `perspective`, `clip-path`, `mask`, or `mask-image` set (even without `position`).
+- Elements with `isolation: isolate`.
+- Elements with `contain: layout` or `contain: paint`.
+
+When `z-index` seems to have no effect, inspect the element's ancestors for these properties. A positioned child with `z-index: 999` has no effect if a grandparent with `transform: translateZ(0)` creates a stacking context that isolates it. The "999" value only determines stacking within that grandparent's context, not globally.
+
+### Specificity Calculation
+
+Specificity is a weight calculated from selector components. The browser assigns a four-part value (often represented as a-b-c-d or a tuple):
+
+1. Inline styles (weight: 1-0-0-0)
+2. ID selectors (weight: 0-1-0-0)
+3. Class, attribute, and pseudo-class selectors (weight: 0-0-1-0)
+4. Element and pseudo-element selectors (weight: 0-0-0-1)
+
+Example specificity calculations:
+
+```css
+/* Specificity: 0-0-1-0 */
+.button { color: blue; }
+
+/* Specificity: 0-0-2-0 */
+.button.primary { color: red; }
+
+/* Specificity: 0-0-1-1 */
+button.primary { color: green; }
+
+/* Specificity: 0-1-0-0 */
+#main { color: purple; }
+```
+
+The universal selector `*`, combinators (`>`, `+`, `~`), and `:not()`, `:is()`, `:has()` do not contribute to specificity (though the selectors inside `:not()` and `:is()` do count in newer CSS specifications). When two selectors have equal specificity, the one declared later in the stylesheet wins.
+
+Avoid over-nesting selectors like `body div.main div.card button.primary` -- they are fragile (a markup change breaks the selector) and their high specificity makes future overrides difficult. Prefer a flat class-based approach.

@@ -304,11 +304,4 @@ public sealed class MyQueue
 
 Each element moves from `_input` to `_output` at most once, so operations are amortized `O(1)`.
 
-## Practice Problems
-
-- Valid Parentheses
-- Min Stack
-- Daily Temperatures
-- Binary Tree Level Order Traversal
-- Rotting Oranges
-- Sliding Window Maximum
+Stack and queue patterns extend to a wide range of problems including bracket validation, monotonic stack applications, tree level-order traversal, and sliding window maximum computation.

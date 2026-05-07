@@ -4,7 +4,7 @@
 
 LINQ should be the default query surface in EF Core, but it is not the only one. There are legitimate cases where raw SQL or stored procedures are the better tool: provider-specific functionality, reporting queries, complex hand-tuned statements, legacy database integration, or set-based operations that are clearer in SQL than in LINQ.
 
-The key is not whether raw SQL is allowed. The key is that it should remain deliberate, parameterized, and isolated to the places where relational specificity is genuinely part of the design.
+Raw SQL should remain deliberate, parameterized, and isolated to the places where relational specificity is genuinely part of the design.
 
 ## LINQ First, SQL When Justified
 
@@ -18,13 +18,21 @@ This preserves the benefits of EF Core while still acknowledging that relational
 
 ## `FromSql` And Parameterization
 
-EF Core allows raw SQL entity queries through `FromSql`:
+EF Core provides two forms for raw SQL entity queries:
 
 ```csharp
+// Preferred: interpolated string, automatically parameterized
 var orders = await _dbContext.Orders
     .FromSql($"SELECT * FROM Orders WHERE Status = {status}")
     .ToListAsync(ct);
+
+// Explicit: raw string with separate parameters
+var orders = await _dbContext.Orders
+    .FromSqlRaw("SELECT * FROM Orders WHERE Status = {0}", status)
+    .ToListAsync(ct);
 ```
+
+`FromSql` (interpolated) converts its arguments to `DbParameter` instances automatically. `FromSqlRaw` requires the caller to supply parameter values separately. The interpolated form is generally preferred because it makes parameterization harder to forget.
 
 Interpolated `FromSql` parameterizes values rather than concatenating them into the SQL text. That distinction is critical. Raw SQL is only acceptable if untrusted values remain parameters.
 
@@ -38,11 +46,17 @@ The design rule is straightforward: values may vary through parameters; SQL stru
 
 ## Commands And Set-Based Operations
 
-EF Core also supports raw SQL commands:
+EF Core also supports raw SQL commands through the same interpolated and raw variants:
 
 ```csharp
+// Interpolated, automatically parameterized
 await _dbContext.Database.ExecuteSqlAsync(
     $"UPDATE Orders SET Status = {"Expired"} WHERE CreatedAt < {cutoff}");
+
+// Raw with separate parameters
+await _dbContext.Database.ExecuteSqlRawAsync(
+    "UPDATE Orders SET Status = {0} WHERE CreatedAt < {1}",
+    "Expired", cutoff);
 ```
 
 These commands are useful for maintenance operations, data fixes, or set-based actions that are clearer or more provider-specific than what LINQ expresses well.

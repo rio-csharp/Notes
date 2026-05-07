@@ -315,13 +315,4 @@ For business workflows, include business metrics:
 - failed checkout count;
 - email delivery failures.
 
-## Practice Task
-
-Add observability for:
-
-1. order creation API;
-2. SQL query;
-3. Redis call;
-4. RabbitMQ or Kafka publish;
-5. p95 latency dashboard;
-6. error rate alert.
+The observability practices described -- trace instrumentation, structured logging, RED/USE metrics, percentile latency tracking, and actionable alerting -- provide the foundation for operating production systems with confidence.

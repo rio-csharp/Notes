@@ -4,7 +4,7 @@
 
 SQL is not a sequence of row-by-row instructions in the way many application programmers first imagine it. It is a declarative language in which the query describes the result set the database should produce, while the optimizer chooses an execution strategy. That distinction matters because effective SQL work depends on thinking in sets, predicates, and result shape rather than in procedural loops.
 
-This chapter introduces SQL from that perspective. The objective is not to list syntax mechanically. It is to build the mental model needed for the later chapters on joins, indexing, and query optimization.
+The objective is to build the mental model needed for later work on joins, indexing, and query optimization, not to list syntax mechanically.
 
 ## Result Sets And Projection
 
@@ -72,6 +72,83 @@ ORDER BY CreatedAt DESC;
 This seems straightforward, but two points matter in practice.
 
 First, rows are not inherently ordered unless the query specifies an order. Second, ordering can be expensive if the database must sort a large intermediate result set. This is why index design and query shape later become closely tied to ordering patterns.
+
+## Distinct Results
+
+`SELECT DISTINCT` removes duplicate rows from the result set:
+
+```sql
+SELECT DISTINCT Status
+FROM Orders;
+```
+
+This is useful for enumerating the set of unique values in a column. However, it should be used deliberately. `DISTINCT` can be expensive on wide result sets because the database must compare all selected columns to identify duplicates. A more targeted approach is often to use `GROUP BY` with specific aggregation or to query a separate lookup table.
+
+## Subqueries
+
+A subquery is a `SELECT` statement nested inside another query. Subqueries can appear in `WHERE`, `FROM`, or `SELECT` clauses.
+
+Non-correlated subquery (executed once, independent of the outer query):
+
+```sql
+SELECT Id, Name
+FROM Customers
+WHERE Id IN
+(
+    SELECT CustomerId
+    FROM Orders
+    WHERE Total > 500
+);
+```
+
+Correlated subquery (re-evaluated for each row of the outer query):
+
+```sql
+SELECT c.Id, c.Name,
+    (
+        SELECT SUM(o.Total)
+        FROM Orders o
+        WHERE o.CustomerId = c.Id
+    ) AS TotalSpent
+FROM Customers c;
+```
+
+Correlated subqueries require careful evaluation because they can become expensive for large row sets. In many cases, a `JOIN` with aggregation is more efficient and more readable than a correlated subquery.
+
+## Set Operations: UNION, INTERSECT, EXCEPT
+
+SQL set operations combine results from multiple queries:
+
+- `UNION` combines results and removes duplicates.
+- `UNION ALL` combines results and preserves duplicates.
+- `INTERSECT` returns rows present in both result sets.
+- `EXCEPT` returns rows present in the first set but not the second.
+
+```sql
+SELECT Email FROM CurrentCustomers
+UNION
+SELECT Email FROM ArchivedCustomers;
+```
+
+These operations work when both queries return the same number of columns with compatible types. They are especially useful for reporting queries that need to compare or combine data from different logical sources.
+
+## CASE Expressions
+
+`CASE` provides conditional logic within SQL:
+
+```sql
+SELECT
+    Id,
+    Total,
+    CASE
+        WHEN Total >= 1000 THEN 'High'
+        WHEN Total >= 100 THEN 'Medium'
+        ELSE 'Low'
+    END AS OrderCategory
+FROM Orders;
+```
+
+`CASE` is a scalar expression, not a control-of-flow statement. It can appear in `SELECT`, `WHERE`, `ORDER BY`, and `GROUP BY` clauses. Using `CASE` in SQL is often cleaner than importing the raw data and applying conditional logic in application code.
 
 ## Aggregation And Grouping
 

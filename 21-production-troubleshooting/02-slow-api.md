@@ -134,7 +134,7 @@ public sealed class RequestTimingMiddleware
 
 Avoid logging request bodies or secrets.
 
-## Common Cause: Slow SQL Query
+## Slow SQL Query
 
 Symptoms:
 
@@ -172,7 +172,6 @@ WHERE CreatedAt >= '2026-01-01'
   AND CreatedAt < '2027-01-01';
 ```
 
-Chinese note:
 
 ## EF Core Query Shape
 
@@ -213,7 +212,7 @@ var orders = await _db.Orders
 
 Use `AsNoTracking` for read-only queries to reduce tracking overhead.
 
-## Common Cause: N+1 Queries
+## N+1 Queries
 
 N+1 example:
 
@@ -250,7 +249,7 @@ var orders = await _db.Orders
     .ToListAsync(ct);
 ```
 
-## Common Cause: Lock Contention
+## Lock Contention
 
 Symptoms:
 
@@ -274,17 +273,19 @@ CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) AS t
 WHERE r.blocking_session_id <> 0;
 ```
 
+Understanding the wait type is critical because it determines the right mitigation. Common blocking wait types include `LCK_M_*` (lock waits from contention), `PAGELATCH_*` (internal page latch contention, often from concurrent inserts on the same index page), and `WRITELOG` (waiting for the transaction log to flush). Each requires a different approach: lock waits need index or query changes, page latch contention may need index partitioning or sequential key design, and log waits need storage performance improvements.
+
 Mitigation:
 
-- identify blocker;
-- understand what it is doing;
+- identify blocker and its wait type;
+- understand what the blocker is doing;
 - avoid killing sessions blindly;
 - reduce transaction duration;
-- add proper indexes;
+- add proper indexes to reduce lock duration;
 - process large updates in batches;
-- use appropriate isolation strategy.
+- use appropriate isolation strategy (read committed snapshot isolation reduces read-write blocking).
 
-## Common Cause: Connection Pool Exhaustion
+## Connection Pool Exhaustion
 
 Symptoms:
 
@@ -326,7 +327,7 @@ public async Task<IReadOnlyList<Order>> GetOrdersAsync(CancellationToken ct)
 
 Always dispose connections.
 
-## Common Cause: Thread Pool Starvation
+## Thread Pool Starvation
 
 Symptoms:
 
@@ -358,7 +359,9 @@ public async Task<IActionResult> Get(CancellationToken ct)
 
 Avoid `.Result`, `.Wait()`, and blocking sleeps in request paths.
 
-## Common Cause: External Dependency Slowdown
+**Why this causes starvation:** When `await` is used, the method returns its thread pool thread to the pool while the async operation is in flight, allowing that thread to serve other requests. When `.Result` or `.Wait()` is used, the calling thread is blocked. If the async operation needs to resume on the thread pool (which is the default behavior for `Task` continuations in ASP.NET Core's `SynchronizationContext`), it cannot proceed because all available threads are blocked. The thread pool must then inject additional threads to handle the backlog, but thread injection is slow (roughly one new thread per second). During this window, requests queue up and latency spikes.
+
+## External Dependency Slowdown
 
 Symptoms:
 
@@ -401,7 +404,7 @@ public async Task<PaymentResult> ChargeAsync(
 
 Retries should be bounded and should not retry non-idempotent operations unless idempotency keys are used.
 
-## Common Cause: Large Payloads
+## Large Payloads
 
 Symptoms:
 
@@ -440,7 +443,7 @@ return await _db.Orders
 
 Use pagination and DTO projection.
 
-## Common Cause: Cache Problems
+## Cache Problems
 
 Cache outage or cache stampede can slow APIs.
 
@@ -509,24 +512,4 @@ Depending on cause:
 
 Do not increase timeout blindly. Longer timeout can make saturation worse.
 
-## Practice Task
 
-Given this trace:
-
-```text
-GET /api/orders                    7.4s
-  Auth                             20ms
-  SQL SELECT Orders                6.8s
-  JSON serialization               420ms
-  Response write                   80ms
-```
-
-Write:
-
-```text
-Most likely bottleneck:
-Evidence:
-Next three checks:
-Possible mitigation:
-Long-term prevention:
-```

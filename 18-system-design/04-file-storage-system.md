@@ -57,18 +57,37 @@ Cons:
 
 ### Direct Upload With Pre-signed URL
 
-Client asks API for upload URL, then uploads directly to object storage.
+The client requests an upload URL from the API, then uploads directly to object storage (AWS S3, Azure Blob, GCS) without the API server acting as a proxy.
+
+#### Pre-signed URL Mechanism
+
+A pre-signed URL embeds authentication credentials (typically a signature computed from the request parameters and a secret key) directly into the URL for a limited time. The object storage service verifies the signature before accepting the upload. This offloads the data transfer burden from the application server to the storage backend.
+
+```text
+Client -> API:      "I want to upload invoice.pdf (1 MB)"
+API -> Client:      "Here is a URL valid for 15 minutes: https://storage.example/upload/..."
+Client -> Storage:  PUT https://storage.example/upload/... (file data)
+Client -> API:      "I have uploaded file f-123, please confirm."
+```
+
+#### Security Considerations
+
+- **URL expiration**: short-lived URLs (5-15 minutes) limit the window for interception. Generate URLs just-in-time, not pre-stored.
+- **Permission scoping**: the pre-signed URL should grant only the minimum permissions needed for the operation (upload only, no read or delete for other objects).
+- **Content type and size enforcement**: the pre-signed URL can include conditions limiting allowed content type and maximum object size. Without these, a client could upload a different file than declared.
+- **Path uniqueness**: the storage key should include a random component (e.g., `tenants/{tenantId}/files/{fileId}/{originalFileName}`) to prevent enumeration or overwrite attacks.
 
 Pros:
 
-- reduces API load;
-- better for large files;
-- object storage handles upload.
+- reduces API server load, especially for large files;
+- object storage handles upload bandwidth, not the application;
+- client can resume interrupted uploads using multipart APIs.
 
 Cons:
 
-- more complex flow;
-- must carefully control URL expiration and permissions.
+- more complex client-server interaction;
+- pre-signed URLs that expire too early cause user-facing upload failures;
+- compromised pre-signed URLs allow unauthorized uploads within the validity window.
 
 ## API Design
 
@@ -164,15 +183,37 @@ Do not:
 - expose raw internal storage keys unnecessarily;
 - allow path traversal in file names.
 
+## Virus Scanning Workflow
+
+Uploaded files must be scanned for malware before being made available to users. The scanning step is inserted between upload confirmation and final availability.
+
+### Scanning Flow
+
+```text
+File confirmed (Status = Uploaded)
+  -> Scan job queued
+  -> Scanner downloads file
+  -> Scans with antivirus engine (ClamAV, commercial scanner, cloud API)
+  -> If clean:    Status = Available
+  -> If infected: Status = Rejected, file deleted, admin alerted
+```
+
+### Key Design Decisions
+
+1. **Scan before availability**: files should not be downloadable until the scan completes. The `Status` column gates access -- the download endpoint checks for `Status = Available`.
+2. **Async scanning**: scanning can take seconds for large files. Use a background worker rather than blocking the upload confirmation response. The confirm endpoint returns immediately; the client polls or receives a callback when scanning finishes.
+3. **Multiple engines**: for defense in depth, pass files through two scanning engines. This catches zero-day threats that one engine may miss.
+4. **Scan timeout and quarantine**: if scanning times out or the engine crashes, move the file to a quarantine bucket for manual review rather than making it available automatically.
+
 ## Large Files
 
-For large files:
+For files exceeding typical API payload limits (e.g., 100 MB+):
 
-- multipart upload;
-- resumable upload;
-- chunking;
-- progress tracking;
-- background processing.
+- multipart upload (parallel parts, each independently retryable);
+- resumable upload (track offset, resume from failure point);
+- chunked streaming on the upload confirmation path;
+- progress tracking via WebSocket or polling;
+- background processing that starts after the final part is confirmed.
 
 ## Upload Request Flow
 
@@ -273,9 +314,9 @@ API authorizes user
 
 Streaming gives more control but increases API bandwidth cost.
 
-## Practice Task
+## Verification
 
-Design:
+Key aspects to verify:
 
 1. upload request API;
 2. file metadata table;

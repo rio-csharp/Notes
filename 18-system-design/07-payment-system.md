@@ -119,16 +119,23 @@ Payment creation flow:
 6. Return client secret or redirect information.
 ```
 
-## Provider Callback
+## Provider Callback (Webhook)
 
-Webhook must:
+The payment provider sends webhook events (payment.succeeded, payment.failed, charge.refunded) to a public endpoint. Each event must be processed safely and idempotently.
 
-- verify signature;
-- validate event type;
-- deduplicate event;
-- update payment state;
-- publish event;
-- return 2xx after safe processing.
+### Webhook Processing Pipeline
+
+1. **Verify signature**: the provider signs the request body using a shared secret (HMAC-SHA256) or a private key (asymmetric). Compute the expected signature from the raw body and compare. Reject requests with missing or invalid signatures. Return 401 without processing.
+
+2. **Validate event type**: discard events the system does not handle. Log unknown event types for audit visibility.
+
+3. **Deduplicate event**: providers may deliver the same webhook event multiple times (at-least-once delivery). Use a `ProviderEvents` table with the provider's event ID as the primary key. If the event already exists, return 200 without processing again.
+
+4. **Update payment state**: apply the state transition (e.g., Captured, Failed) atomically with the deduplication check.
+
+5. **Publish internal event**: emit an `PaymentCaptured` or `PaymentFailed` internal event for downstream consumers (order service, notification service).
+
+6. **Return 2xx**: acknowledge receipt after successful persistence. If the endpoint returns non-2xx, the provider retries later.
 
 Deduplicate provider events:
 
@@ -212,7 +219,7 @@ Scheduled job:
 4. Fix local status or alert.
 ```
 
-Why:
+Reconciliation is necessary because:
 
 - callbacks can fail;
 - provider can delay events;
@@ -252,9 +259,9 @@ Do not:
 - trust frontend payment status;
 - expose provider secrets to unauthorized clients.
 
-## Practice Task
+## Verification
 
-Design:
+Key aspects to verify:
 
 1. payment table;
 2. idempotency table;

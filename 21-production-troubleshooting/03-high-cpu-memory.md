@@ -34,7 +34,7 @@ Is this inside a container with memory limits?
 
 One bad instance can indicate data-specific or instance-specific problems. All instances rising together often points to traffic, deployment, shared dependency, or global workload.
 
-## High CPU Common Causes
+## High CPU Patterns
 
 Common:
 
@@ -94,7 +94,7 @@ while (!token.IsCancellationRequested)
 }
 ```
 
-## High Memory Common Causes
+## High Memory Patterns
 
 Common:
 
@@ -203,7 +203,7 @@ dotnet-trace collect --process-id 1234 --duration 00:00:30 --output cpu.nettrace
 
 Tools such as Visual Studio, PerfView, and `dotnet-dump analyze` can inspect these files.
 
-## Important Counters
+## Key Runtime Counters
 
 Useful runtime counters:
 
@@ -240,7 +240,11 @@ Memory sawtooth pattern
 
 ## GC Pressure
 
-GC pressure means the application allocates enough memory that garbage collection becomes frequent or expensive.
+GC pressure means the application allocates enough memory that garbage collection becomes frequent or expensive. Understanding why requires familiarity with the generational GC model.
+
+The .NET GC uses three generations. Gen 0 contains short-lived objects (temporary variables, intermediate results). Gen 1 acts as a buffer between Gen 0 and Gen 2. Gen 2 contains long-lived objects. Collections are cheapest in Gen 0 (fast, processor-local) and most expensive in Gen 2 (may require stopping all threads and compacting the full heap). The Large Object Heap (LOH) is collected as part of Gen 2.
+
+When allocation rate is high, Gen 0 fills quickly and triggers frequent collections. If objects survive Gen 0, they are promoted to Gen 1 and eventually Gen 2, where collection is much more expensive. High allocation plus high survival rate is the worst case: frequent expensive Gen 2 collections that consume CPU and pause application threads.
 
 Bad allocation-heavy code:
 
@@ -287,8 +291,6 @@ For very large exports, stream instead of building one giant string.
 ## Large Object Heap
 
 Large objects are usually allocated on the Large Object Heap.
-
-Chinese note:
 
 Large arrays, strings, and buffers can cause memory pressure.
 
@@ -490,26 +492,4 @@ Possible:
 
 Increasing memory can be valid, but it should not hide an unbounded leak.
 
-## Practice Task
 
-Given these metrics:
-
-```text
-CPU: 95%
-allocation-rate: very high
-Gen 2 GC count: increasing quickly
-LOH size: growing
-p95 latency: rising
-recent change: new CSV export feature
-```
-
-Write:
-
-```text
-Most likely problem:
-Evidence:
-Data to collect:
-Immediate mitigation:
-Code changes to consider:
-Prevention actions:
-```

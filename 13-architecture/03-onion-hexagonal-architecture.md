@@ -12,6 +12,8 @@ Business core should not depend on infrastructure.
 
 ## Onion Architecture
 
+Onion Architecture, described by Jeffrey Palermo in 2008, places the domain model at the center with dependencies flowing outward to inward. Every outer layer depends only on layers closer to the center.
+
 Conceptual layers:
 
 ```text
@@ -21,11 +23,13 @@ Application Services
 Infrastructure / UI
 ```
 
-Dependencies point inward.
+Dependencies point inward. The key distinction from basic layered architecture is that the Onion explicitly inverts the traditional data-access dependency: the domain does not depend on persistence, persistence depends on the domain.
+
+Onion Architecture and Clean Architecture share the same dependency principle, but Clean Architecture adds more structure around use cases, interfaces, and frameworks. Hexagonal Architecture (Ports and Adapters) focuses specifically on the boundary between the application and the outside world through ports and adapters. All three agree on the rule: the business core does not depend on infrastructure.
 
 ## Hexagonal Architecture
 
-Also called Ports and Adapters.
+Also called Ports and Adapters, Hexagonal Architecture was described by Alistair Cockburn in 2005. The core application defines ports (interfaces) that external actors implement as adapters.
 
 Core app defines ports:
 
@@ -293,12 +297,4 @@ public sealed class PaymentRequestedConsumer
 
 The application core does not care whether the trigger is HTTP, Kafka, RabbitMQ, or a scheduled job.
 
-## Practice Task
-
-Build payment integration with:
-
-1. application port `IPaymentGateway`;
-2. Stripe adapter;
-3. fake adapter for tests;
-4. API endpoint;
-5. integration test boundary.
+Ports and Adapters (Hexagonal) Architecture provides a clean boundary between the application core and the outside world. By defining ports in the domain or application layer and implementing adapters in infrastructure, the business logic can be tested and evolved independently of external dependencies. The same port can be driven by HTTP, message queues, or scheduled jobs without modifying the core logic.

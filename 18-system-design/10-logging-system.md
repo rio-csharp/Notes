@@ -26,12 +26,27 @@ Non-functional:
 
 ```text
 Applications
-  -> Log Agent / SDK
-  -> Queue / Stream
-  -> Log Processor
-  -> Elasticsearch / OpenSearch
-  -> Dashboard / Alerting
+  -> Log Agent / SDK (filebeat, fluent-bit, serilog sink)
+  -> Queue / Stream (Kafka, Azure Event Hubs, AWS Kinesis)
+  -> Log Processor (parsing, enrichment, filtering, sampling)
+  -> Storage tier:
+       hot:  Elasticsearch / OpenSearch (7-14 days)
+       warm: Elasticsearch with reduced replicas (30-90 days)
+       cold: Object storage (S3, Azure Blob) for compliance retention
+  -> Dashboard (Kibana, Grafana) / Alerting
 ```
+
+### Pipeline Stages
+
+1. **Collection**: log agents (filebeat, fluent-bit) or SDK sinks (Serilog `Sinks.ElasticSearch`) forward structured logs to a buffering layer. The agent tails log files or receives log events over the network. For containerized workloads, the agent runs as a sidecar and reads stdout/stderr.
+
+2. **Buffering**: a queue or stream (Kafka, Event Hubs) absorbs write bursts and decouples producers from consumers. This prevents backpressure from the search cluster from slowing down application logs. The buffer should be durable enough to survive a storage-layer outage without losing logs.
+
+3. **Processing**: a log processor reads from the buffer, parses unstructured messages into structured fields, enriches with metadata (cluster name, environment, data center), applies sampling rules for high-volume verbose logs, and writes to the search index.
+
+4. **Indexing**: the search index (Elasticsearch, OpenSearch) organizes logs by timestamp-based indices (e.g., `logs-2026.05.08`). Each index has a mapping that defines which fields are searchable, aggregatable, or stored as keywords. Mappings directly affect storage cost and query performance.
+
+5. **Dashboard and alerting**: Kibana or Grafana dashboards surface real-time log views. Alerting rules trigger on error rate thresholds, missing log patterns, or ingestion lag.
 
 ## Log Format
 

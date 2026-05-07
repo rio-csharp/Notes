@@ -1,14 +1,39 @@
 # C# Language Basics
 
-## Core Idea
+C# is a statically typed language with object-oriented roots and broad support for procedural, functional, and asynchronous styles. In day-to-day .NET development, most code is built from a recurring set of language constructs: types, members, initialization rules, visibility boundaries, and a handful of features that shape how APIs are designed and maintained. Later chapters cover the deeper parts of the type system, generics, asynchronous control flow, and concurrency.
 
-C# is a statically typed language with object-oriented roots and broad support for procedural, functional, and asynchronous styles. In day-to-day .NET development, however, most code is built from a smaller set of recurring language constructs: types, members, initialization rules, visibility boundaries, and a handful of features that shape how APIs are designed and maintained.
+## Language Version And Project Context
 
-This chapter establishes that working vocabulary. It does not attempt to survey the entire language. Later chapters cover the deeper parts of the type system, generics, asynchronous control flow, and concurrency in their own right. The goal here is to build a reliable mental model for the constructs that appear constantly in application code.
+Modern C# features do not exist in isolation from the project that compiles them. In practice, the effective language surface is shaped by the SDK, target framework, and project settings:
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
+```
+
+Most modern SDK-style projects infer a suitable C# language version from the installed SDK and target framework, so teams often do not set `LangVersion` explicitly. It still matters as an activation point when a codebase wants predictable compiler behavior across machines, CI agents, and future SDK upgrades.
+
+This relationship becomes visible whenever a feature seems to "not work." Primary constructors, collection expressions, nullable reference types, and other modern features are not only syntax choices. They depend on the compiler and project configuration actually supporting them. In practice, the first verification step is usually `dotnet build`: if the language version or project settings are incompatible, the compiler reports the problem before the application ever runs.
+
+On a real machine, teams often inspect the effective toolchain with:
+
+```bash
+dotnet --version
+dotnet --info
+dotnet build
+```
+
+Those commands do not replace reading the project file, but they make the language boundary visible. If a feature compiles on one machine and fails on another, the SDK and project context are among the first things worth checking.
 
 ## Types, State, And Behavior
 
-The first important habit in C# is to treat types as design tools rather than mere containers for data. A type defines what state may exist, how that state may change, and which operations make sense for callers.
+Types are design tools that define what state may exist, how that state may change, and which operations make sense for callers.
 
 ```csharp
 public sealed class User
@@ -115,9 +140,7 @@ public sealed class Order
 }
 ```
 
-This design is stronger than a type with unrestricted setters because invalid intermediate states become harder to create in the first place. A constructor does not guarantee complete business validity for the lifetime of an object, but it should at least establish the object's essential identity and basic invariants.
-
-There is a useful distinction between domain objects and transport models here. Domain objects often benefit from constructors that enforce validity immediately. Request and response models, by contrast, are often designed around binding and serialization concerns:
+A constructor does not guarantee complete business validity for the lifetime of an object, but it establishes the object's essential identity and basic invariants. Domain objects benefit from constructors that enforce validity immediately. Request and response models are often designed around binding and serialization concerns:
 
 ```csharp
 public sealed class CreateUserRequest
@@ -128,6 +151,59 @@ public sealed class CreateUserRequest
 ```
 
 `required` and `init` improve initialization discipline, but they are not substitutes for real validation. They express assignment rules to the compiler. They do not prove that an email address is well-formed or that a business rule has been satisfied.
+
+A fuller application boundary example makes that difference clearer:
+
+```csharp
+public sealed class CreateOrderRequest
+{
+    public required int CustomerId { get; init; }
+    public required List<CreateOrderItemRequest> Items { get; init; }
+}
+
+public sealed class CreateOrderItemRequest
+{
+    public required int ProductId { get; init; }
+    public required int Quantity { get; init; }
+}
+
+public sealed class Order
+{
+    private readonly List<OrderItem> _items = new();
+
+    public int CustomerId { get; }
+    public IReadOnlyCollection<OrderItem> Items => _items.AsReadOnly();
+
+    public Order(int customerId)
+    {
+        if (customerId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(customerId));
+        }
+
+        CustomerId = customerId;
+    }
+
+    public void AddItem(int productId, int quantity)
+    {
+        if (productId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(productId));
+        }
+
+        if (quantity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(quantity));
+        }
+
+        _items.Add(new OrderItem(productId, quantity));
+    }
+}
+
+public sealed record OrderItem(int ProductId, int Quantity);
+```
+
+The request model expresses assignment intent for the binding boundary. The domain model still owns the business validity of the actual order object. That separation is a recurring pattern in professional C# systems.
 
 ## Access Modifiers As Design Boundaries
 
@@ -160,7 +236,48 @@ The list itself remains private because the object should own mutation rules. Ca
 
 `internal` is especially important in multi-project solutions. It allows sharing within an assembly while avoiding accidental public surface area. Public APIs tend to become sticky over time, so reducing unnecessary visibility early makes future refactoring easier.
 
-## Static Members And Shared State
+`protected internal` and `private protected` refine visibility further in inheritance scenarios that cross assembly boundaries. The distinction is precise and worth demonstrating with a concrete example:
+
+```csharp
+// Assembly A (Core library)
+public class NotificationBase
+{
+    protected internal void OnCreated() { }   // derived types OR same assembly
+    private protected void OnValidated() { }  // derived types AND same assembly
+}
+
+// Assembly B (references Assembly A)
+public class EmailNotification : NotificationBase
+{
+    public void Send()
+    {
+        OnCreated();     // OK: protected internal — derived type in any assembly
+        // OnValidated(); // ERROR: private protected — caller must be in same assembly
+    }
+}
+
+// Back in Assembly A
+public class AuditService
+{
+    public void Audit(NotificationBase notification)
+    {
+        notification.OnCreated();   // OK: protected internal — same assembly
+        // notification.OnValidated(); // ERROR: private protected — not a derived type
+    }
+}
+
+// Inside Assembly A, a derived type
+public class SmsNotification : NotificationBase
+{
+    public void Send()
+    {
+        OnCreated();    // OK: same assembly (internal path)
+        OnValidated();  // OK: derived type AND same assembly
+    }
+}
+```
+
+`protected internal` is a logical OR: the member is accessible to derived types anywhere or to any code in the same assembly. `private protected` is a logical AND: the member is accessible only to derived types that are also defined in the same assembly. The OR form is the more common choice for framework internals that subclasses may need. The AND form is the narrowest possible visibility short of `private` and is most useful when a base class wants to expose an implementation detail exclusively to derived types it controls — for example, a hook called only by the factory methods defined in the same assembly.
 
 Static members belong to the type rather than to an instance.
 
@@ -181,7 +298,7 @@ public static class CurrentUser
 }
 ```
 
-In a server application, mutable static state is shared across requests, users, and threads. That creates coupling between otherwise unrelated execution paths and often leads to race conditions, test contamination, or incorrect cross-request behavior. When state should vary per request or per operation, instance-based design and dependency injection are usually the better fit.
+Static state that is mutable creates problems in server applications: it is shared across requests, users, and threads, coupling otherwise unrelated execution paths and often leading to race conditions, test contamination, or incorrect cross-request behavior. When state should vary per request or per operation, instance-based design and dependency injection are usually the better fit.
 
 ```csharp
 public interface ICurrentUser
@@ -190,7 +307,7 @@ public interface ICurrentUser
 }
 ```
 
-The important rule is not "never use static." It is "use static only when the value is truly process-wide and semantically shared."
+Static members should carry values that are truly process-wide and semantically shared.
 
 ## Partial Types And Generated Code
 
@@ -261,7 +378,38 @@ public sealed class OrderService(IOrderRepository repository, ILogger<OrderServi
 }
 ```
 
-This can reduce ceremony for dependency-heavy service classes. It works best when constructor logic is simple and the resulting type remains easy to scan. Where initialization is complex, explicit constructors often remain clearer.
+The compiler captures a primary constructor parameter as a private field only when that parameter is referenced in an instance member — a method body, property accessor, or field initializer. Parameters used exclusively in the constructor body itself (for argument validation or passing to a base constructor) remain ordinary constructor parameters and are never stored as fields:
+
+```csharp
+public sealed class ReportGenerator(
+    ITemplateEngine engine,      // captured: used in GenerateAsync
+    IAuditLogger audit,          // captured: used in _logPrefix initializer
+    int maxRetries)              // NOT captured: used only in constructor body
+{
+    private readonly string _logPrefix = $"ReportGen-{audit.Id}";
+
+    public ReportGenerator(ITemplateEngine engine, IAuditLogger audit, int maxRetries)
+        : this(engine, audit, maxRetries)
+    {
+        if (maxRetries <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxRetries));
+        }
+    }
+
+    public async Task<string> GenerateAsync(ReportRequest request)
+    {
+        var template = await engine.LoadAsync(request.TemplateId);
+        return template.Render(request.Data);
+    }
+}
+```
+
+In this example, `engine` appears in `GenerateAsync` and `audit` appears in a field initializer — both are captured as private fields. The `maxRetries` parameter appears only in the explicit constructor body for validation and is never stored.
+
+This distinction matters for two reasons. First, captured parameters increase the object's size; if a parameter looks like a dependency but is never used beyond construction, it silently adds a field. Second, captured fields follow normal GC reachability rules, so the captured `ITemplateEngine` reference keeps the engine alive for the lifetime of the `ReportGenerator`. For dependency-heavy services this is usually harmless, but it is worth keeping in mind when designing types with primary constructors.
+
+This feature also depends on the effective language version of the project. In most current SDK-style applications, that support comes from the modern SDK and target framework automatically. If a codebase uses an older SDK, pins an older language version, or compiles in a constrained environment, the syntax may fail at build time even though the code looks valid to the reader.
 
 ### Collection Expressions
 
@@ -273,6 +421,27 @@ List<string> names = ["Alice", "Bob"];
 ```
 
 They do not change the underlying collection semantics. Choosing between arrays, lists, sets, and dictionaries still requires the same design judgment around mutability, lookup behavior, ordering, and allocation.
+
+Like other modern syntax features, collection expressions are best treated as a readability improvement on top of an existing semantic model. The feature is active only if the compiler in the current project understands it, so build success is again the practical verification point.
+
+## Record Structs
+
+C# 10 introduced `record struct`, combining value-type allocation with compiler-generated equality and `ToString`. A `record struct` lives on the stack (or inlined into a containing object) like any struct, but the compiler synthesizes `Equals`, `GetHashCode`, `ToString`, `==`, `!=`, and `IEquatable<T>` based on the struct's fields — the same machinery that `record class` provides, but without the heap allocation and reference semantics:
+
+```csharp
+public readonly record struct Money(decimal Amount, string Currency);
+
+var a = new Money(10m, "USD");
+var b = new Money(10m, "USD");
+
+Console.WriteLine(a == b); // true — structural equality
+```
+
+The critical differences from a plain `readonly struct` are the compiler-generated equality members. A plain struct inherits `ValueType.Equals`, which uses reflection by default and is slow; a `record struct` gets field-by-field comparison generated at compile time. The difference from a `record class` is value semantics: copying a `record struct` produces an independent copy, and a `record struct` variable can never be null.
+
+`record struct` is a natural fit for small, immutable value objects where structural equality is semantically correct: coordinates, version numbers, measurement units, composite keys. It is less suitable for types that carry many fields (equality cost grows with field count), types that need inheritance (`record struct` does not support `abstract` or `virtual` members beyond what `struct` permits), or types large enough that value-type copying becomes a measurable cost.
+
+The `readonly` modifier on `record struct` is important. An unadorned `record struct` is mutable by default (unlike positional `record class`, which generates `init`-only properties). Omitting `readonly` risks the same problems as any mutable struct: defensive copies at call sites, lost mutations, and confusing behavior when the struct is used as a property or readonly field.
 
 ## Resource Lifetime And Deterministic Cleanup
 
@@ -300,6 +469,8 @@ finally
 
 For engineering work, this distinction matters because resource leaks often appear long before memory exhaustion does. An application can remain memory-stable and still fail because it has exhausted connections, file handles, or other external resources.
 
+`await using` only applies when the resource implements `IAsyncDisposable`. That boundary matters in real code because not every type with asynchronous work supports asynchronous disposal. The compiler enforces that distinction, which means the activation and verification path is straightforward: the resource type either supports `await using`, or the code will not compile.
+
 ## Extension Methods And API Shape
 
 Extension methods add method syntax to existing types without modifying their source definitions.
@@ -324,6 +495,28 @@ public static Task ApproveOrderAsync(this Order order, AppDbContext db)
 ```
 
 That style weakens clarity because the call site resembles domain behavior while quietly depending on infrastructure. Extension methods are best when they improve expression without obscuring responsibility.
+
+The compiler resolves extension methods by scanning `using` directives for static classes that contain a matching method. The search looks for a static method whose first parameter is decorated with `this` and whose type is compatible with the expression at the call site. Only `using`-imported namespaces are considered; a static class in the current namespace but not imported via `using` is invisible to extension resolution:
+
+```csharp
+using MyApp.StringHelpers; // Without this, IsBlank is not found.
+
+string? input = null;
+var result = input.IsBlank(); // Resolves to StringExtensions.IsBlank
+```
+
+Ambiguity arises when two imported static classes define extension methods with the same signature. The compiler reports an error and requires the call to be rewritten as a normal static method call — extension syntax cannot disambiguate between equally applicable candidates:
+
+```csharp
+using LibraryA.Extensions;
+using LibraryB.Extensions;
+
+string? input = null;
+// input.IsBlank(); // CS0121: ambiguous call
+var result = StringExtensions.IsBlank(input); // explicit disambiguation
+```
+
+Instance methods always take priority over extension methods. If a type defines an instance method with a matching name and compatible parameters, the compiler selects the instance method even when an extension method would also apply. This is why adding an instance method to a type is a breaking change for any consumer that relied on an extension method with the same signature — the extension method becomes silently unreachable.
 
 ## Deferred Execution With Iterators
 
@@ -350,7 +543,7 @@ numbers.Clear();
 var result = query.ToList();
 ```
 
-Since the iterator runs during enumeration, changes to the source sequence can change the eventual result. The same deferred-execution mindset appears again in LINQ, which is why understanding it early is useful.
+Since the iterator runs during enumeration, changes to the source sequence after the query is composed but before it is materialized can change the eventual result. The same deferred-execution mindset appears throughout LINQ, where queries composed with `Where`, `Select`, and similar operators also defer work until iteration.
 
 ## By-Reference Features And Performance-Oriented Constructs
 
@@ -385,3 +578,71 @@ public async Task ProcessAsync(Memory<byte> data)
 ```
 
 Most application chapters in this book do not depend heavily on spans, but professional readers should recognize them because modern .NET libraries use them extensively in performance-sensitive APIs.
+
+A more complete comparison helps explain why both exist:
+
+```csharp
+public static bool HasOrderPrefix(ReadOnlySpan<char> value)
+{
+    return value.StartsWith("ORDER-", StringComparison.Ordinal);
+}
+
+public static async Task<int> CountNonZeroBytesAsync(
+    Memory<byte> buffer,
+    CancellationToken ct)
+{
+    await Task.Delay(10, ct);
+
+    var count = 0;
+    foreach (var value in buffer.Span)
+    {
+        if (value != 0)
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+```
+
+`Span<T>` is designed for short-lived synchronous access. `Memory<T>` exists when the same data must survive heap-based and asynchronous flow. Both appear extensively in modern .NET library APIs.
+
+The stack-only restriction on `Span<T>` is a direct consequence of its internal representation. A `Span<T>` is a `ref`-like structure — it contains a managed pointer (a `ref` field) to the data it spans, plus a length. Managed pointers cannot appear on the managed heap because the GC cannot track and update them during compaction. The runtime therefore prohibits `Span<T>` from appearing as a class field, a boxed value, an array element, or any other heap-resident location. The compiler enforces this through the `ref struct` declaration, which `Span<T>` uses:
+
+```csharp
+public readonly ref struct Span<T>
+{
+    internal readonly ref T _reference;
+    internal readonly int _length;
+    // ...
+}
+```
+
+This is why `Span<T>` cannot cross `await` boundaries (the async state machine lives on the heap), why it cannot be captured by lambdas (the closure class is heap-allocated), and why `Memory<T>` exists as the heap-safe alternative.
+
+A realistic zero-allocation parsing example makes the trade-off concrete. Parsing a CSV line into its fields without any heap allocation:
+
+```csharp
+public static int SumSecondColumn(ReadOnlySpan<char> csvLine)
+{
+    var total = 0;
+
+    foreach (var field in csvLine.Split(','))
+    {
+        // Split returns a Range, not a string — no allocation.
+        var slice = csvLine[field];
+
+        // Take every second column (index 1, 3, 5, ...).
+        // In a real parser, field counting would track position.
+        if (int.TryParse(slice, out var value))
+        {
+            total += value;
+        }
+    }
+
+    return total;
+}
+```
+
+The `MemoryExtensions.Split` method on `ReadOnlySpan<char>` returns `SpanSplitEnumerator<char>`, another `ref struct`. Each `MoveNext` call slices the original span without copying character data. The entire operation — splitting, slicing, parsing — touches no managed heap beyond any integer boxing that `TryParse` avoids. In high-throughput scenarios such as log processing, ETL pipelines, or network protocol parsing, this allocation-free style can reduce GC frequency by orders of magnitude relative to `string.Split` or `Substring`-based approaches.

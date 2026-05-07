@@ -242,11 +242,19 @@ Two-column form:
 }
 ```
 
-### Flexbox vs Grid?
+### Choosing Between Flexbox and Grid
 
-> Flexbox is best for one-dimensional layouts. Grid is best for two-dimensional layouts with rows and columns.
+Flexbox and Grid are complementary layout systems, not competing alternatives. The primary distinction is dimensionality:
 
-### How do you center an element?
+**Flexbox** operates in one dimension at a time -- either a row or a column. It distributes space along the main axis and aligns items along the cross axis. Flexbox excels when the number of items is unknown or dynamic, such as toolbars, navigation bars, button groups, and centered content blocks. Items in a flex container can wrap to new rows, but each new row is an independent flex container -- items in one row do not align with items in another row.
+
+**Grid** operates in two dimensions simultaneously -- rows and columns. Grid excels when you need to align items across both axes, such as page shells, card grids, form layouts, and dashboard panels. Items in a Grid container share column and row tracks, so elements in one row align with elements in adjacent rows.
+
+In practice, they are often used together: Grid defines the page shell (sidebar, header, main, footer), while Flexbox manages the internal layout of individual page components (toolbar buttons, form controls, card content).
+
+### Centering Strategies
+
+Flexbox provides the most straightforward centering for a single child element within its parent:
 
 ```css
 .parent {
@@ -256,16 +264,25 @@ Two-column form:
 }
 ```
 
-### What does `minmax(240px, 1fr)` do?
+Grid provides equivalent centering with a single property:
 
-> It creates a grid column that is at least 240px and can grow to share available space.
+```css
+.parent {
+  display: grid;
+  place-items: center;
+}
+```
 
-## Practice Task
+For centering in one axis only, `margin: auto` on the child element (with a defined width or height on the parent) remains a reliable fallback that works across all block-level contexts.
 
-Build:
+### The fr Unit and minmax()
 
-1. app shell with sidebar and content;
-2. responsive card grid;
-3. toolbar with left/right groups;
-4. table header layout;
-5. mobile stacked layout.
+The `fr` unit in Grid represents a fraction of the available space in the grid container after fixed-size tracks (those with explicit length values like `px`, `rem`, or `%`) have been allocated. Two columns defined as `1fr 2fr` mean the second column receives twice the space of the first.
+
+`minmax()` defines a track size range. `grid-template-columns: minmax(200px, 1fr)` creates a column that is at least 200px wide but can grow to fill available space. This is useful for responsive layouts without media queries:
+
+```css
+grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+```
+
+The `min(100%, 16rem)` guard prevents the minimum from exceeding the viewport width on very narrow screens, which would otherwise cause horizontal overflow.

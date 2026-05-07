@@ -6,7 +6,7 @@ A modular monolith is a single deployable application organized into strong inte
 
 It keeps the operational simplicity of a monolith while improving code boundaries.
 
-## Why Modular Monolith?
+## Conditions For A Modular Monolith
 
 Good when:
 
@@ -231,6 +231,34 @@ public sealed class ModuleBoundaryTests
 
 This example uses NetArchTest-style rules. The same idea can be implemented with other architecture testing tools.
 
+## Cross-Module Transactions
+
+A modular monolith shares a database, which means a single transaction can span multiple modules. This is one of the strongest advantages over microservices: if Ordering needs to create an order and Billing needs to record a payment in the same atomic boundary, a shared `DbContext` or a transaction scope makes it trivial.
+
+The facade pattern still applies: the Ordering module should not manipulate Billing tables directly. Instead, the orchestrating code (typically in the API or a workflow handler) calls both module facades within one transaction:
+
+```csharp
+public sealed class CheckoutHandler
+{
+    private readonly IOrderingModule _ordering;
+    private readonly IBillingModule _billing;
+
+    public async Task Handle(CheckoutCommand command, CancellationToken ct)
+    {
+        using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
+
+        await _ordering.ConfirmOrderAsync(command.OrderId, ct);
+        await _billing.CreateInvoiceAsync(command.OrderId, ct);
+
+        await transaction.CommitAsync(ct);
+    }
+}
+```
+
+This pattern works because both modules share the same database connection and transaction. When modules are later extracted into separate services, this code must be replaced with a saga — which is why cross-module transactions should be documented as extraction points.
+
+If each module uses its own `DbContext` class against the same physical database, `TransactionScope` or `IDbContextTransaction` with shared connections can still coordinate them. If modules have truly separate databases, cross-module transactions are no longer possible without distributed transactions (which carry their own costs).
+
 ## Database Strategy
 
 Options:
@@ -257,13 +285,4 @@ Extraction is easier when:
 - no direct cross-module database access;
 - tests cover behavior.
 
-## Practice Task
-
-Design modules for:
-
-1. ordering;
-2. billing;
-3. notification;
-4. reporting;
-5. define allowed communication;
-6. define extraction criteria.
+A modular monolith provides the operational simplicity of a single deployment with the structural discipline of separated module boundaries. Each module owns its domain logic, communicates through explicit contracts or in-process events, and shares transactional consistency when needed. When a module's boundary is clear enough and its scaling requirements diverge, it becomes a candidate for extraction into an independent service.

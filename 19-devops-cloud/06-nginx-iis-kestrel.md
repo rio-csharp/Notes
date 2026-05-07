@@ -131,9 +131,7 @@ app.MapGet("/", (HttpContext http) => new
 app.Run();
 ```
 
-Important:
-
-> Only trust forwarded headers from trusted proxies. If the app accepts these headers directly from the public internet, clients can spoof IP addresses and schemes.
+Only trust forwarded headers from trusted proxies. If the app accepts these headers directly from the public internet, clients can spoof IP addresses and schemes.
 
 In a locked-down deployment, configure known proxy IP ranges instead of clearing them.
 
@@ -287,7 +285,7 @@ Common symptom:
 Normal API requests work, but SignalR/WebSocket disconnects quickly.
 ```
 
-Likely causes:
+Possible causes:
 
 - missing upgrade headers;
 - proxy read timeout too low;
@@ -459,25 +457,4 @@ Health endpoints should not expose secrets, stack traces, or internal dependency
 | SPA route refresh returns 404 | no `try_files` fallback to `index.html` |
 | Auth callback fails | wrong host/scheme behind proxy |
 
-## Practice Task
 
-Create a local deployment design for:
-
-1. React SPA served by Nginx.
-2. ASP.NET Core API running on Kestrel at port `8080`.
-3. Nginx proxying `/api/` to Kestrel.
-4. SPA fallback for client-side routes.
-5. Forwarded headers.
-6. Upload limit of `25m`.
-7. WebSocket route `/hub/`.
-8. Health check route `/health/ready`.
-
-Then explain:
-
-```text
-Which layer terminates TLS?
-Which layer knows the public host name?
-How does the app know the original scheme?
-Where are request size limits configured?
-How would you debug a 502?
-```

@@ -533,15 +533,4 @@ Large exports should use streaming and permission checks.
 - avoid unnecessary frontend re-renders;
 - use virtualization only when truly needed.
 
-## Practice Task
 
-Design an admin users page with:
-
-1. server-side pagination.
-2. search and status filter.
-3. URL-persisted filters.
-4. permission-based row actions.
-5. backend authorization policies.
-6. audit log for disable user.
-7. async export job.
-8. loading, error, and empty states.

@@ -151,21 +151,47 @@ Pending -> Expired
 Reserved -> Released
 ```
 
-## Saga Flow
+## Distributed Transaction via Saga
+
+An order checkout spans multiple services (order, inventory, payment, shipping). A distributed transaction with ACID guarantees across all services is impractical; instead, the system uses a saga -- a sequence of local transactions with compensating actions for rollback.
+
+### Saga Execution
 
 ```text
-CreateOrder
-  -> ReserveInventory
-  -> CreatePayment
-  -> ConfirmOrder
+CreateOrder          -> Order DB
+  -> ReserveInventory   -> Inventory Service
+  -> CreatePayment      -> Payment Service
+  -> ConfirmOrder       -> Order DB
 ```
 
-If payment fails:
+If `CreatePayment` fails:
 
 ```text
-CancelOrder
-ReleaseInventory
+CancelOrder          -> Order DB (compensation)
+ReleaseInventory     -> Inventory Service (compensation)
 ```
+
+### Choreography vs. Orchestration
+
+**Choreography**: each service emits events after completing its local transaction, and the next service in the saga subscribes. No central coordinator exists.
+
+```
+OrderCreated -> InventoryService reserves stock -> InventoryReserved -> PaymentService charges -> PaymentCaptured -> OrderService confirms
+```
+
+Choreography is loosely coupled but hard to trace and debug because saga progress is distributed across independent event handlers.
+
+**Orchestration**: a central coordinator (orchestrator) tells each service what to do and tracks the saga state. If a step fails, the orchestrator issues compensating commands.
+
+```
+Orchestrator -> OrderService    (CreateOrder)
+Orchestrator -> InventoryService (ReserveInventory)
+Orchestrator -> PaymentService   (CreatePayment)
+```
+
+Orchestration is more centralized, making saga progress visible and compensating logic explicit. The orchestration state (current step, success/failure, retry count) is persisted in a saga log, allowing the orchestrator to resume after a crash.
+
+For an e-commerce checkout with financial consequences and multiple compensation paths, orchestration is the safer choice.
 
 ## Payment Callback Handling
 
@@ -213,9 +239,9 @@ Events:
 
 Use outbox to publish reliably.
 
-## Practice Task
+## Verification
 
-Design:
+Key aspects to verify:
 
 1. order state machine;
 2. checkout API;

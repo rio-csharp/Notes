@@ -202,8 +202,6 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 `EnableRetryOnFailure` helps with transient errors.
 
-Chinese note:
-
 Do not use retries to hide permanent problems such as bad SQL, missing tables, or wrong credentials.
 
 ## Blob Storage
@@ -297,10 +295,6 @@ Common options:
 - CDN/private access patterns for high-traffic files.
 
 SAS means Shared Access Signature.
-
-Chinese note:
-
-Example concept:
 
 ```csharp
 public async Task<Stream> OpenReadAsync(string blobName, CancellationToken ct)
@@ -501,8 +495,6 @@ public sealed class OrderEventPublisher
 
 Consumers should be idempotent because messages can be delivered more than once.
 
-Chinese note:
-
 ## Azure Cache For Redis
 
 Use Redis for:
@@ -547,8 +539,6 @@ Public internet
   -> Azure SQL / Storage / Key Vault
 ```
 
-Chinese note:
-
 ## Backup And Restore
 
 Backups are only useful if restore has been tested.
@@ -591,28 +581,4 @@ Practical habits:
 - move old blobs to cool/archive tiers;
 - delete temporary resources.
 
-## Practice Task
 
-Design an Azure deployment for:
-
-1. React frontend.
-2. ASP.NET Core API.
-3. Azure SQL.
-4. Blob Storage uploads.
-5. Redis cache.
-6. Key Vault with Managed Identity.
-7. Application Insights.
-8. Service Bus background processing.
-9. CI/CD deployment.
-
-Write down:
-
-```text
-Which service hosts each component?
-Where are secrets stored?
-How does the app authenticate to Azure services?
-How are files uploaded and downloaded?
-How are logs and traces collected?
-How would you restore the database?
-Which parts are public and which parts are private?
-```

@@ -6,15 +6,13 @@ An Architecture Decision Record (ADR) documents an important technical decision,
 
 Architecture is not only about choosing tools. It is about making decisions that remain understandable when the team, product, traffic, and constraints change.
 
-## Why ADRs Matter
+## Purpose of ADRs
 
 Architecture decisions often outlive the people who made them.
 
-Without ADRs, teams forget:
+Without ADRs, teams forget why decisions were made, what alternatives were considered, and what trade-offs were accepted. An ADR gives future engineers this context. It prevents the same debate from restarting every few months with no recorded memory of prior conclusions.
 
-An ADR gives future engineers context. It prevents the same debate from restarting every few months with no memory.
-
-## When To Write An ADR
+## Decisions Worth Recording
 
 Write ADRs for decisions that are expensive to reverse or affect many parts of the system:
 
@@ -133,8 +131,6 @@ Examples:
 - observability;
 - failure recovery;
 - vendor lock-in.
-
-Chinese note:
 
 ## Example 1: Redis For Distributed Cache
 
@@ -569,7 +565,7 @@ Keep an index so decisions are discoverable.
 | ADR-004 | Use Short-Lived JWT Access Tokens | Accepted | 2026-05-03 |
 ```
 
-## How ADRs Connect To Code
+## Connecting ADRs to Code
 
 An ADR should influence implementation. If the ADR says cache keys must include tenant ID, code review should check that rule.
 
@@ -587,27 +583,4 @@ Redis cache ADR implementation checks:
 
 This turns architecture into practical engineering behavior.
 
-## Practice Task
 
-Write ADRs for:
-
-1. Redis vs database-only reads.
-2. Service Bus vs Kafka.
-3. Modular monolith vs microservices.
-4. JWT tokens vs opaque tokens.
-5. SQL Server vs PostgreSQL.
-6. API gateway vs direct service routing.
-7. App Service vs Kubernetes.
-
-For each ADR, include:
-
-```text
-Context:
-Decision drivers:
-Options:
-Decision:
-Positive consequences:
-Negative consequences:
-Implementation notes:
-Revisit when:
-```

@@ -2,190 +2,115 @@
 
 ## Purpose
 
-This repository is being shaped into a professional English technical book rather than a study notebook, interview guide, or question bank. Every chapter revision should be checked against this standard before it is considered stable.
+This repository is being shaped into a professional English technical book — not a study notebook, interview guide, question bank, or outline dump.
 
-## Non-Negotiable Goals
+The target book is **broad** (covers its subject responsibly), **deep** (teaches engineering judgment), **concrete** (recognizable in real work), and **structured** (reads as a coherent book, not accumulated notes). This standard protects all four qualities simultaneously.
 
-Each chapter must be:
+**Important:** The original content is a starting point, not a finished manuscript. Chapters may contain inaccuracies, gaps, shallow explanations, or outdated information. Editing is not only about cleaning up style — it includes verifying correctness, filling knowledge gaps, deepening shallow sections, and rewriting entirely when needed. Do not treat the existing text as authoritative.
 
-- technically correct;
-- sufficiently complete for its scope;
-- appropriately deep for a professional engineering audience;
-- structurally coherent as a book chapter;
-- concrete enough to teach real implementation and engineering judgment, not only abstract concepts;
-- written in professional English;
-- free of Chinese content unless explicitly required for a special appendix;
-- free of interview-style or training-note scaffolding.
+---
 
-## Chapter Quality Bar
+## Core Quality Dimensions
 
-Before a chapter is called stable, it should satisfy all of the following.
+Every chapter must satisfy all six dimensions before it is considered stable.
 
-### 1. Scope Clarity
+### 1. Scope & Structure
 
-- The chapter has a clear topic boundary.
-- The reader can tell why the chapter exists and what it covers.
-- Topics that belong to other chapters are mentioned briefly only when necessary, then deferred.
-- The chapter does not feel like several unrelated mini-chapters glued together.
+- The chapter has a clear topic boundary; the reader understands why it exists and what it covers.
+- Concepts live in their most natural chapter. Cross-references are fine, but the main explanation belongs in one primary place.
+- The chapter reads as a continuous narrative with logical progression, not disconnected notes.
+- Repeated explanations are consolidated. Redundancy is acceptable only when it serves a distinct purpose.
+- Topics belonging elsewhere are mentioned briefly only when necessary, then deferred.
 
-### 2. Coverage Completeness
+### 2. Depth & Mechanism
 
-- The important concepts for the chapter's scope are present.
-- The chapter covers both conceptual foundations and practical engineering implications.
-- Missing material is identified explicitly and added before the chapter is considered stable.
-- Examples do not replace core explanation; they support it.
-- If the old chapter contained meaningful concrete examples, implementation patterns, representative code, or operational scenarios, those should not be removed merely to make the prose shorter.
-- A chapter is incomplete if it explains principles but no longer shows how those principles appear in real code, real APIs, real database queries, real UI structures, or real production workflows when such examples are central to the topic.
+- Explanations go beyond definitions. The chapter explains **why** a concept matters, **where** it breaks down, and **what trade-offs** it introduces.
+- For language, runtime, framework, and infrastructure topics, explain **how** the mechanism works — not only what API to call. The reader should build a mental model deep enough for reasoning, not only memorization.
+- Operational consequences, performance implications, and design trade-offs are included where they materially matter.
+- Simplified models are allowed only if they do not create misleading intuition. When a simplification is used, acknowledge the nuance if it matters.
+- Examples of mechanism-level depth: why `await` becomes a state machine, why `IQueryable<T>` differs from `IEnumerable<T>`, why boxing allocates, why bounded channels create backpressure.
+- **If existing content is too shallow** — only naming concepts without explaining them, or providing definitions without engineering context — rewrite it. A shallow paragraph that merely exists is worse than a missing one because it creates an illusion of coverage.
 
-### 3. Depth And Professional Value
+### 3. Breadth Within Scope
 
-- Explanations go beyond definitions.
-- The chapter explains why a concept matters, where it breaks down, and what trade-offs it introduces.
-- Operational consequences, performance implications, and design consequences are included where they materially matter.
-- The material is useful for real software engineering work, not only for passing interviews.
-- Practical implementation detail is part of depth. A chapter should not become so abstract that a reader understands the idea but cannot recognize or apply it in actual engineering work.
+- The chapter covers the major dimensions a serious reader would expect — conceptual foundations **and** practical engineering implications.
+- Breadth does not mean mentioning everything superficially. It means the chapter does not teach a distorted picture by covering only the easiest or most abstract parts.
+- If a topic has meaningful design, runtime, performance, operational, and API-surface dimensions, touch each at least briefly.
+- A chapter should not feel complete if it teaches only syntax, only theory, or only one framework-facing usage pattern.
 
-### 4. Technical Accuracy
+### 4. Concrete Teaching
+
+- Examples clarify the concept; they do not replace core explanation but support it.
+- Rich, realistic code examples are a requirement, not optional. A strong chapter includes multiple substantial examples showing the concept in realistic usage — not only isolated toy snippets.
+- High-value examples include: representative code paths, API contracts, database schemas, frontend markup/CSS, auth flows, and failure or edge-case examples that reveal trade-offs.
+- When a concept is commonly configured (project files, runtime config, environment variables, DI registration, hosting setup), show at least one representative configuration path.
+- When a concept is commonly misunderstood because readers cannot tell whether it is active, include a realistic verification or inspection step (command-line check, logging, diagnostics, runtime API).
+- Rewriting must preserve knowledge density. Reducing line count is acceptable only when concrete teaching material is retained. Removing scaffolding is good; stripping away implementation detail is not.
+- If a chapter becomes noticeably more abstract after editing, that is a review failure.
+
+### 5. Technical Accuracy
 
 - Claims are precise enough for experienced readers.
 - Simplifications are allowed only if they do not create a misleading mental model.
-- When a simplification is used, the text should acknowledge the nuance if that nuance matters.
 - Statements about runtime behavior, framework behavior, and architectural guidance must be checked carefully.
-
-### 5. Book Structure
-
-- The chapter reads like a continuous chapter, not a list of disconnected notes.
-- There should be a logical progression from fundamentals to applied guidance.
-- Repetition should be minimized.
-- Dedicated recap files are allowed at folder level.
-- Per-file summary sections are not required unless they materially improve flow.
-- Book-like structure does not mean aggressively minimizing all concrete material. Rich, well-placed examples are compatible with good book structure and are often necessary for technical clarity.
-
-### 6. Style And Tone
-
-- The tone is professional, calm, and book-like.
-- The prose should teach clearly without sounding like a lecture script or tutoring notes.
-- Avoid explicit note labels such as:
-  - `Key point:`
-  - `Important:`
-  - `Practical explanation:`
-  - `Engineering perspective:`
-  - `Why this matters:`
-  - `Why risky:`
-  - `Decision rule:`
-  - `Rule:`
-- Avoid explicit Q&A headings such as:
-  - `What is ...`
-  - `Why ...`
-  - `How ...`
-  - `When ...`
-  - `Should ...`
-  - `Can ...`
-- Avoid direct interview framing, such as "common interview question" or "better answer."
-
-### 7. Content Integration
-
-- Review questions must be absorbed into normal exposition.
-- Common mistakes must be integrated into the relevant knowledge sections instead of isolated as a training appendix.
-- If a point has no natural home, add a normal subsection for it.
-- Practice tasks should generally be removed unless the book later gains a deliberate exercises part.
-
-### 8. Examples
-
-- Examples must clarify the concept, not just fill space.
-- Example code should be technically plausible and aligned with the surrounding explanation.
 - Examples should illustrate trade-offs, not only idealized happy paths.
-- Examples should not repeat the same idea excessively across files.
-- Each chapter should retain enough concrete examples that the reader can see how the concept appears in real practice.
-- When editing, prefer keeping a smaller number of high-value, representative examples rather than deleting implementation detail wholesale.
-- High-value examples include:
-  - representative code paths;
-  - realistic API contracts;
-  - database schema or query examples;
-  - frontend markup, CSS, or rendering patterns;
-  - production-safe authentication, authorization, or deployment flows;
-  - failure, misuse, or edge-case examples that reveal trade-offs.
-- If a concrete example is removed, its practical teaching value should be preserved elsewhere in the chapter unless the example was redundant or low-value.
 
-### 8A. Concrete Material Preservation
+### 6. Professional Voice
 
-- Rewriting must preserve knowledge density, not only conceptual cleanliness.
-- A reduction in line count is acceptable only if the chapter still retains the important concrete material needed to teach the subject well.
-- Removing scaffolding is good; removing too many concrete implementation details is not.
-- A technically strong chapter usually includes both:
-  - conceptual explanation;
-  - concrete illustrations that a practitioner could recognize in real work.
-- If a chapter becomes noticeably more abstract after editing, that is a review failure unless the abstraction is offset by equally strong concrete examples elsewhere in the same chapter.
+- The tone is professional, calm, and book-like. The prose teaches clearly without sounding like lecture scripts or tutoring notes.
+- The chapter is written in English. No Chinese content unless explicitly required for a special appendix.
+- Review questions, common mistakes, and practice tasks must be absorbed into normal exposition — never isolated as training appendices.
+- No interview framing (e.g., "common interview question," "better answer").
 
-### 9. Redundancy Control
+---
 
-- Repeated explanations should be consolidated.
-- If a concept has a dedicated chapter, other chapters should only provide the minimum context needed.
-- Repetition is acceptable only when it improves comprehension and each occurrence serves a distinct purpose.
-- Redundancy control must not be used as a reason to strip away valuable examples, framework-specific implementation patterns, or representative code that carries unique teaching value.
+## Style Rules (Quick Reference)
 
-### 10. Chapter Placement
+**Prohibited note labels:**
+`Key point:` `Important:` `Practical explanation:` `Engineering perspective:` `Why this matters:` `Why risky:` `Decision rule:` `Rule:`
 
-- Each concept should live in the most natural chapter.
-- If something is currently explained in the wrong chapter, it should be moved or reduced.
-- Cross-references in prose are acceptable, but the main explanation should live in one primary place.
+**Prohibited Q&A headings:**
+`What is ...` `Why ...` `How ...` `When ...` `Should ...` `Can ...`
 
-## Required Chapter Review Pass
+**Also avoid:**
+- `Short answer:` / `Answer:` / `Detailed explanation:` / `Expected reasoning:` / `Questions:` / `Full knowledge check:`
+- Numbered or bulleted question lines starting with what/why/how/when/where/which
+- `Follow-up:` lines
+- Dedicated "Knowledge Checks" or "Common Mistakes" sections
 
-Each chapter should go through this sequence:
+---
 
-1. Structural pass
-   - Remove Q&A tails, review-question sections, Chinese notes, training scaffolding, and notebook artifacts.
-2. Editorial review pass
-   - Identify coverage gaps, shallow sections, redundancy, misplaced material, weak explanations, and places where concrete implementation detail has become too thin.
-3. Rewrite pass
-   - Fix the identified problems, not only the formatting.
-4. Final verification pass
-   - Check for Chinese residue, Q&A headings, note-style labels, chapter-flow issues, and whether the chapter still contains enough concrete examples and implementation detail for its topic.
+## Review Workflow
 
-## Required Review Output Format
+Every chapter goes through four passes:
 
-When reviewing a chapter, findings should be stated explicitly and prioritized. The review should focus first on:
+| Pass | Focus |
+|------|-------|
+| **1. Structural** | Remove Q&A tails, review-question sections, Chinese content, training scaffolding, notebook artifacts, and prohibited labels/headings. |
+| **2. Editorial** | Identify coverage gaps, shallow sections, missing concrete examples, missing config/verification paths, weak mechanism explanation, misplaced material, unnecessary redundancy, and — critically — **inaccurate or outdated claims**. State findings explicitly and prioritize them. Verify technical correctness against current documentation and real-world behavior. |
+| **3. Rewrite** | Fix the identified problems — not only formatting. This may involve rewriting entire sections when the existing content is inaccurate, too shallow, or incomplete. Protect core concepts, breadth, representative examples, mechanism-level explanation, and activation/verification paths. |
+| **4. Verification** | Check for residual Chinese, prohibited labels, chapter-flow issues, and whether the chapter still has enough depth, concrete examples, and implementation detail after cleanup. |
 
-- missing knowledge;
-- inaccurate or potentially misleading explanations;
-- weak depth;
-- loss of important concrete examples or implementation guidance;
-- structural overlap or misplacement;
-- unnecessary redundancy.
+**Review priorities** (in order): missing knowledge → inaccuracies → weak depth → insufficient breadth → lost concrete examples → missing code examples → missing config/verification paths → structural misplacement → unnecessary redundancy.
 
-Only after the findings are addressed should the chapter be considered stable.
+---
 
 ## Stability Rule
 
-A chapter is not considered stable merely because:
+A chapter is **not** stable merely because it is in English, has no review questions, has a recap file, sounds cleaner, or has a few examples.
 
-- it is in English;
-- it has no review questions;
-- it has a recap file;
-- it sounds cleaner than before.
+A chapter is stable only after passing: structural cleanup, substantive editorial review, concrete-material preservation review, depth review, and example-density review.
 
-A chapter is stable only when it has passed both:
+---
 
-- structural cleanup;
-- substantive editorial review.
-- concrete-material preservation review.
-
-## Working Rule For Future Updates
+## Editing Process
 
 Before editing any chapter:
+1. Read this standard.
+2. Review the chapter against all six dimensions.
+3. State the findings explicitly.
+4. Revise the chapter.
 
-1. Read this file.
-2. Review the chapter against this standard.
-3. State the findings.
-4. Then revise the chapter.
-
-During revision, explicitly protect:
-
-- core concepts;
-- representative concrete examples;
-- high-value implementation patterns;
-- practical engineering trade-offs;
-- enough detail that the chapter remains useful to someone building real software.
+During revision, explicitly protect: core concepts, breadth, representative concrete examples, mechanism-level explanation, and activation/configuration/verification paths.
 
 If speed and quality conflict, quality wins.

@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-EF Core querying is the process of describing a data request in LINQ, allowing the provider to translate that expression into database commands, and materializing the result into entities or projected read models. The important point is that LINQ in EF Core is not ordinary in-memory LINQ. It is a query description language whose meaning depends on translation.
-
-This chapter focuses on read behavior rather than general performance tuning. The goal is to explain how query shape influences SQL shape, why projection is so important, and where query boundaries should live in a layered application.
+EF Core querying is the process of describing a data request in LINQ, allowing the provider to translate that expression into database commands, and materializing the result into entities or projected read models. LINQ in EF Core is not ordinary in-memory LINQ. It is a query description language whose meaning depends on translation. Query shape influences SQL shape, projection matters enormously, and query boundaries belong in a layered application rather than wherever a `DbContext` happens to be available.
 
 ## `IQueryable<T>` As A Deferred Query Description
 
@@ -53,6 +51,10 @@ LINQ expression
   -> result materialization
   -> optional tracking
 ```
+
+Internally, EF Core parses the LINQ expression tree into a model-level representation called a `SelectExpression`. This is a normalized tree of projections, filters, joins, groupings, and ordering that abstracts away the LINQ method-call surface. A series of `ExpressionVisitor` subclasses then transform this tree: first to inline or reduce visitor-recognizable patterns, then to apply provider-specific logic (such as translating `String.StartsWith` into a `LIKE` expression for SQL Server), and finally to produce a parameterized SQL string.
+
+Each provider ships its own implementation of `QueryCompilationContext` and `QueryTranslationPreprocessor`, which is why the same LINQ expression can produce different SQL on SQL Server versus PostgreSQL versus SQLite. The translation pipeline is therefore never fully portable in its output, only in its input form.
 
 ```csharp
 var query = _dbContext.Orders
@@ -199,6 +201,20 @@ public async Task<PagedResult<OrderListItemDto>> SearchAsync(
 
 This pattern is useful because it preserves query translation until the last responsible moment while still keeping the read model explicit.
 
+## Provider-Specific Functions With `EF.Functions`
+
+When a LINQ expression needs provider-specific behavior -- such as a full-text search predicate, a date-difference function, or a `LIKE` with escaped patterns -- EF Core exposes `EF.Functions`:
+
+```csharp
+var results = await _dbContext.Products
+    .Where(p => EF.Functions.Like(p.Name, "%gaming%"))
+    .ToListAsync(ct);
+```
+
+`EF.Functions` acts as a gateway to provider-specific extension methods. Each provider can implement its own set of functions. The benefit is that the application still works within the LINQ translation boundary instead of falling back to raw SQL for every provider-specific need.
+
+The limitation is portability: a method such as `EF.Functions.FreeText` works only on SQL Server because it translates to SQL Server's full-text index predicate. Applications that target multiple providers must account for such differences or wrap them behind abstraction boundaries.
+
 ## Client Evaluation And Translation Failures
 
 A common source of confusion is introducing logic into a query that the provider cannot translate.
@@ -209,7 +225,7 @@ var orders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-If `IsImportant` is an arbitrary .NET method, EF Core usually cannot convert it into SQL. The safer alternative is to express the condition in provider-translatable terms:
+If `IsImportant` is an arbitrary .NET method, EF Core cannot convert it into SQL and, by default, throws an `InvalidOperationException` describing the translation failure. The safer alternative is to express the condition in provider-translatable terms:
 
 ```csharp
 var importantStatuses = new[] { OrderStatus.Paid, OrderStatus.PendingReview };
@@ -235,6 +251,24 @@ var exists = await _dbContext.Users
 ```
 
 Choosing the right terminal operator improves both readability and execution semantics.
+
+## Parameterization Control: `EF.Constant` And `EF.Parameter`
+
+EF Core parameterizes query values by default, which helps the database reuse cached execution plans across different predicate values. In EF Core 8 and later, the application can control this behavior explicitly.
+
+`EF.Constant` forces a value to be embedded as a SQL literal rather than as a parameter:
+
+```csharp
+var active = await _dbContext.Users
+    .Where(u => u.IsActive == EF.Constant(true))
+    .ToListAsync(ct);
+```
+
+This is useful when a value is truly constant (for example, filtering a lookup table by a known sentinel) and the application wants to produce a more predictable query shape or avoid parameter-sniffing issues on that specific predicate.
+
+`EF.Parameter` forces the value to be parameterized, which is the default behavior but can be made explicit when the code should signal intent clearly.
+
+In most application queries, the default parameterization strategy is correct. These markers should be used deliberately when the generated SQL needs specific tuning for plan quality.
 
 ## Query Boundaries In Application Architecture
 

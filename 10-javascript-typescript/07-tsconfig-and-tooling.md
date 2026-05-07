@@ -223,24 +223,83 @@ npm run typecheck
 
 Use it in CI so type errors do not reach production builds.
 
-### What does strict mode do?
+### Strict Mode Configuration in Depth
 
-> Strict mode enables stronger type checks and helps catch null, implicit any, and unsafe typing issues earlier.
+Enabling `strict: true` in `tsconfig.json` activates a family of individual strictness flags. Understanding each flag helps when migrating an existing project to strict mode incrementally:
 
-### Does TypeScript guarantee API data shape at runtime?
+| Flag | Effect |
+|------|--------|
+| `strictNullChecks` | Makes `null` and `undefined` distinct types. Without it, `null` is assignable to any type, which is the source of most null-reference errors. |
+| `noImplicitAny` | Reports an error when TypeScript cannot infer a type and falls back to `any`. This forces explicit annotations on function parameters and prevents accidental escape hatches. |
+| `strictFunctionTypes` | Enables stricter checking of function parameter bivariance. Without it, a function accepting `Animal[]` could be passed where `Dog[]` is expected, which is unsound. |
+| `strictPropertyInitialization` | Ensures all class properties are initialized in the constructor or via a default value. Prevents accessing uninitialized properties. |
 
-> No. TypeScript types are compile-time only. Runtime data from APIs should be validated if it is untrusted or critical.
+Beyond `strict`, additional flags provide further safety:
 
-### Why use path aliases?
+- `noUncheckedIndexedAccess`: Makes array element access and indexed property access return `T \| undefined` instead of `T`.
+- `exactOptionalPropertyTypes`: Prevents assigning `undefined` to an optional property unless `undefined` is explicitly in the property's type.
+- `noImplicitOverride`: Requires the `override` keyword when overriding a base class method. Catches accidental overrides when a base class adds a method with the same name.
 
-> They make imports cleaner and reduce brittle deep relative paths.
+### The Compile-Time Only Guarantee
 
-## Practice Task
+TypeScript types exist only during compilation and are entirely erased before the code runs. This means no type checking occurs at runtime:
 
-Configure:
+```ts
+interface User {
+  id: number;
+  email: string;
+}
 
-1. strict TypeScript;
-2. path alias;
-3. ESLint;
-4. Prettier;
-5. Zod validation for one API response.
+async function loadUser(id: number): Promise<User> {
+  const response = await fetch(`/api/users/${id}`);
+  return response.json() as User;
+}
+```
+
+The `as User` assertion tells TypeScript to trust the return type, but if the API returns `{ id: "abc", email: null }` (with wrong types), TypeScript will not catch it. The application receives an object that violates the `User` contract, potentially causing runtime errors when code expects `id` to be a number.
+
+Runtime validation at trust boundaries -- API responses, local storage reads, URL/query parameter parsing, cross-origin messages -- is therefore necessary when the data source is untrusted or the contract is not enforced by a shared type system. Zod and other schema libraries provide type inference from runtime validators, ensuring a single source of truth:
+
+```ts
+const UserSchema = z.object({
+  id: z.number(),
+  email: z.string().email()
+});
+
+type User = z.infer<typeof UserSchema>; // inferred from schema
+
+const parsed = UserSchema.parse(json); // throws if shape is wrong
+```
+
+### Path Alias Configuration and Pitfalls
+
+Path aliases require synchronized configuration in two places:
+
+1. `tsconfig.json` for the TypeScript compiler and editor integration:
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+```
+
+2. The bundler (Vite, webpack, or Next.js) for actual module resolution during builds:
+```ts
+// vite.config.ts
+import { defineConfig } from "vite";
+import path from "node:path";
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src")
+    }
+  }
+});
+```
+
+The most common failure mode is an alias mismatch: TypeScript resolves imports correctly in the editor, but the bundler cannot find the modules at build time. This produces "module not found" errors that only surface in CI. Using a shared alias configuration (e.g., reading from `tsconfig.json` paths into the bundler config) prevents this class of bug.

@@ -4,7 +4,7 @@
 
 Dependency injection works best when the container can decide the full object graph at composition time. Factories become useful when that is not enough: when object creation depends on runtime values, when multiple implementations are valid and the choice depends on input, or when a service must create a short-lived object with parameters the container cannot know in advance.
 
-This chapter treats factories not as an alternative to dependency injection, but as one of the ways DI remains explicit even when object creation becomes dynamic. The central design question is not merely whether a factory exists. It is whether the factory preserves visible dependencies or collapses into a disguised service locator.
+Factories are not an alternative to dependency injection. They are one of the ways DI remains explicit even when object creation becomes dynamic. The central design question is whether the factory preserves visible dependencies or collapses into a disguised service locator.
 
 ## Constructor Injection As The Default
 

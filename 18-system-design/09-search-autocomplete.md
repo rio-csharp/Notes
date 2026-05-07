@@ -50,11 +50,9 @@ Options:
 
 ## Trie
 
-Trie is good for prefix search.
+A trie (prefix tree) organizes strings by their shared prefixes. Each node represents a single character; a path from root to a node spells a prefix. This makes prefix lookups fast: finding all suggestions for "iph" requires traversing only three nodes and then collecting all descendant completions.
 
-But distributed, large-scale trie management can be complex.
-
-Simple node model:
+### Mechanism
 
 ```csharp
 public sealed class TrieNode
@@ -65,7 +63,21 @@ public sealed class TrieNode
 }
 ```
 
-Trie is excellent for local prefix lookup, but ranking, updates, memory usage, and multi-language tokenization become harder at large scale.
+To find completions for a prefix:
+
+1. Traverse from the root, following each character in the prefix. If a character is missing, return empty.
+2. From the final node, perform a depth-first (or best-first) traversal to collect candidate completions, using the `Frequency` score for ranking.
+
+### Scaling Challenges
+
+A trie is excellent for in-memory local prefix lookup, but distributed, large-scale deployment introduces challenges:
+
+- **Memory**: a trie of common English words with frequency data can consume hundreds of megabytes. If the trie is rebuilt periodically from search logs, each rebuild creates a new trie before swapping out the old one, doubling peak memory.
+- **Ranking by popularity**: the trie stores per-node frequencies, but if the popular queries change, the trie must be rebuilt. Real-time frequency updates require atomic increment operations on shared nodes, which is impractical in a distributed setting.
+- **Multi-language tokenization**: languages without clear word boundaries (Chinese, Japanese) require segmentation before trie indexing, adding complexity.
+- **Sharding**: distributing the trie across machines requires splitting the key space (e.g., by first-character prefix), but this creates hot partitions for popular prefixes like "a" or "s".
+
+Because of these constraints, production autocomplete systems often combine multiple approaches: a trie for the hot prefix cache, Elasticsearch for the full suggestion corpus, and Redis sorted sets for trending queries.
 
 ## Elasticsearch Approach
 

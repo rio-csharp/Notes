@@ -4,7 +4,7 @@
 
 Captive dependency is the lifetime mismatch that occurs when a longer-lived service captures a shorter-lived dependency and then continues to use it beyond the boundary that shorter-lived dependency was meant to obey. In ASP.NET Core, the most common example is a singleton depending on a scoped service.
 
-This topic deserves its own treatment because it is one of the clearest ways dependency injection moves from configuration syntax into correctness failures. A registration can compile, a constructor can look innocent, and yet the application can still end up reusing request-specific state across requests or holding onto objects after their intended scope has ended.
+This is one of the clearest ways dependency injection moves from configuration syntax into correctness failures. A registration can compile, a constructor can look innocent, and yet the application can still end up reusing request-specific state across requests or holding onto objects after their intended scope has ended.
 
 ## Lifetime Mismatch As A Design Bug
 
@@ -248,9 +248,11 @@ await dbContext.Database.MigrateAsync();
 
 This keeps scope ownership visible and aligns resolution with intended disposal.
 
-## Validation And What It Can Catch
+## Validation Limits And Detection
 
-Development-time validation can catch some lifetime mismatches early.
+In .NET 8+, the default host builder enables both `ValidateScopes` and `ValidateOnBuild` automatically when the environment is Development. This means the most common captive-dependency mistakes are caught at startup during local development without any explicit configuration.
+
+Explicit configuration is only necessary to enable these checks in non-Development environments or to override the defaults:
 
 ```csharp
 builder.Host.UseDefaultServiceProvider(options =>
@@ -260,9 +262,9 @@ builder.Host.UseDefaultServiceProvider(options =>
 });
 ```
 
-`ValidateScopes` is especially useful for detecting cases where scoped services are captured by singletons or resolved from the root provider in invalid ways.
+`ValidateScopes` detects cases where scoped services are captured by singletons or resolved from the root provider in invalid ways. `ValidateOnBuild` verifies that all registered services can be constructed when the provider is built, catching missing-registration errors before the first request.
 
-Even so, validation is only a safety net. Some lifetime problems are conceptually wrong even if they are not immediately rejected by the container. Good lifetime design still depends on understanding scope boundaries rather than relying on tooling alone.
+Even so, validation is only a safety net. Some lifetime problems are conceptually wrong even if they are not immediately rejected by the container — for instance, a scoped service depending on a transient that holds disposable resources may compile and validate but still cause resource leaks. Good lifetime design still depends on understanding scope boundaries rather than relying on tooling alone.
 
 ## A Clean Lifetime Composition Example
 

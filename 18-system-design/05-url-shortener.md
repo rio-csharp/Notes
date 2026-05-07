@@ -115,20 +115,30 @@ Use a unique database constraint on `Code`. Code generation reduces collision pr
 
 ## Caching
 
-Redirect is read-heavy.
+The redirect path is read-heavy: a short URL may be accessed millions of times while its long URL is set once at creation. Every redirect must be fast, so caching is critical.
 
-Use Redis:
+### Cache Layout
 
 ```text
-shorturl:abc123 -> long URL
+Key:  shorturl:abc123
+Value: {"longUrl": "https://example.com/very/long/path", "expiresAt": "..."}
+TTL:  1 hour (sliding reset on each hit)
 ```
 
-Cache aside:
+### Cache-Aside Flow
 
-1. check Redis;
-2. if miss, query database;
-3. cache result;
-4. redirect.
+1. Check Redis for the short code.
+2. On cache hit, redirect immediately (no database query).
+3. On cache miss, query the database for the mapping.
+4. If the mapping exists and has not expired, store in Redis and redirect.
+5. If the mapping does not exist or is expired, return 404.
+
+### Cache Population Strategy
+
+- **On read (lazy population)**: first redirect fills the cache from the database. Simple and works for all codes. Warmup time: the first redirect for each code is slow.
+- **On write (eager population)**: when a short URL is created, pre-populate Redis. Eliminates the cold-start latency for new URLs but requires the cache to be updated if the long URL is changed.
+
+For a production URL shortener, combine both: populate on create for popular expected links and rely on lazy loading for the long tail of infrequently accessed URLs.
 
 Redirect service:
 

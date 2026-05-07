@@ -31,7 +31,7 @@ OrderApproved
 
 A fact that something already happened.
 
-## Why Use Events?
+## Event Benefits And Costs
 
 Benefits:
 
@@ -322,7 +322,7 @@ The unique primary key protects against duplicate effects even if the same messa
 
 Events are contracts. Design them carefully.
 
-Good event contract:
+A well-designed event contract includes several key fields:
 
 ```csharp
 public sealed record OrderSubmittedIntegrationEvent(
@@ -335,7 +335,7 @@ public sealed record OrderSubmittedIntegrationEvent(
     DateTimeOffset SubmittedAt);
 ```
 
-Include:
+Good contracts contain:
 
 - stable message ID;
 - schema version;
@@ -374,13 +374,38 @@ Version 2 adds `currency`:
 
 Avoid removing or renaming fields without a migration period.
 
-## Practice Task
+## Schema Registry
 
-Design:
+As the number of event types grows, a schema registry becomes valuable. A schema registry stores event schemas and their versions so producers and consumers can validate messages before processing. In the .NET ecosystem, options include Confluent Schema Registry (when using Kafka) or simpler approaches such as publishing contract NuGet packages from a shared repository.
 
-1. `OrderSubmitted` domain event;
-2. integration event contract;
-3. outbox table;
-4. publisher worker;
-5. idempotent consumer;
-6. dead-letter handling.
+Without a registry, schema changes are harder to track: a producer may add a field that a consumer cannot parse, or a consumer may expect a field that a producer removed. A registry catches these mismatches at build or deploy time rather than at runtime.
+
+## Dead-Letter Handling
+
+Messages that cannot be processed after retry exhaustion must not be silently dropped. A dead-letter queue (DLQ) captures them for inspection and recovery.
+
+The outbox publisher already limits retries (`RetryCount < 10`). When a message exhausts retries, the publisher should move it to a dead-letter destination rather than leaving it in the outbox table indefinitely:
+
+```csharp
+if (message.RetryCount >= 10)
+{
+    await deadLetterQueue.PublishAsync(message, ct);
+    message.MarkDeadLettered(DateTimeOffset.UtcNow);
+}
+```
+
+DLQ messages should be surfaced through monitoring so operators can investigate and replay after fixing the root cause. A DLQ without alerting becomes a silent data loss mechanism.
+
+## Event Sourcing vs Event-Driven Architecture
+
+Event-driven architecture and event sourcing are distinct concepts that are sometimes conflated.
+
+Event-driven architecture uses events for communication between components. The events notify other parts of the system that something happened; the source of truth is still the current state stored in a database.
+
+Event sourcing persists state as a sequence of events rather than storing current state directly. The current state is reconstructed by replaying events. Event sourcing is a persistence strategy, not a communication pattern — though it pairs naturally with event-driven design because the event store can also feed integration events.
+
+Most systems benefit from event-driven architecture without event sourcing. Event sourcing adds complexity (snapshots, projections, replay) and is appropriate when audit history, temporal queries, or full rebuild capability are required.
+
+## Event-Driven Architecture Summary
+
+Event-driven architecture decouples components by communicating through events rather than direct calls. Reliable event publishing relies on the outbox pattern to ensure at-least-once delivery, while consumer idempotency protects against duplicate processing. Schema versioning, dead-letter queues, and monitoring are essential operational concerns that determine whether an event-driven system remains maintainable as it grows.

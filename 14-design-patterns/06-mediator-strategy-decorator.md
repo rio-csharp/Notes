@@ -453,7 +453,7 @@ Usage:
 </WithPermission>
 ```
 
-## When Not To Use Them
+## Avoiding Unnecessary Abstraction
 
 Do not use Mediator when:
 

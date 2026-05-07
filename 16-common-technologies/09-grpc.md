@@ -4,7 +4,7 @@
 
 gRPC is a high-performance RPC framework using HTTP/2 and Protocol Buffers.
 
-## When gRPC Fits
+## gRPC Use Cases
 
 Use gRPC for:
 
@@ -264,12 +264,4 @@ REST:
 - easier public API adoption;
 - aligns with HTTP caching and resource semantics.
 
-## Practice Task
-
-Build:
-
-1. order gRPC service;
-2. .NET gRPC client;
-3. deadline handling;
-4. error mapping;
-5. REST vs gRPC comparison.
+The gRPC patterns shown -- protobuf contract definition, deadline propagation, structured error mapping, and server streaming -- provide the foundational elements for inter-service communication.

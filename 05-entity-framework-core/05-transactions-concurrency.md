@@ -120,7 +120,15 @@ modelBuilder.Entity<Product>()
     .IsRowVersion();
 ```
 
-When EF Core updates the row, the concurrency token becomes part of the `WHERE` clause. If another write changed the row first, the update affects zero rows and EF Core throws `DbUpdateConcurrencyException`.
+When EF Core updates the row, the concurrency token becomes part of the `WHERE` clause:
+
+```sql
+UPDATE Products
+SET Stock = @newStock, RowVersion = @newRowVersion
+WHERE Id = @id AND RowVersion = @originalRowVersion
+```
+
+The `@originalRowVersion` value is the token the application read earlier. If another transaction modified the row between the read and the update, the database's `RowVersion` no longer matches, the `WHERE` clause excludes the row, and `@@ROWCOUNT` is zero. EF Core detects this condition and throws `DbUpdateConcurrencyException`.
 
 This mechanism does not resolve the conflict. It detects that the original assumptions are no longer valid.
 
@@ -141,14 +149,41 @@ catch (DbUpdateConcurrencyException)
 
 In HTTP APIs, that commonly maps to `409 Conflict`.
 
+The exception provides access to the conflicting entries through its `Entries` property, which exposes three value sets for each affected entity:
+
+- `OriginalValues` -- the values as they were when the entity was loaded.
+- `CurrentValues` -- the values the application attempted to write.
+- `GetDatabaseValues()` -- the values currently in the database.
+
 More sophisticated flows may load current database values and decide whether to:
 
 - reject and ask the user to reload;
-- merge non-overlapping changes;
-- retry a naturally retryable command;
+- merge non-overlapping changes (overwriting only the columns that did not change in the database);
+- retry a naturally retryable command after refreshing the entity;
 - treat the row as deleted if current values no longer exist.
 
-The right response depends on the business rule. The important point is that concurrency detection is a business event, not merely a technical exception.
+```csharp
+catch (DbUpdateConcurrencyException ex)
+{
+    foreach (var entry in ex.Entries)
+    {
+        var databaseValues = await entry.GetDatabaseValuesAsync(ct);
+
+        if (databaseValues is null)
+        {
+            // Row was deleted.
+            throw new ConflictException("The record was deleted by another user.");
+        }
+
+        // Option: reload and retry, or report the conflict to the user.
+        entry.OriginalValues.SetValues(databaseValues);
+    }
+
+    await _dbContext.SaveChangesAsync(ct);
+}
+```
+
+The right response depends on the business rule. Concurrency detection is a business event, not merely a technical exception. Retry logic should be idempotent-safe, and automatic merge strategies should be validated against the specific domain rules before being deployed.
 
 ## Transactions And Concurrency Are Not The Same
 

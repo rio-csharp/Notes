@@ -215,7 +215,7 @@ public int MinSubArrayLen(int target, int[] nums)
 
 Works when numbers are positive. If negative numbers exist, this pattern may fail.
 
-Why positive numbers matter:
+The monotonic property of positive numbers:
 
 ```text
 When right expands, sum only increases.
@@ -252,8 +252,6 @@ public double FindMaxAverage(int[] nums, int k)
 ```
 
 ## Permutation In String
-
-Problem:
 
 Check whether `s2` contains any permutation of `s1`.
 
@@ -329,12 +327,4 @@ public int LengthOfLongestSubstringKDistinct(string s, int k)
 }
 ```
 
-## Practice Problems
-
-- Valid Palindrome
-- Two Sum II
-- Container With Most Water
-- Longest Substring Without Repeating Characters
-- Minimum Size Subarray Sum
-- Permutation in String
-- Sliding Window Maximum
+Two-pointer and sliding-window patterns apply broadly to substring search, palindrome checking, container volume maximization, and fixed-size window analysis.

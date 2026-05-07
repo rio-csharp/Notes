@@ -155,9 +155,7 @@ const updatedOrders = orders.map(order =>
 );
 ```
 
-Important:
-
-> Spread is shallow. Nested objects are still shared unless copied too.
+Spread is shallow. Nested objects are still shared unless copied too.
 
 ```ts
 const state = {
@@ -238,14 +236,78 @@ import formatDate from "./formatDate";
 
 Named exports are often easier to refactor because import names stay explicit.
 
-### let vs const vs var?
+### Variable Declaration Rules
 
-> `var` is function-scoped and hoisted. `let` and `const` are block-scoped. `const` prevents reassignment but does not make objects deeply immutable.
+`var` declares a function-scoped variable that is hoisted to the top of its enclosing function and initialized to `undefined`. This means the variable is accessible (as `undefined`) before its declaration line. `var` also ignores block scope -- a `var` inside an `if` block is accessible outside it:
 
-### Primitive vs object?
+```ts
+if (true) {
+  var x = 10;
+}
+console.log(x); // 10
+```
 
-> Primitive values are copied by value. Objects are reference values, so assigning an object variable copies the reference.
+`let` and `const` are block-scoped. They are hoisted to the top of their block but are not initialized -- accessing them before the declaration causes a `ReferenceError` due to the temporal dead zone (TDZ):
 
-### Why use strict equality?
+```ts
+console.log(y); // ReferenceError
+let y = 5;
+```
 
-> Strict equality avoids implicit type coercion and makes comparisons more predictable.
+`const` prevents reassignment of the binding, not mutation of the value. For primitive values, this makes the value constant. For objects and arrays, the reference is constant but the contents can change:
+
+```ts
+const arr = [1, 2, 3];
+arr.push(4); // allowed
+arr = [5, 6]; // TypeError: Assignment to constant variable
+```
+
+In modern code, prefer `const` by default for values that should not be reassigned, use `let` when reassignment is necessary, and avoid `var` entirely. This convention signals intent and prevents accidental reassignment.
+
+### Pass by Value and Pass by Reference
+
+JavaScript always passes values by value -- but for objects, the "value" is a reference to the object in memory. This distinction explains the copying behavior:
+
+```ts
+let a = 1;
+let b = a;
+b = 2;
+console.log(a); // 1 -- independent copies
+
+const objA = { count: 1 };
+const objB = objA;
+objB.count = 2;
+console.log(objA.count); // 2 -- both point to same object
+
+function appendItem(arr: number[], value: number) {
+  arr.push(value);
+}
+
+const items = [1, 2];
+appendItem(items, 3);
+console.log(items); // [1, 2, 3] -- array mutated via reference
+```
+
+The practical implication is that passing an object to a function gives that function the ability to mutate the original object. To avoid unintended mutation, either create a copy before passing (using spread or structuredClone for deep copies) or use immutable update patterns.
+
+### Strict vs Loose Equality
+
+Strict equality (`===`) compares both value and type without coercion. It is the safe default for all comparisons:
+
+```ts
+"42" === 42; // false -- different types
+null === undefined; // false
+0 === false; // false
+```
+
+Loose equality (`==`) applies type coercion before comparing. The coercion rules are complex and non-intuitive:
+
+```ts
+"42" == 42; // true -- string coerced to number
+0 == false; // true -- number and boolean coerced
+"" == false; // true
+null == undefined; // true -- special case
+[] == false; // true -- empty array coerces to ""
+```
+
+Because the coercion rules are difficult to reason about, `==` is nearly always the wrong choice outside of comparing against `null` or `undefined` (where `value == null` checks both simultaneously). TypeScript's compiler with `strict: true` flags many loose-equality usages as errors, reinforcing the `===` convention.

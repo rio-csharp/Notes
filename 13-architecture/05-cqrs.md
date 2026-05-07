@@ -40,6 +40,8 @@ API
 
 This is often enough for normal applications.
 
+Simple CQRS (same database, separate handler classes) improves code clarity without introducing distributed complexity. It is a modest refactoring: commands and queries still share the same database connection, same transaction scope, and same consistency guarantees. The main benefit is that each handler has a single responsibility, making the code easier to test and modify.
+
 ## Command Example
 
 ```csharp
@@ -139,6 +141,10 @@ Costs:
 - more moving parts;
 - projection rebuild complexity;
 - operational overhead.
+
+When the write and read databases are separate, there is an inherent delay between a command completing and the read model reflecting the change. This eventual consistency window may be milliseconds (with synchronous projection) or seconds (with polled outbox). The UI must handle this: after creating an order, the order list page may briefly not show it. Techniques include redirecting to a detail page that reads from the write model, or polling until the read model catches up.
+
+Separate read models are valuable when read patterns differ materially from write patterns — for example, a search page that joins data from multiple aggregates, or a dashboard that aggregates across many records. For a simple CRUD screen that looks like the write model, separate read storage adds complexity without proportional benefit.
 
 ## MediatR Example
 
@@ -404,14 +410,4 @@ public sealed class OrderSubmittedProjection
 }
 ```
 
-## Practice Task
-
-Implement:
-
-1. `CreateOrderCommand`;
-2. `ApproveOrderCommand`;
-3. `GetOrderByIdQuery`;
-4. `SearchOrdersQuery`;
-5. validation behavior;
-6. logging behavior;
-7. one query optimized with projection.
+CQRS is a practical separation of read and write responsibilities that can be applied incrementally. Starting with separate handler classes against a shared database provides clarity without distributed complexity. When read and write patterns diverge significantly, separate read models with projection workers unlock further performance and organizational benefits. The key is recognizing when the separation serves the codebase and when it adds unnecessary ceremony.

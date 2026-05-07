@@ -4,8 +4,6 @@
 
 Collection endpoints are where many APIs begin to show their real design quality. A single-resource endpoint can remain acceptable even with weak conventions. List endpoints quickly become expensive, ambiguous, and difficult to evolve unless pagination, filtering, and sorting are designed deliberately.
 
-This chapter treats collection queries as contract design rather than as controller plumbing.
-
 ## The Need For Structured Collection Endpoints
 
 An unbounded list endpoint is rarely acceptable in a production API. It places too much trust in dataset size, client restraint, and network capacity. Even when it works initially, it tends to degrade quietly as data volume grows.
@@ -113,7 +111,7 @@ private static IQueryable<Order> ApplySorting(IQueryable<Order> query, string so
 }
 ```
 
-The important design point is that sorting fields belong to a known contract. Arbitrary field names or raw SQL order fragments should not flow directly from user input into the query layer.
+Sorting fields belong to a known contract. Arbitrary field names or raw SQL order fragments should not flow directly from user input into the query layer.
 
 ## Metadata In Collection Responses
 

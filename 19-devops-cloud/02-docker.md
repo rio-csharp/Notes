@@ -2,20 +2,22 @@
 
 ## Core Idea
 
-Docker packages an application and its runtime dependencies into an image that can run consistently across environments.
+Docker packages an application and its runtime dependencies into an image that can run consistently across environments. Two fundamental mechanisms make this possible: image layering for efficient storage and distribution, and Linux kernel isolation features (namespaces and cgroups) for running containers securely on a shared host.
+
+Docker is not virtualization in the traditional sense. Unlike a virtual machine, a container shares the host operating system kernel and does not require a separate guest OS. This reduces overhead but means that Windows containers require a Windows host, and Linux containers require a Linux host.
 
 ## Image vs Container
 
 Image:
 
 ```text
-Immutable template containing app files and runtime dependencies.
+Immutable template composed of read-only layers.
 ```
 
 Container:
 
 ```text
-Running instance of an image.
+A running instance of an image with a writable layer added on top.
 ```
 
 Useful commands:
@@ -27,6 +29,54 @@ docker ps
 docker logs <container-id>
 docker exec -it <container-id> sh
 ```
+
+## Image Layers And Layer Caching
+
+Every Dockerfile instruction that modifies the filesystem creates a new layer. Layers are stacked using overlay2 (Linux) or similar union filesystem technologies to present a single unified view.
+
+```dockerfile
+FROM node:20-alpine AS build
+WORKDIR /app               # layer 1: set working directory
+COPY package*.json ./      # layer 2: add dependency manifest
+RUN npm ci                 # layer 3: install dependencies
+COPY . .                   # layer 4: add source code
+RUN npm run build          # layer 5: build
+```
+
+Layer caching is the reason Docker builds are fast when only source code changes. Docker checks each instruction against its build cache: if the instruction and the input files have not changed, Docker reuses the corresponding layer from a previous build. This is why Dockerfiles should order instructions from least frequently changing to most frequently changing:
+
+- Copy dependency manifests first (e.g., `package*.json`, `*.csproj`)
+- Install dependencies
+- Copy source code last
+
+When only source code changes, all layers up to `COPY . .` are reused from cache. Breaking this order (for example, copying all source before running `npm ci`) invalidates the dependency install cache on every source change.
+
+```bash
+# Inspect layers of an image
+docker history myapp-api
+```
+
+To verify that layers are shared between images built from the same base:
+
+```bash
+docker images --digests
+```
+
+Images using the same base image (e.g., `mcr.microsoft.com/dotnet/aspnet:8.0`) share those base layers on disk without duplication.
+
+## Container Isolation
+
+Containers rely on Linux kernel features for isolation:
+
+- **Namespaces**: Provide process-level isolation. Each container gets its own process tree (PID namespace), network stack (NET namespace), mount table (MNT namespace), and hostname (UTS namespace). A process in a container cannot see processes in other containers or on the host.
+- **Control groups (cgroups)**: Limit and account for resource usage. Cgroups constrain CPU, memory, disk I/O, and network bandwidth that a container can consume. This prevents a single container from starving other processes on the host.
+
+Docker does not provide the same level of isolation as a hypervisor. Kernel vulnerabilities can potentially affect the host. Production deployments should use additional security measures such as:
+
+- Running containers as a non-root user
+- Using read-only root filesystems
+- Dropping unnecessary Linux capabilities
+- Using seccomp profiles to limit system calls
 
 ## .NET Multi-stage Dockerfile
 
@@ -55,12 +105,32 @@ EXPOSE 8080
 ENTRYPOINT ["dotnet", "MyApp.Api.dll"]
 ```
 
-Why multi-stage:
+Multi-stage builds provide several benefits:
 
 - SDK is used only during build;
 - runtime image is smaller;
 - fewer tools exist in production image;
 - build and runtime concerns are separated.
+
+With BuildKit (the default builder in modern Docker), cache mounts can speed up package restoration across builds:
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+COPY *.sln .
+COPY src/MyApp.Api/*.csproj src/MyApp.Api/
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages \
+    dotnet restore
+
+COPY . .
+RUN --mount=type=cache,id=nuget,target=/root/.nuget/packages \
+    dotnet publish src/MyApp.Api/MyApp.Api.csproj \
+    -c Release -o /app/publish --no-restore
+```
+
+The `--mount=type=cache` directive preserves the NuGet package cache between builds, avoiding repeated downloads of the same packages for each CI run. The cache is shared across builds on the same machine and can be configured to use a registry-backed cache in CI environments.
 
 ## Non-root Container
 

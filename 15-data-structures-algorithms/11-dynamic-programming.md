@@ -4,7 +4,7 @@
 
 Dynamic programming solves problems by reusing results of overlapping subproblems.
 
-## When To Use DP
+## Recognizing DP Problems
 
 Look for:
 
@@ -14,9 +14,12 @@ Look for:
 - choices at each step;
 - recurrence relationship.
 
-DP is usually about answering three questions:
+DP revolves around three core decisions:
 
 ```text
+what each state represents
+how states transition from one another
+which base cases anchor the recurrence
 ```
 
 ## Fibonacci With Memoization
@@ -329,11 +332,4 @@ bottom-up iteration
 
 Memoization is often easier to write when recursion matches the problem. Tabulation is often easier to optimize for space.
 
-## Practice Problems
-
-- Climbing Stairs
-- House Robber
-- Coin Change
-- Longest Increasing Subsequence
-- Longest Common Subsequence
-- 0/1 Knapsack
+Dynamic programming problems share a common structure of state definition, recurrence formulation, and base case anchoring. The patterns shown here -- linear DP, grid DP, and knapsack -- generalize to many optimization and counting problems.

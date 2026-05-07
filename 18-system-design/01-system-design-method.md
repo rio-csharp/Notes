@@ -95,7 +95,9 @@ Numbers do not need to be perfect. They should guide architecture.
 
 ## Capacity Estimation Method
 
-Use rough numbers to find the likely bottlenecks.
+Capacity estimates do not need to be precise. Their purpose is to identify the likely bottlenecks before any code is written, so the architecture can address them early.
+
+### Derivation Chain
 
 ```text
 Daily traffic -> average QPS -> peak QPS
@@ -104,19 +106,38 @@ Read/write ratio -> cache and database pressure
 Fanout factor -> queue and worker pressure
 ```
 
-Example:
+### Example: Notification System
 
 ```text
-10 million notifications/day
-Average QPS = 10,000,000 / 86,400 ~= 116/sec
-Peak factor = 20x
-Peak QPS ~= 2,300/sec
+Users:                         10 million
+Daily active users (DAU):      2 million (20% of total)
+Avg. notifications/active user: 5
+Total notifications/day:       10 million
+Average QPS:                   10,000,000 / 86,400 ~= 116/sec
+Peak factor (DAU concentrated): 20x
+Peak QPS:                      ~2,300/sec
 
-If each notification fans out to 2 channels:
-Peak delivery jobs ~= 4,600/sec
+If each notification fans out to 2 channels (email + push):
+Peak delivery jobs:            4,600/sec
 ```
 
-This tells you workers and provider limits matter.
+This estimate immediately reveals that the system needs horizontally scalable workers, a message queue that can sustain ~5,000 messages per second, and provider integrations that can handle peak throughput without being overwhelmed. The 20x peak factor means the system must scale up quickly during business hours or promotional events.
+
+### Why Peak Factor Matters
+
+The peak-to-average ratio varies by domain. An e-commerce site may see 1-2x on a normal day but 50x on Black Friday. A business-hours B2B application may see 4x concentrated in 8 hours. Choose a peak factor that matches the system's traffic pattern, and test against that peak -- average-case estimates hide scaling requirements.
+
+### Storage Estimation
+
+```text
+Notification record:     1 KB
+Daily storage:           10 GB
+90-day retention:        900 GB
+Index overhead (approx): 100-200 GB
+Total storage estimate:  ~1.1 TB
+```
+
+This determines the database tier and whether archival/purging strategies are needed for the 90-day retention target.
 
 ## Step 5: API Design
 
@@ -146,9 +167,7 @@ Response:
 }
 ```
 
-Why `202 Accepted`?
-
-The request is accepted for asynchronous processing, not fully delivered yet.
+A `202 Accepted` response signals that the request is accepted for asynchronous processing, not fully delivered yet.
 
 ## Step 6: Data Model
 
@@ -313,9 +332,18 @@ Logs should include:
 
 ## Step 12: Security And Privacy
 
-Ask:
+Every system design must address data protection, access control, and compliance. The specific concerns depend on the data the system processes.
 
-- Who can access it?
+Key questions to address:
+
+- **Authentication**: how does the system verify the identity of callers? (API keys, OAuth2, JWT, mutual TLS)
+- **Authorization**: what can each authenticated caller do? (RBAC, ABAC, per-resource ACLs)
+- **Data in transit**: is all communication encrypted? (TLS 1.2+)
+- **Data at rest**: is sensitive data encrypted in the database or object storage?
+- **Secrets management**: how are API keys, database credentials, and provider tokens stored and rotated?
+- **Audit trail**: are state-changing operations logged with identity, timestamp, and before/after state?
+- **Compliance**: does the system handle regulated data (PII, PCI, HIPAA)? If so, what specific controls are required (retention limits, access logs, right-to-delete)?
+- **Least privilege**: do service-to-service calls use only the permissions they need?
 
 ## ADR Example
 
@@ -356,17 +384,6 @@ Provider latency becomes negligible or product requires synchronous delivery con
 - Rate limiter
 - Monitoring
 
-## Common Design Mistakes
-
-- Jumping to technology before requirements.
-- No scale estimation.
-- No data model.
-- No failure handling.
-- No security discussion.
-- No monitoring.
-- Ignoring idempotency.
-- Over-designing microservices for a small problem.
-
 ## Engineering Checklist
 
 For any design, mention:
@@ -380,16 +397,3 @@ For any design, mention:
 - deployment and rollback;
 - security and privacy;
 - cost and operational complexity.
-
-## Practice Problems
-
-Practice with the same framework:
-
-- URL shortener;
-- file upload system;
-- chat system;
-- notification system;
-- rate limiter;
-- payment callback system;
-- e-commerce order system;
-- audit logging system.

@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-EF Core migrations are versioned schema changes generated from model evolution. In small projects they can feel like a development convenience. In serious systems they are deployment artifacts that carry operational risk. The difference matters. A migration is not only a piece of source code. It is a database change that may lock tables, rewrite large amounts of data, invalidate application assumptions, or break rolling deployments.
-
-This chapter treats migrations as part of production engineering rather than as a local developer tool.
+EF Core migrations are versioned schema changes generated from model evolution. In small projects they can feel like a development convenience. In serious systems they are deployment artifacts that carry operational risk. The difference matters. A migration is not only a piece of source code. It is a database change that may lock tables, rewrite large amounts of data, invalidate application assumptions, or break rolling deployments. Migrations must be treated as part of production engineering rather than as a local developer tool.
 
 ## The Migration Model
 
@@ -53,6 +51,25 @@ Those two mechanisms serve different purposes:
 - the history table tells EF which migrations a database has already applied.
 
 That history is what makes idempotent scripts possible and what keeps multiple environments from blindly replaying the same schema change.
+
+## Migration Transaction Behavior
+
+By default, EF Core wraps each migration in its own transaction. This means that if a migration fails partway through, its DDL statements are rolled back, but already-applied earlier migrations remain committed. This is usually the correct behavior: partial application of a single migration is not recoverable, but the overall migration history advances only when a migration completes successfully.
+
+When a migration contains multiple DDL commands that must succeed or fail together, the generated code often wraps them in explicit transactions:
+
+```csharp
+protected override void Up(MigrationBuilder migrationBuilder)
+{
+    migrationBuilder.Sql("BEGIN TRANSACTION");
+
+    // DDL statements here
+
+    migrationBuilder.Sql("COMMIT");
+}
+```
+
+For migrations that mix schema changes with large data updates, transaction log growth is a real concern. Providers may offer batching or online DDL options (such as `ONLINE = ON` in SQL Server Enterprise) that affect how migration commands interact with user traffic.
 
 ## Generated Migrations Still Require Review
 

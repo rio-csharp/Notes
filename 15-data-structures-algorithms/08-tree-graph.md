@@ -499,13 +499,4 @@ public sealed class UnionFind
 
 Path compression and union by rank make operations almost constant in practice.
 
-## Practice Problems
-
-- Binary Tree Inorder Traversal
-- Maximum Depth of Binary Tree
-- Binary Tree Level Order Traversal
-- Number of Islands
-- Clone Graph
-- Course Schedule
-- Rotting Oranges
-- Word Ladder
+Tree and graph algorithms form the backbone of problems involving hierarchical data, connectivity analysis, dependency resolution, and shortest-path computation.

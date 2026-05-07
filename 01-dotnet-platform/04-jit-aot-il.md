@@ -1,21 +1,10 @@
 # IL, JIT, ReadyToRun, And Native AOT
 
-## Core Idea
+The previous chapter established the default execution path: C# compiles to IL, assemblies are loaded, methods are JIT-compiled on first invocation. This chapter examines how .NET can shift compilation work between build time, publish time, and runtime — and what engineering trade-offs each strategy introduces.
 
-C# normally compiles to Intermediate Language (IL), not directly to machine code. The question in this chapter is not the basic execution path, which the previous chapter already established, but how .NET can shift compilation work between build time, publish time, and runtime.
+## IL And Metadata
 
-## IL
-
-IL is CPU-independent intermediate code.
-
-Its value comes from several properties:
-
-- language interoperability;
-- runtime optimization;
-- metadata support;
-- platform flexibility.
-
-Example C#:
+Intermediate Language (IL) is the CPU-independent instruction set that the Roslyn compiler produces from C# source. An assembly is not a native binary; it is a container of IL instructions and metadata.
 
 ```csharp
 public static int Add(int left, int right)
@@ -24,7 +13,7 @@ public static int Add(int left, int right)
 }
 ```
 
-Conceptual IL shape:
+The conceptual IL for this method is straightforward:
 
 ```text
 load first argument
@@ -33,73 +22,20 @@ add
 return
 ```
 
-You do not need to memorize IL instructions for most engineering practice. What matters is the model:
+IL's design serves several engineering purposes simultaneously. It enables language interoperability — F#, Visual Basic, and C# all compile to IL that the same runtime can execute. It defers architecture-specific optimization to the JIT, which can target the exact CPU features of the current machine. It preserves metadata that enables reflection, diagnostics, and tooling. And it provides platform flexibility — the same IL runs on Windows, Linux, and macOS without recompilation.
 
-> C# becomes IL plus metadata. The CLR can inspect metadata and JIT IL into native code for the current process and CPU architecture.
-
-## Metadata
-
-Assemblies do not only contain IL. They also contain metadata.
-
-Metadata describes:
-
-- types;
-- methods;
-- parameters;
-- return types;
-- attributes;
-- referenced assemblies;
-- generic type information.
-
-For example:
-
-```csharp
-[Obsolete("Use AddNew instead.")]
-public static int AddOld(int left, int right)
-{
-    return left + right;
-}
-```
-
-The attribute is stored as metadata. Tools and frameworks can inspect it later.
+Metadata is the descriptive layer stored alongside IL. It records type names, method signatures, parameters, return types, attributes, referenced assemblies, and generic type information. When code applies `[Obsolete]` to a method, that attribute is stored as metadata — tools and frameworks inspect it later independently of the IL.
 
 ## JIT Compilation
 
-JIT compiles methods when needed.
+JIT compilation translates IL to native code when a method is first invoked. The compiled code is stored in process memory and reused for subsequent calls. When the process exits, the generated native code is discarded — a new process JITs again.
 
-Its value comes from several properties:
-
-- optimized for current CPU;
-- can optimize hot methods;
-- supports dynamic runtime behavior.
-
-Cost:
-
-- first execution has compilation overhead.
-
-Per-process behavior:
-
-```text
-Process starts
-  -> method called first time
-  -> JIT compiles method
-  -> native code stored in process memory
-  -> later calls reuse that native code
-  -> process exits
-  -> generated code is gone
-```
-
-This is why a cold start can be slower than later requests. The rest of the chapter asks how much of that first-use cost can be moved earlier.
-
-Example benchmark shape:
+The cold-start cost is measurable: the first invocation of a method pays compilation overhead, and later invocations in the same process do not. Startup latency and steady-state throughput are separate performance concerns.
 
 ```csharp
 using System.Diagnostics;
 
-static int Work(int value)
-{
-    return value * 2;
-}
+static int Work(int value) => value * 2;
 
 var first = Stopwatch.StartNew();
 Work(1);
@@ -107,212 +43,165 @@ first.Stop();
 
 var repeated = Stopwatch.StartNew();
 for (var i = 0; i < 10_000_000; i++)
-{
     Work(i);
-}
 repeated.Stop();
 
 Console.WriteLine($"First call ticks: {first.ElapsedTicks}");
 Console.WriteLine($"Repeated calls ms: {repeated.ElapsedMilliseconds}");
 ```
 
-This is not a perfect JIT benchmark because modern runtimes optimize heavily, but it helps you see the idea of first-use cost vs repeated execution.
+A single measurement is not a precise benchmark — modern runtimes apply multi-tier compilation, on-stack replacement, and dynamic profile-guided optimization that mask simple timing. The structural fact being demonstrated is that first-use cost exists, and the runtime handles it transparently for subsequent calls.
+
+For a realistic order-of-magnitude comparison across strategies, a medium-sized ASP.NET Core application (roughly 50 controllers, 200 endpoints, EF Core, standard middleware) on .NET 9, measured on a typical cloud VM (4 vCPU, 8 GB):
+
+| Strategy | First request (cold) | Steady-state (warm) | Publish size |
+|---|---|---|---|
+| Default JIT | 800–1200 ms | 5–15 ms | ~10 MB |
+| ReadyToRun | 200–400 ms | 5–15 ms | ~15–20 MB |
+| Native AOT | 50–150 ms | 3–8 ms | ~25–35 MB (self-contained) |
+
+These are illustrative ranges, not benchmarks — actual numbers depend on code size, dependency graph, and hardware. The structural relationship is what matters: ReadyToRun cuts cold-start JIT cost roughly in half at the price of larger binaries; Native AOT eliminates JIT entirely but requires self-contained publishing and restricts runtime dynamism.
 
 ## Tiered Compilation
 
-Tiered compilation allows the runtime to:
-
-1. compile quickly first;
-2. optimize hot methods later.
-
-This improves startup and long-running performance.
-
-The easiest mental model is:
+Tiered compilation splits JIT work into two phases. Tier 0 compiles quickly with minimal optimization, prioritizing startup speed. Once the runtime observes that a method is frequently executed (via call-count thresholds and other heuristics), it recompiles the method at Tier 1 with aggressive optimizations for throughput. The transition from Tier 0 to Tier 1 is transparent — the runtime patches the call site so subsequent invocations use the optimized code.
 
 ```text
-Tier 0:
-  compile quickly
-  lower optimization
-  good for startup
-
-Tier 1:
-  optimize hot methods
-  better for throughput
-  used after runtime observes frequent execution
+Tier 0: quick compilation, lower optimization, fast startup
+Tier 1: recompile hot methods, higher optimization, better throughput
 ```
 
-This matters for APIs because the first few requests after deployment may not represent steady-state performance. Warm-up, realistic load testing, and p95/p99 latency matter more than a single first request.
+On-stack replacement (OSR) extends tiered compilation to long-running methods. Without OSR, a method that enters a long loop in Tier 0 code cannot be recompiled until the next invocation. With OSR (enabled by default in .NET 9), the runtime can compile a Tier 1 version of the loop body and redirect execution mid-method. This matters for applications with long-running startup logic: OSR allows the runtime to optimize hot paths without waiting for method boundaries.
+
+The first few requests after deployment do not represent steady-state performance. Warm-up procedures, realistic load testing, and p95/p99 latency measurements are more informative than single-request benchmarks.
+
+In modern .NET, tiered compilation is enabled by default. It can be made explicit through runtime configuration for controlled testing:
+
+```json
+{
+  "runtimeOptions": {
+    "configProperties": {
+      "System.Runtime.TieredCompilation": true,
+      "System.Runtime.TieredCompilation.QuickJit": true
+    }
+  }
+}
+```
+
+Most teams never toggle these settings. Their value lies in knowing that the startup-to-throughput transition is a real runtime policy, not merely a conceptual tendency — and that measurements should account for the warm-up period during which Tier 0 code is still active.
 
 ## ReadyToRun
 
-ReadyToRun precompiles some code before runtime.
-
-Publish:
+ReadyToRun (R2R) precompiles a portion of IL to native code at publish time, reducing the JIT work that must happen on first invocation. The trade-off is larger assembly size and the possibility that some methods still require runtime JIT — generic instantiations, dynamic methods, and hot paths that tiered compilation may recompile.
 
 ```bash
 dotnet publish -c Release -p:PublishReadyToRun=true
 ```
 
-Operational advantages:
+Or as a project default:
 
-- faster startup;
-- less JIT work.
+```xml
+<PropertyGroup>
+  <PublishReadyToRun>true</PublishReadyToRun>
+</PropertyGroup>
+```
 
-Operational limitations:
-
-- larger binaries;
-- still may need JIT for some methods;
-- less optimized than runtime JIT in some cases.
-
-Why it may still need JIT:
-
-- generic methods may need runtime-specific instantiations;
-- dynamic methods cannot be fully known ahead of time;
-- tiered compilation may replace precompiled code for hot paths;
-- runtime can still choose optimized code based on actual execution.
-
-Practical use:
-
-> ReadyToRun is often useful when startup time matters but you still want normal .NET compatibility.
-
-A realistic operational example is a medium-sized ASP.NET Core service in a container platform. If cold pods are taking too long to become ready, ReadyToRun may reduce some first-request JIT cost without forcing the team to give up reflection-heavy libraries or ordinary hosting patterns. It is not a universal win, but it is often one of the first publishing changes worth testing.
+ReadyToRun is a middle ground. It reduces cold-start JIT cost without requiring the application to give up reflection, dynamic loading, or standard library compatibility. A medium-sized ASP.NET Core service in a container platform where cold pods take too long to become ready often benefits from ReadyToRun as a first publishing change. Verification is comparative: publish with and without R2R, measure cold-start behavior, and compare output size and startup traces under identical deployment conditions.
 
 ## Native AOT
 
-Native AOT compiles the app ahead of time to a native executable.
-
-Operational advantages:
-
-- very fast startup;
-- smaller runtime footprint;
-- useful for serverless, CLI, small services.
-
-Operational limitations:
-
-- reflection limitations;
-- dynamic code generation limitations;
-- library compatibility issues.
-
-Example publish:
+Native AOT compiles the entire application ahead of time to a platform-specific native executable. The runtime is largely eliminated from the startup path — there is no JIT, and the executable loads and begins execution directly.
 
 ```bash
 dotnet publish -c Release -p:PublishAot=true
 ```
 
-AOT-friendly code tends to be:
-
-- explicit;
-- less reflection-heavy;
-- source-generator-friendly;
-- less dependent on runtime type discovery.
-
-For example, code shaped like this is more AOT-friendly:
-
-```csharp
-builder.Services.AddScoped<IOrderHandler, OrderHandler>();
+```xml
+<PropertyGroup>
+  <PublishAot>true</PublishAot>
+</PropertyGroup>
 ```
 
-while code shaped like this is more runtime-dynamic and therefore harder for trimming or AOT tooling to reason about:
+Native AOT delivers very fast startup and reduced runtime footprint. It is well-suited to CLI tools, serverless functions, and small services where cold-start latency or package size is a primary constraint.
+
+The cost is reduced runtime dynamism. Native AOT depends on the build pipeline understanding the complete application shape at publish time. Reflection, dynamic type loading, and runtime code generation become constrained because the compiler cannot prove that dynamically-discovered code paths will exist in the final output.
 
 ```csharp
+// Predictable at build time — AOT-friendly
+builder.Services.AddScoped<IOrderHandler, OrderHandler>();
+
+// Runtime type discovery — fragile under AOT
 var typeName = configuration["HandlerType"];
 var type = Type.GetType(typeName!);
 var handler = Activator.CreateInstance(type!);
 ```
 
-The second pattern is not automatically wrong. It simply shifts the design toward runtime discovery and away from publish-time predictability.
+The second pattern is not incorrect, but it shifts design toward runtime discovery and away from publish-time predictability. Native AOT requires the application code to be explicit enough that the build tooling can trace every code path and preserve every required type.
+
+### NativeAOT Limitations in .NET 9
+
+Native AOT in .NET 9 has specific constraints beyond the general reflection limitation:
+
+- **No `Assembly.Load`** — assemblies cannot be loaded dynamically from files or byte arrays. All code must be known at publish time.
+- **No `System.Reflection.Emit`** — `DynamicMethod`, `MethodBuilder`, `TypeBuilder`, and expression-tree compilation to delegates all depend on runtime IL generation. `Expression<T>.Compile()` falls back to interpretation mode, which is significantly slower than JIT-compiled delegates.
+- **Limited `MakeGenericType`/`MakeGenericMethod`** — generic instantiation works for type parameters that the static analysis can trace. A `Dictionary<string, T>` instantiated for a type `T` resolved at runtime via `Type.GetType` may fail because the AOT compiler did not pre-generate that instantiation.
+- **`Assembly.Location` returns empty string** — the concept of "the assembly file on disk" does not exist in a native executable.
+
+The NativeAOT publish output includes trim warnings that identify code patterns the compiler cannot prove are safe. Running with `<PublishAot>true</PublishAot>` and `<TrimmerSingleWarn>false</TrimmerSingleWarn>` produces per-location warnings:
+
+```xml
+<PropertyGroup>
+  <PublishAot>true</PublishAot>
+  <TrimmerSingleWarn>false</TrimmerSingleWarn>
+</PropertyGroup>
+```
+
+A typical warning from a reflection-dependent path:
+
+```text
+ILC: Trim analysis warning IL2026: Program.GetHandler():
+  Using member 'Type.GetType(String)' which has 'RequiresUnreferencedCodeAttribute'
+  can break functionality when trimming application code.
+```
+
+Each warning must be resolved by either annotating the calling code with `[RequiresUnreferencedCode]` (accepting the risk), suppressing via `[UnconditionalSuppressMessage]` (if the path is provably safe), replacing reflection with source generation, or excluding the application from NativeAOT.
 
 ## Trimming
 
-Trimming removes unused code during publish to reduce output size.
-
-It is closely related to Native AOT because both require the build process to understand what code and metadata the application needs.
-
-Example publish option:
+Trimming removes unused code during publish to reduce output size. It is closely related to Native AOT because both require the build process to determine what code and metadata the application needs.
 
 ```bash
 dotnet publish -c Release -p:PublishTrimmed=true
 ```
 
-Trimming works best when code paths are visible at build time.
-
-Risky pattern:
-
-```csharp
-var typeName = configuration["HandlerType"];
-var type = Type.GetType(typeName!);
-var handler = Activator.CreateInstance(type!);
+```xml
+<PropertyGroup>
+  <PublishTrimmed>true</PublishTrimmed>
+</PropertyGroup>
 ```
 
-The trimmer may not know that the dynamically named type must be preserved.
+Trimming works best when code paths are statically visible. Runtime type discovery via `Type.GetType` is fragile under trimming because the trimmer cannot determine that the dynamically-named type must be preserved. The .NET trimmer uses static analysis to trace reachable code from the application entry point; any type, method, or metadata reachable only through reflection is at risk of removal.
 
-More predictable pattern:
-
-```csharp
-builder.Services.AddScoped<IOrderHandler, OrderHandler>();
-```
-
-JIT gives the most runtime flexibility. ReadyToRun moves some compilation earlier. Trimming and Native AOT move more decisions to publish time, which can improve startup and footprint but requires more explicit code and a more predictable dependency model.
-
-Reflection-sensitive example:
-
-```csharp
-var type = Type.GetType("MyApp.Features.OrderHandler");
-var instance = Activator.CreateInstance(type!);
-```
-
-This can be fragile under trimming/AOT because the compiler may not know that `OrderHandler` must be preserved.
-
-More AOT-friendly shape:
-
-```csharp
-builder.Services.AddScoped<IOrderHandler, OrderHandler>();
-```
-
-Here the type relationship is visible to the compiler and framework tooling.
-
-## Comparison
+Publish-time warnings are the primary verification mechanism. A warning means the build pipeline cannot prove that a runtime-discovered code path or metadata dependency will survive publish. For example, enabling trim warnings produces output like:
 
 ```text
-JIT:
-  More flexible, runtime optimized, startup cost.
-
-ReadyToRun:
-  Faster startup, larger output, still partly runtime-dependent.
-
-Native AOT:
-  Very fast startup, less dynamic flexibility.
+warning IL2072: Program.Main(): 'type.GetMethod("Process")'
+  'type' argument does not satisfy 'DynamicallyAccessedMemberTypes.PublicMethods' in call to
+  'System.Type.GetMethod(String)'. The parameter 'type' of method 'Program.Main()'
+  does not have matching annotations.
 ```
 
-Decision table:
+Resolution strategies are the same as for Native AOT: annotate with `[DynamicallyAccessedMembers]` to inform the trimmer, use `[RequiresUnreferencedCode]` to document risk, replace reflection with source-generator alternatives, or suppress with `[UnconditionalSuppressMessage]` when the path is provably safe. Teams verify safety by publishing with trimming enabled, running representative request flows, and confirming no trim-related runtime failures occur.
 
-| Option | Best For | Main Trade-off |
-| --- | --- | --- |
-| JIT | normal ASP.NET Core apps, dynamic frameworks | startup JIT cost |
-| ReadyToRun | faster startup with broad compatibility | larger output, partial JIT still possible |
-| Native AOT | CLI, serverless, small services, fast cold start | reflection/dynamic limitations |
+## Choosing A Compilation Strategy
 
-## Practical Scenario
+| Strategy | Best For | Primary Trade-off |
+|---|---|---|
+| JIT (default) | Server APIs, dynamic frameworks, broad compatibility | Startup JIT cost |
+| ReadyToRun | Faster startup with full .NET compatibility | Larger binaries, partial JIT still possible |
+| Native AOT | CLI tools, serverless, small services | Limited reflection and dynamic code generation |
+| Trimming | Reduced deployment size | Same static-analysis constraints as AOT |
 
-Consider the following scenario:
+The decision depends on workload characteristics, not abstract preference. Short-lived CLI tools prioritize startup above all else. Serverless functions care about cold start and package size. Long-running APIs care about compatibility and steady-state throughput more than a small first-request penalty. Plugin-heavy or reflection-heavy systems may require architectural changes before Native AOT or aggressive trimming are practical options.
 
-```text
-Our serverless .NET function cold start is too slow. What can we do?
-```
-
-> I would first measure cold start and separate platform startup, app initialization, dependency loading, and first request JIT. Then I would reduce startup work, avoid heavy reflection, trim dependencies, consider ReadyToRun or Native AOT if compatible, and verify with realistic deployment measurements.
-
-This trade-off exists because C# usually does not compile straight to machine code. It first becomes IL, and then the CLR JIT-compiles that IL into native machine code at runtime. ReadyToRun and Native AOT move more of that compilation work to publish time.
-
-Native AOT is most useful when fast startup, smaller runtime footprint, and simple deployment are especially valuable, such as in CLI tools, serverless functions, or small focused services. It becomes harder to adopt when the application or its dependencies rely heavily on reflection, dynamic loading, or runtime code generation.
-
-JIT normally does not compile every method at startup. Methods are usually compiled when they are first executed, which reduces startup work but means first use can pay a compilation cost.
-
-JIT-generated native code is scoped to the running process. Once the process exits, that generated code is gone. ReadyToRun and Native AOT exist specifically to move more of that work earlier so cold-start behavior becomes more predictable. The real engineering decision is therefore not "JIT versus AOT" in the abstract, but which compilation strategy fits the application's startup sensitivity, dynamism requirements, and operational constraints.
-
-That is why these publishing choices should be measured in the context of the actual workload:
-
-- short-lived CLI tools care heavily about startup;
-- serverless functions care about cold start and package size;
-- long-running APIs may care more about compatibility and steady-state throughput than about a small first-request penalty;
-- plugin-heavy or reflection-heavy systems may not be good Native AOT candidates without architectural change.
+JIT-generated native code is scoped to the running process; ReadyToRun and Native AOT move compilation work to publish time so cold-start behavior becomes more predictable. The engineering decision is not "JIT versus AOT" in isolation, but which strategy fits the application's startup sensitivity, dynamism requirements, and operational constraints — measured against the actual workload.

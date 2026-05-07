@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-Observability is the ability to understand a running system from its outward signals. In ASP.NET Core applications, that usually means logs, metrics, and traces working together rather than as isolated tools.
-
-This chapter treats observability as part of system design, not as an optional operational accessory. Production debugging, capacity planning, incident response, and reliability improvement all depend on whether the application emits useful signals and whether those signals preserve enough context to explain what the system was doing.
+Observability is the ability to understand a running system from its outward signals. In ASP.NET Core applications, that usually means logs, metrics, and traces working together rather than as isolated tools. Observability is part of system design, not an optional operational accessory. Production debugging, capacity planning, incident response, and reliability improvement all depend on whether the application emits useful signals and whether those signals preserve enough context to explain what the system was doing.
 
 ## Logs, Metrics, And Traces As Different Kinds Of Evidence
 
@@ -253,7 +251,7 @@ Low-cardinality dimensions are often better:
 
 This is an important design constraint because observability is not only about emitting more data. It is about emitting data that remains queryable, affordable, and actionable at scale.
 
-## What To Measure
+## Signals Worth Measuring
 
 Good observability includes both technical and business signals.
 

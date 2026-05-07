@@ -4,8 +4,6 @@
 
 An API contract that exists only in controller code is harder to review, harder to test, and harder for clients to trust. OpenAPI provides a machine-readable description of the contract, while tools such as Swagger UI make that contract inspectable by humans. The real value is not the interactive UI alone. The value is visibility.
 
-This chapter treats OpenAPI as part of contract governance rather than as developer convenience.
-
 ## Documentation As Part Of The API Surface
 
 Clients need to know:
@@ -53,7 +51,7 @@ The tooling is useful because it turns runtime endpoints into a documentable sur
 
 ## Response Metadata And Error Visibility
 
-One of the most important uses of OpenAPI metadata is making non-success responses explicit.
+Making non-success responses explicit is one of the highest-value uses of OpenAPI metadata.
 
 If an endpoint can return:
 

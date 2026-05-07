@@ -1,23 +1,10 @@
 # Reflection And Attributes In .NET
 
-## Core Idea
+Reflection enables code to inspect types, methods, properties, and attributes at runtime. Attributes attach declarative metadata to code elements. They are related because attributes become meaningful only when some framework, tool, or application reads that metadata and acts on it.
 
-Reflection lets code inspect types, methods, properties, and attributes at runtime.
+## Reflection
 
-Attributes attach metadata to code elements. Reflection and attributes are related because attributes only become useful when some code, framework, or tool reads that metadata and acts on it.
-
-## Reflection Example
-
-```csharp
-var type = typeof(User);
-
-foreach (var property in type.GetProperties())
-{
-    Console.WriteLine($"{property.Name}: {property.PropertyType.Name}");
-}
-```
-
-Example model:
+Reflection inspects the shape of a type at runtime without knowing it at compile time:
 
 ```csharp
 public sealed class User
@@ -25,11 +12,7 @@ public sealed class User
     public int Id { get; init; }
     public string Email { get; init; } = "";
 }
-```
 
-Reflection lets you inspect the shape of `User` at runtime:
-
-```csharp
 var type = typeof(User);
 
 Console.WriteLine(type.Name);
@@ -40,7 +23,7 @@ foreach (var property in type.GetProperties())
 }
 ```
 
-Output shape:
+Output:
 
 ```text
 User
@@ -48,36 +31,28 @@ Id -> Int32
 Email -> String
 ```
 
-Frameworks use this idea to bind JSON, validate models, create services, and map data.
-
-## Creating Objects With Reflection
-
-Reflection can also create instances dynamically:
+Frameworks use this capability to bind JSON to objects, validate models, create services through dependency injection, and map data between layers. Reflection can also create instances dynamically:
 
 ```csharp
 var type = typeof(User);
 var instance = Activator.CreateInstance(type);
 ```
 
-This is useful for frameworks and plugin systems, but application code should not default to it. Constructor injection and explicit factories are usually easier to read, test, and optimize.
+This is appropriate for frameworks and plugin systems. In application code, constructor injection and explicit factories are preferable when the dependency graph is known at compile time — they are statically analyzable, easier to test, and compatible with trimming and Native AOT without additional configuration.
 
-A common framework-style example is a serializer, mapper, or extensibility point discovering types by convention. A common application mistake is copying that same dynamic style into ordinary business code where the dependencies were actually known all along. Reflection is powerful, but explicit code is often better when no real runtime variability exists.
+## Attributes
 
-## Attribute Example
+Attributes are metadata markers that do not execute by themselves. They describe intent; a separate runtime component must consume them:
 
 ```csharp
 [AttributeUsage(AttributeTargets.Class)]
-public sealed class AuditableAttribute : Attribute
-{
-}
+public sealed class AuditableAttribute : Attribute { }
 
 [Auditable]
-public sealed class Order
-{
-}
+public sealed class Order { }
 ```
 
-Reading attributes:
+Reading the attribute requires explicit code:
 
 ```csharp
 var isAuditable = typeof(Order)
@@ -85,31 +60,7 @@ var isAuditable = typeof(Order)
     .Any();
 ```
 
-Attributes are metadata. They do not run by themselves. They are declarative markers that become meaningful only when a framework, library, or application explicitly interprets them.
-
-For example:
-
-```csharp
-[Auditable]
-public sealed class Payment
-{
-}
-```
-
-Nothing happens unless some code checks for `[Auditable]`:
-
-```csharp
-public static bool ShouldAudit(Type type)
-{
-    return type.GetCustomAttributes(typeof(AuditableAttribute), inherit: true).Any();
-}
-```
-
-## AttributeUsage
-
-`AttributeUsage` controls where an attribute can be applied.
-
-For example:
+`AttributeUsage` constrains where an attribute can be applied and whether it can appear multiple times or be inherited:
 
 ```csharp
 [AttributeUsage(
@@ -127,42 +78,20 @@ public sealed class RequiresPermissionAttribute : Attribute
 }
 ```
 
-Meaning:
+Attributes work well for stable, declarative metadata — permissions, serialization hints, routing conventions, validation rules — that should stay close to the code element they describe. When behavior requires complex runtime decisions or evolving state, normal code is usually clearer than encoding intent into attributes.
 
-- `AttributeTargets.Class | AttributeTargets.Method`: can be placed on classes and methods;
-- `AllowMultiple = false`: cannot apply the same attribute multiple times to the same target;
-- `Inherited = true`: derived classes or overridden members can inherit the attribute depending on reflection usage.
+## Framework Attributes
 
-Attributes are useful when metadata is stable and declarative. They work well for permissions, serialization hints, routing hints, validation rules, and mapping conventions that should stay close to the code element they describe. If the behavior needs complex runtime decisions, evolving state, or significant branching logic, normal code is often clearer than encoding too much intent into attributes.
+The .NET ecosystem uses attributes extensively as a compact metadata contract between application code and framework infrastructure:
 
-## Common Framework Uses
+| Framework | Examples |
+|---|---|
+| ASP.NET Core | `[ApiController]`, `[HttpGet]`, `[Authorize]`, validation attributes |
+| EF Core | `[Key]`, `[Required]`, `[Timestamp]` |
+| Testing | `[Fact]`, `[Theory]` |
+| Serialization | `[JsonPropertyName]`, `[JsonIgnore]` |
 
-ASP.NET Core:
-
-- `[ApiController]`;
-- `[HttpGet]`;
-- `[Authorize]`;
-- model validation attributes.
-
-EF Core:
-
-- `[Key]`;
-- `[Required]`;
-- `[Timestamp]`.
-
-Testing:
-
-- `[Fact]`;
-- `[Theory]`.
-
-Serialization:
-
-- `[JsonPropertyName]`;
-- `[JsonIgnore]`.
-
-These examples show a broader pattern: attributes are often used as a compact metadata contract between application code and framework code. They describe intent, but a separate runtime component still has to consume that intent.
-
-ASP.NET Core routing is a simple illustration:
+ASP.NET Core routing illustrates the pattern: attributes describe routing intent, and the framework reads that metadata to build the endpoint table:
 
 ```csharp
 [ApiController]
@@ -177,32 +106,21 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-The attributes do not execute the routing behavior by themselves. Framework code reads that metadata and builds endpoint behavior around it.
+The attributes do not execute the routing. Framework code reads them at startup and constructs the routing infrastructure from the metadata.
 
 ## Reflection Performance
 
-Reflection can be slower than direct calls because the runtime must inspect metadata, resolve members, and often box values or use more general invocation paths than ordinary compiled code.
-
-If used in hot paths:
-
-- cache metadata;
-- compile expressions;
-- use source generators;
-- use delegates.
-
-Slow repeated reflection:
+Reflection is slower than direct calls because the runtime must inspect metadata, resolve members by name, and often box values or use general invocation paths. In hot paths, repeated reflection creates measurable overhead:
 
 ```csharp
+// Slow: metadata lookup on every call
 public static object? GetValueSlow(object target, string propertyName)
 {
     var property = target.GetType().GetProperty(propertyName);
     return property?.GetValue(target);
 }
-```
 
-Better when repeated often:
-
-```csharp
+// Cached: metadata lookup once per type-property pair
 private static readonly ConcurrentDictionary<(Type Type, string Name), PropertyInfo?> PropertyCache = new();
 
 public static object? GetValueCached(object target, string propertyName)
@@ -213,44 +131,75 @@ public static object? GetValueCached(object target, string propertyName)
 }
 ```
 
-For very hot paths, cached delegates or source-generated code can be faster than `PropertyInfo.GetValue`.
+The performance gap is not theoretical. In a tight loop reading a property 1,000,000 times, `PropertyInfo.GetValue` without caching typically takes 200–500 ms on a modern CPU, while cached `PropertyInfo.GetValue` drops to 50–150 ms, and a compiled delegate via `Delegate.CreateDelegate` or expression trees reduces to 5–10 ms — comparable to direct property access. The metadata lookup and boxing are the dominant costs; caching eliminates the lookup, and delegates eliminate both lookup and boxing.
 
-That trade-off appears often in serializers, object mappers, validation frameworks, and plugin systems. Reflection gives flexibility at startup or configuration time. Cached delegates or generated code become more attractive when the same operation is repeated on hot request paths.
+| Approach | Relative throughput | Trimming/NativeAOT compatible |
+|---|---|---|
+| `PropertyInfo.GetValue` (uncached) | ~1× | Requires annotation |
+| `PropertyInfo.GetValue` (cached) | ~5× | Requires annotation |
+| `Delegate.CreateDelegate` | ~50× | Requires annotation |
+| Source-generated accessor | ~100× | Fully compatible |
+
+For the hottest paths, cached delegates or source-generated code outperform `PropertyInfo.GetValue` entirely. This trade-off appears in serializers, object mappers, validation frameworks, and plugin systems. Reflection provides flexibility at startup or configuration time; cached delegates and generated code become necessary when the same operation is repeated under load.
 
 ## Source Generators
 
-Source generators create code at compile time.
-
-They can reduce runtime reflection.
-
-Examples:
-
-- JSON serialization source generation;
-- mapping code generation;
-- API client generation.
-
-Why source generators help:
-
-```text
-Runtime reflection:
-  discover shape while app is running
-
-Source generation:
-  generate code during build
-  use normal compiled code at runtime
-```
-
-This can improve startup, reduce reflection overhead, and work better with trimming and Native AOT. In practice, source generation is one of the clearest examples of the platform shifting work from runtime discovery to build-time knowledge.
-
-Example idea:
+Source generators produce code at compile time, shifting work from runtime discovery to build-time knowledge. They improve startup, reduce reflection overhead, and are compatible with trimming and Native AOT:
 
 ```csharp
 [JsonSerializable(typeof(OrderDto))]
-public partial class AppJsonContext : JsonSerializerContext
+public partial class AppJsonContext : JsonSerializerContext { }
+```
+
+The JSON serializer uses the generated metadata instead of discovering type shapes dynamically at runtime. Activation requires wiring the generated context into serializer configuration:
+
+```csharp
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonContext.Default);
+});
+```
+
+Source generation is a code artifact and a runtime path simultaneously. The build produces the generated code; the application must still be configured to use it.
+
+### Migration Example: Reflection-Based Serialization To Source Generation
+
+A service that serializes domain events using reflection-based `System.Text.Json` might have code paths like:
+
+```csharp
+// Reflection-based: JsonSerializer discovers type shape at runtime
+var json = JsonSerializer.Serialize<OrderShipped>(orderShipped);
+```
+
+This works but requires the serializer to reflect over `OrderShipped` on every first serialization, and trimming analysis cannot prove the type's properties must be preserved. Migrating to source generation involves three steps:
+
+**Step 1**: Define a JSON serializer context that declares every serialized type:
+
+```csharp
+[JsonSerializable(typeof(OrderShipped))]
+[JsonSerializable(typeof(OrderCancelled))]
+[JsonSerializable(typeof(InventoryUpdated))]
+public partial class DomainEventContext : JsonSerializerContext
 {
 }
 ```
 
-The JSON serializer can use generated metadata instead of discovering everything dynamically at runtime.
+**Step 2**: Register the context in DI and configure all JSON endpoints to use it:
 
-Reflection therefore remains most appropriate for startup work, configuration, framework glue, diagnostics, tests, and other lower-frequency operations. In hot paths, repeated reflection should usually be cached, converted to delegates, or replaced with generated code. The important architectural distinction is that reflection provides flexibility, while generated or explicit code provides predictability. The right choice depends on whether the system values dynamism more than startup, throughput, trimming safety, and operational transparency.
+```csharp
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolverChain.Insert(0, DomainEventContext.Default);
+});
+```
+
+**Step 3**: Verify the migration by publishing with trimming enabled and running integration tests that exercise every serialized event type:
+
+```bash
+dotnet publish -c Release -p:PublishTrimmed=true
+# Run integration tests against the published output
+```
+
+After migration, the serializer reads pre-generated metadata. Serialization of declared types no longer triggers reflection, trim warnings for those types disappear, and the application becomes one step closer to NativeAOT compatibility. The migration is incremental: types can be added to the context one at a time while the rest of the application continues using reflection-based serialization. The runtime cost is zero for types in the context; types outside it continue to pay the reflection cost.
+
+Reflection remains appropriate for startup work, configuration, framework glue, diagnostics, tests, and infrequent operations. In hot paths, repeated reflection should be cached, converted to delegates, or replaced with generated code. Reflection provides flexibility; explicit or generated code provides predictability and performance. The right choice depends on whether dynamism or throughput is the primary concern.

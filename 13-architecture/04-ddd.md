@@ -8,7 +8,7 @@ DDD is most useful when business rules are complex.
 
 It is not mainly about folder structure. It is about modeling the business accurately.
 
-## When DDD Helps
+## Where DDD Adds Value
 
 DDD helps when:
 
@@ -273,7 +273,7 @@ public interface IOrderRepository
 
 Avoid repositories that expose every database operation.
 
-Risky:
+A generic repository that mirrors every database operation creates several problems:
 
 ```csharp
 public interface IGenericRepository<T>
@@ -285,7 +285,7 @@ public interface IGenericRepository<T>
 }
 ```
 
-Why risky:
+This pattern is risky because it:
 
 - leaks query composition everywhere;
 - does not express domain intent;
@@ -391,14 +391,4 @@ public sealed class BillingCustomerTranslator
 
 The Billing context does not blindly reuse the Sales customer model.
 
-## Practice Task
-
-Model an order domain:
-
-1. `Order` aggregate root;
-2. `OrderItem` entity;
-3. `Money` value object;
-4. `OrderSubmittedDomainEvent`;
-5. rule: cannot submit empty order;
-6. rule: cannot change submitted order;
-7. unit tests for domain behavior.
+Domain-Driven Design provides the conceptual tools to model complex business domains with precision. The aggregate root enforces consistency boundaries, value objects encapsulate domain concepts, domain events capture meaningful business occurrences, and bounded contexts define where each model is valid. Together, these building blocks allow the code to speak the same language as the domain experts, reducing the translation cost between business requirements and software implementation.

@@ -4,7 +4,7 @@
 
 Dependency injection is a design technique in which a class receives the collaborators it needs from outside instead of constructing them internally. In ASP.NET Core, this technique is supported by the built-in dependency injection container, but the underlying architectural value is broader than the framework feature itself. DI makes object relationships explicit, reduces coupling to concrete implementations, and moves object graph construction into a dedicated composition mechanism.
 
-This chapter begins with that broader view. Later files examine lifetimes, lifetime mismatches, factories, and decorators in more detail. The purpose of this opening section is to establish what the container actually does, where its responsibilities begin and end, and why dependency injection is useful when treated as a structural design tool rather than as a registration ritual.
+The later files examine lifetimes, lifetime mismatches, factories, and decorators in more detail.
 
 ## From Direct Construction To Injected Dependencies
 
@@ -115,6 +115,14 @@ builder.Services.AddScoped<IEmailSender>(sp =>
 
 This registration phase defines what the container is allowed to build later. It does not usually create the full graph immediately.
 
+When multiple registration sources may compete for the same service type, `TryAdd` variants prevent duplicate registrations from silently replacing earlier ones:
+
+```csharp
+services.TryAddScoped<IOrderService, OrderService>();
+```
+
+`TryAdd` registers the service only if no registration for the same service type already exists. This is useful in library code where the consumer should be able to override the default implementation, or when convention-based scanning may encounter duplicate matches.
+
 ## Building The Service Provider
 
 At startup, ASP.NET Core builds an `IServiceProvider` from the collected registrations.
@@ -145,7 +153,7 @@ The provider must be able to satisfy all three constructor dependencies before i
 
 ## Constructor Selection And Graph Resolution
 
-The built-in container resolves services through public constructors. If multiple public constructors exist, it attempts to use one it can satisfy, generally preferring the most parameter-rich constructor that is resolvable.
+The built-in container resolves services through public constructors. When multiple public constructors exist, the container attempts to use the constructor with the most parameters that it can fully resolve from registered services. If two constructors are equally viable and ambiguity remains, resolution throws an `InvalidOperationException`.
 
 ```csharp
 public sealed class ReportService
@@ -162,7 +170,7 @@ public sealed class ReportService
 }
 ```
 
-If both dependencies are available, the second constructor is preferred. If multiple constructors are equally viable in a way that creates ambiguity, resolution may fail.
+If both `IReportRepository` and `ILogger<ReportService>` are registered, the second constructor is chosen. If `ILogger<ReportService>` is not registered, the first constructor is used.
 
 For that reason, ordinary application services are usually better with one public constructor. The goal is not merely to satisfy the container. It is to make the dependency model of the type obvious.
 

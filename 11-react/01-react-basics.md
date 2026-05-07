@@ -2,9 +2,15 @@
 
 ## Core Idea
 
-React is a UI library for building component-based user interfaces.
+React is a declarative UI library organized around components. Instead of telling the browser how to update the DOM step by step (imperative), the developer declares what the UI should look like for a given state, and React reconciles the difference automatically.
 
-- `JSX`: JavaScript XML-like syntax.
+A component is a function that accepts inputs called props and returns a description of what should appear on screen. When state changes, React re-executes the component to obtain a new description, compares it with the previous one, and applies only the necessary changes to the real DOM. This abstraction frees the developer from manually managing DOM operations, event listener lifecycles, and teardown logic.
+
+### JSX
+
+JSX is a JavaScript syntax extension that looks like HTML. Each JSX node compiles to a call to `jsx()` (or `createElement()` in older React versions) that returns a plain JavaScript object called a React element. These elements are lightweight descriptions of DOM structure — type, props, and children — not actual DOM nodes. React reads the element tree produced by components and uses it during reconciliation to determine what DOM mutations are necessary.
+
+Because JSX is syntactic sugar over JavaScript, it can embed any JavaScript expression inside `{}` braces. Attributes in JSX use camelCase naming for DOM properties (e.g., `className` instead of `class`, `htmlFor` instead of `for`).
 
 ## Component
 
@@ -41,13 +47,13 @@ Lowercase JSX names are treated as built-in DOM elements:
 
 ## Props
 
-Props are inputs from parent component.
+Props are inputs passed from a parent component. They flow downward in a unidirectional data model: a parent passes props to a child, but a child cannot modify props from its parent. This one-way data flow makes component behavior predictable because data has a single, traceable origin.
 
 ```tsx
 <UserCard name="Alice" email="alice@example.com" />
 ```
 
-Props should be treated as read-only.
+Props should be treated as read-only. Mutating a prop directly inside a child component would bypass React's change detection and create inconsistencies between the parent's view of state and the child's. If a child needs to communicate back to a parent, the parent passes a callback function as a prop, and the child invokes it with the relevant data.
 
 ## State
 
@@ -63,7 +69,9 @@ function Counter() {
 }
 ```
 
-State changes trigger re-render.
+State changes trigger a re-render of the component. When `setCount` is called with a new value, React schedules a re-render for the component, calls the component function again to produce the new element tree, compares it against the previous tree through reconciliation, and applies only the necessary DOM updates.
+
+React detects state changes by reference identity. Calling `setState` with a new value tells React that the state has diverged. Mutating an existing state object and passing it to `setState` with the same reference will not trigger a re-render because React relies on reference comparison to detect changes.
 
 Use functional updates when the next state depends on the previous state:
 
@@ -259,34 +267,6 @@ function OrdersPage() {
 }
 ```
 
-This example shows:
+The example demonstrates several patterns that recur throughout React development: components divided by responsibility, props for passing data from parent to child, local state for managing loading and error states, stable keys for list rendering, accessible table markup, and a cleanup guard in the effect to prevent setting state after unmount.
 
-- components split by responsibility;
-- props for child inputs;
-- local state for loading/error/data;
-- stable keys for list rows;
-- accessible table markup;
-- cleanup guard to avoid setting state after unmount.
-
-### What is a component?
-
-> A component is a reusable UI unit that receives props and returns React elements describing what should appear on screen.
-
-### Props vs state?
-
-> Props are passed from parent to child. State is owned by the component and changes over time.
-
-### Why should keys be stable?
-
-> Stable keys help React preserve item identity and state correctly during list changes.
-
-## Practice Task
-
-Build:
-
-1. `OrderCard`;
-2. `OrderTable`;
-3. loading state;
-4. error state;
-5. empty state;
-6. reusable `Card` component.
+Components are the fundamental building blocks of a React application. They receive props as input and return React elements describing what should appear on screen. Props flow unidirectionally from parent to child and must be treated as read-only, while state is owned locally by each component and drives re-rendering when it changes. For lists, providing stable keys lets React preserve component identity across re-renders, which avoids unnecessary DOM operations and maintains correct component state.

@@ -150,7 +150,7 @@ import { reportWebVitals } from "./app/reportWebVitals";
 reportWebVitals();
 ```
 
-You can also measure custom timings:
+Custom timings can also be measured with the Performance API:
 
 ```ts
 performance.mark("orders-render-start");
@@ -420,9 +420,7 @@ Preload example:
 
 ## React Rendering Optimization
 
-React rendering is not automatically a problem. The problem is unnecessary or expensive rendering.
-
-Common causes:
+React rendering is not automatically a problem. The problem is unnecessary or expensive rendering. Typical causes include:
 
 - state stored too high in the tree;
 - context values changing too often;
@@ -1070,19 +1068,3 @@ Use this order:
 6. Look for long tasks.
 7. Optimize API payloads and caching.
 8. Re-measure on a slower device or throttled network.
-
-## Practice Task
-
-Take a React app and perform a small performance pass:
-
-```text
-1. Run Lighthouse.
-2. Record LCP, CLS, and INP.
-3. Inspect the Network tab.
-4. Build and inspect bundle size.
-5. Lazy-load one large route.
-6. Optimize one large image.
-7. Virtualize one long list.
-8. Reduce one unnecessary re-render found by React Profiler.
-9. Document before and after metrics.
-```

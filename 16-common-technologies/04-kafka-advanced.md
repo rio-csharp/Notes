@@ -55,16 +55,18 @@ Offsets are unique only within a partition, not globally across a topic.
 
 ### Log Segments
 
-Kafka stores partition data in log segments.
+Kafka stores partition data in log segments -- contiguous files on disk. Only one segment is **active** (being written to) at a time; older segments are immutable and read-only.
 
 Conceptually:
 
 ```text
 orders.created-0/
-  00000000000000000000.log
-  00000000000001000000.log
-  00000000000002000000.log
+  00000000000000000000.log   <- oldest, sealed
+  00000000000001000000.log   <- sealed
+  00000000000002000000.log   <- active, being appended to
 ```
+
+Segments roll over based on configurable criteria: size threshold (e.g., 1 GB) or time window (e.g., 7 days). The segment file name encodes the base offset of the first message in that segment, enabling direct offset-based reads.
 
 Segment files make retention and cleanup practical.
 
@@ -74,9 +76,7 @@ Kafka can remove old segments based on:
 - size retention;
 - compaction policy for compacted topics.
 
-Key point:
-
-> Kafka is not a queue that deletes a message immediately after consumption. It keeps a log for a retention period, and consumers track progress with offsets.
+Kafka is not a queue that deletes a message immediately after consumption. It keeps a log for a retention period, and consumers track progress with offsets.
 
 ### Leader, Follower, ISR
 
@@ -110,9 +110,7 @@ Retention controls how long Kafka keeps log data.
 
 If a consumer is offline too long and the old offset falls out of retention, it may no longer be able to resume from that old position.
 
-Engineering perspective:
-
-> Consumer offset does not keep data alive forever. Kafka retention controls data availability. If lag exceeds retention, the consumer may lose the ability to replay from its old offset.
+Consumer offset does not keep data alive forever. Kafka retention controls data availability. If lag exceeds retention, the consumer may lose the ability to replay from its old offset.
 
 ## Under The Hood: Consumer Group Coordination
 
@@ -236,9 +234,7 @@ Defense layers:
 - monitoring duplicate rate;
 - correlation ID across producer and consumer logs.
 
-Strong Practical explanation:
-
-> I do not try to prove duplicate delivery can never happen. I design the consumer so duplicate delivery is harmless.
+The correct approach is not to prove duplicate delivery can never happen, but to design the consumer so duplicate delivery is harmless.
 
 ## Consumption Failure Playbook
 
@@ -277,9 +273,7 @@ Practical design:
 - make handlers idempotent because graceful shutdown can still fail;
 - monitor rebalance count.
 
-Engineering perspective:
-
-> Rebalance is normal, but frequent rebalance is a production smell. I would check processing duration, heartbeat/session settings, consumer crashes, deployment churn, and partition assignment behavior.
+Rebalance is normal, but frequent rebalance is a production smell. Check processing duration, heartbeat/session settings, consumer crashes, deployment churn, and partition assignment behavior.
 
 ## Retry Strategies
 
@@ -350,9 +344,7 @@ orders.created.retry.1h
 orders.created.dlt
 ```
 
-Important:
-
-> A retry topic changes timing and may affect strict ordering. If strict per-key ordering is required, retry design needs extra care because later messages for the same key may overtake the failed message.
+A retry topic changes timing and may affect strict ordering. If strict per-key ordering is required, retry design needs extra care because later messages for the same key may overtake the failed message.
 
 ## Idempotent Consumer
 
@@ -451,13 +443,4 @@ Azure Service Bus:
 - sessions;
 - integrates well with Azure.
 
-## Practice Scenarios
-
-Design:
-
-1. order event publishing with outbox;
-2. billing consumer with idempotency;
-3. retry and DLT topics;
-4. event schema versioning;
-5. consumer lag dashboard;
-6. replay strategy.
+The advanced Kafka patterns covered here -- idempotent consumption, retry topology design, outbox-based publishing, and consumer lag diagnosis -- equip engineering teams to build resilient event-driven systems at scale.

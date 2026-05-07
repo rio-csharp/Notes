@@ -4,7 +4,7 @@
 
 ASP.NET Core exposes two major endpoint programming models for HTTP APIs: controllers and Minimal APIs. Both ultimately participate in the same hosting environment, routing system, authorization pipeline, dependency injection model, and response-writing infrastructure. The question is therefore not which one is "real" ASP.NET Core. The question is which model best expresses the endpoint surface a particular application needs.
 
-This chapter focuses on that design choice. It also clarifies what endpoint code should own, what it should delegate, and how request and response models should be shaped so that the HTTP layer remains explicit without absorbing the entire application.
+The design choice matters because endpoint code must own specific concerns while delegating others, and request and response models must be shaped so that the HTTP layer remains explicit without absorbing the entire application.
 
 ## Endpoints As The HTTP Application Boundary
 

@@ -320,7 +320,7 @@ public sealed class FakeUnitOfWork : IUnitOfWork
 
 Integration tests should still verify real EF Core mapping and queries.
 
-## When Repository Helps
+## Where Repository Adds Value
 
 Useful when:
 
@@ -331,7 +331,7 @@ Useful when:
 - multiple persistence mechanisms may exist;
 - tests benefit from replacing persistence.
 
-## When Repository Hurts
+## Where Repository Creates Overhead
 
 Can hurt when:
 
@@ -341,22 +341,12 @@ Can hurt when:
 - developers must create boilerplate for simple CRUD;
 - repository becomes a place for business logic.
 
-## Common Misconceptions
+Several misconceptions surround Repository and Unit of Work:
 
-- EF Core always needs repository.
-- Repository always makes testing easier.
-- Generic repository is automatically cleaner.
-- Unit of Work means manually opening a transaction for every request.
-- Returning `IQueryable` is always wrong.
+- EF Core does not always need a repository wrapper; `DbSet<T>` already provides repository-like behavior.
+- A repository does not automatically make testing easier; an in-memory database or fake may be simpler.
+- A generic repository is not automatically cleaner; it often hides useful EF Core features.
+- Unit of Work does not mean manually opening a transaction for every request; `SaveChanges` already provides transactional semantics.
+- Returning `IQueryable` is not always wrong; it is acceptable in controlled infrastructure code when the boundary is explicitly managed.
 
-## Practical Checklist
-
-```text
-Does this repository protect an aggregate boundary?
-Does it hide meaningful persistence complexity?
-Does it avoid leaking EF Core into inner layers?
-Is this just a pass-through wrapper over DbSet?
-Does query code need projection instead of aggregate loading?
-Are transaction boundaries explicit?
-Do integration tests verify real database behavior?
-```
+When deciding whether to introduce these patterns, ask whether the repository protects an aggregate boundary, whether it hides meaningful persistence complexity, whether it avoids leaking EF Core into inner layers, whether it is only a pass-through wrapper over `DbSet`, whether query code needs projection instead of aggregate loading, whether transaction boundaries are explicit, and whether integration tests verify real database behavior.

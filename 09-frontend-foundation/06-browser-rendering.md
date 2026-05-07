@@ -33,7 +33,7 @@ Receive HTML bytes
   -> composite
 ```
 
-Important:
+Key behaviors to understand:
 
 - HTML parsing can be incremental;
 - CSS can block rendering because styles are needed to build the render tree;
@@ -98,9 +98,7 @@ for (const item of items) {
 }
 ```
 
-Rule:
-
-> Batch DOM reads, then batch DOM writes.
+The core principle is to batch DOM reads, then batch DOM writes.
 
 ## Compositor-Friendly Animations
 
@@ -122,10 +120,7 @@ top: 20px;
 left: 20px;
 ```
 
-Why:
-
-- layout properties can trigger layout and paint;
-- transform/opacity can often use existing layers.
+This is because layout properties can trigger layout and paint, while transform and opacity can often use existing layers.
 
 Do not overuse `will-change`; it can increase memory usage if applied everywhere.
 
@@ -349,22 +344,63 @@ tableBody.replaceChildren(fragment);
 
 This batches DOM updates and avoids injecting HTML strings.
 
-### What happens when the browser loads a page?
+### How Reflow Propagates Through the Tree
 
-> The browser parses HTML into DOM, parses CSS into CSSOM, combines them into a render tree, calculates layout, paints pixels, and composites layers. JavaScript can modify DOM and CSSOM, causing re-rendering work.
+Reflow (also called layout or relayout) is the process of recalculating element positions and sizes. It begins at the document root and propagates downward through the render tree. The cost of a reflow depends on the size of the affected subtree, not the entire document -- if you change a width on a leaf element, the browser reflows that element and its descendants, not the whole page. However, some operations trigger a global reflow of the entire document:
 
-### What is reflow?
+- Changing font size on the root or body element.
+- Resizing the browser window.
+- Inserting or removing a stylesheet.
+- Reading certain properties like `offsetWidth`, `offsetHeight`, `clientTop`, `scrollTop`, `getComputedStyle()`, and others. These properties force the browser to flush any pending layout changes and compute an up-to-date value before returning -- a forced synchronous layout.
 
-> Reflow, or layout recalculation, happens when the browser needs to recalculate element sizes and positions. It can be expensive if many elements are affected.
+The layout thrashing pattern shown earlier occurs when JavaScript reads a forced-layout property (triggering a layout), then writes a style change (scheduling another layout), then reads again (flushing again). Each read-write cycle in a loop multiplies the layout cost. Batching reads before writes, or using `requestAnimationFrame` to separate read and write phases, eliminates this multiplier.
 
-### How do you improve frontend performance?
+Modern browsers can mitigate some forced layout costs through style caching and incremental layout, but the fundamental cost model remains: every forced layout read processes the full affected subtree synchronously.
 
-> Reduce JavaScript bundle size, optimize images and fonts, avoid unnecessary layout work, lazy-load non-critical resources, use caching, and measure Core Web Vitals.
+### Performance Measurement at the Rendering Level
 
-### Why use `defer` on scripts?
+Beyond Core Web Vitals, browser DevTools provide granular insight into rendering performance:
 
-> `defer` lets the browser continue parsing HTML while downloading JavaScript. The script runs after parsing and preserves order, which is usually better for application scripts than blocking parsing.
+- **Performance panel recording**: Shows each frame's compositing, painting, layout, and scripting phases as a waterfall. Long frames (exceeding 16ms for 60fps) appear as red bars.
+- **Layout shift regions**: DevTools highlights shifting elements in blue or red during interaction, showing exactly which elements contribute to CLS.
+- **Forced reflow warnings**: The Performance panel flags JavaScript operations that trigger forced synchronous layouts, showing the call stack at the time of the read.
+- **Layer boundaries**: Paint flashing highlights areas that are repainted each frame, helping identify unnecessary repaints.
 
-### Why can layout shift happen?
+The `PerformanceObserver` API shown earlier provides programmatic access to these metrics for production monitoring, though real-user measurement via the Chrome UX Report or RUM services like Datadog RUM and New Relic is more representative than any local DevTools session.
 
-> Layout shift happens when visible content moves after initial rendering, often because images lack dimensions, dynamic content is inserted above existing content, or fonts load late.
+### JavaScript Loading Strategies in Detail
+
+Three loading modes exist for external scripts, each with different behavior:
+
+| Mode | Parsing behavior | Execution timing | Order |
+|------|------------------|------------------|-------|
+| Normal (no attribute) | Blocks HTML parsing | As soon as downloaded | Preserved |
+| `defer` | Does not block | After HTML parsing completes | Preserved |
+| `async` | Does not block | As soon as downloaded | Not preserved |
+
+**Normal scripts** block the HTML parser entirely. The browser stops building DOM nodes while the script downloads and executes. This is why inline `<script>` tags in `<head>` delay first paint.
+
+**`defer`** downloads the script while HTML parsing continues. Execution waits until parsing is complete. Because order is preserved, deferred scripts can depend on each other. Use `defer` for application scripts that need the full DOM.
+
+**`async`** downloads without blocking and executes immediately upon download. If multiple async scripts are present, they run in download-completion order, which is unpredictable. Use `async` for independent third-party scripts -- analytics, ads, A/B testing frameworks -- where load order does not matter.
+
+### Cumulative Layout Shift in Detail
+
+Layout shift occurs when a visible element changes position between two rendered frames. The browser calculates a CLS score based on two factors:
+
+1. **Impact fraction**: The portion of the viewport occupied by the moving element in both its old and new positions (combined).
+2. **Distance fraction**: How far the element moved relative to the viewport.
+
+A shift that moves a large element halfway across the viewport scores higher than a small element shifting slightly. The cumulative score sums individual shift scores across the page lifetime.
+
+Common CLS causes and mitigations:
+
+| Cause | Mitigation |
+|-------|-----------|
+| Images without dimensions | Always set `width` and `height` |
+| Ads or embeds without reserved space | Use `min-height` on container |
+| Dynamic injected content (banners, toasts) | Reserve space or insert at viewport edge |
+| Web fonts causing text reflow | Use `font-display: swap` or `font-display: optional` with matching fallback metrics |
+| Late-loading images with no aspect ratio | Use `aspect-ratio` CSS property as fallback |
+
+The skeleton loading pattern (shown earlier as `.order-summary-skeleton { min-height: 12rem; }`) reserves space for content that has not loaded yet, preventing shifts when the real content arrives.

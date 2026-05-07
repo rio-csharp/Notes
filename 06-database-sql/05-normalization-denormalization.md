@@ -4,7 +4,7 @@
 
 Normalization organizes data so that each fact has one primary home, reducing duplication and update anomalies. Denormalization deliberately duplicates or reshapes data when read performance, historical accuracy, or analytical access patterns justify that cost. These are not opposing ideologies. They are design tools serving different purposes.
 
-The important discipline is to keep denormalization intentional. Accidental duplication creates inconsistency. Deliberate duplication can improve performance or preserve business truth.
+Keeping denormalization intentional is essential. Accidental duplication creates inconsistency. Deliberate duplication can improve performance or preserve business truth.
 
 ## The Purpose Of Normalization
 
@@ -14,7 +14,7 @@ If customer name is repeated in every order row, changing a customer's name mean
 
 Normalized design reduces that class of problem by moving the fact to the entity that actually owns it.
 
-## First Through Third Normal Form
+## First Through Third Normal Form And Beyond
 
 The classic normal forms are useful mainly as reasoning tools.
 
@@ -23,6 +23,8 @@ First normal form discourages repeating groups and non-atomic columns. Instead o
 Second normal form matters most when composite keys are involved. A non-key attribute should depend on the full key rather than only part of it.
 
 Third normal form discourages storing non-key facts that depend on other non-key facts. If `CustomerName` depends on `CustomerId`, then `Orders(OrderId, CustomerId, CustomerName)` is usually carrying a fact in the wrong place.
+
+Boyce-Codd normal form (BCNF) is a slightly stricter version of third normal form that applies when there are overlapping composite candidate keys. In practice, schemas that satisfy third normal form also satisfy BCNF unless they have unusual key dependencies. BCNF is worth knowing about but rarely requires explicit attention in ordinary schema design.
 
 In practice, experienced teams do not spend most of their time naming normal forms. They use the underlying idea: keep each fact near its real owner unless there is a deliberate reason not to.
 
@@ -48,7 +50,21 @@ DailySalesSummary(Date, TenantId, OrderCount, TotalAmount)
 
 Such a table can support fast reporting without forcing every dashboard request to aggregate a large operational table repeatedly. The cost is that the system must now maintain consistency between the operational source and the summary projection.
 
-That maintenance burden is the real price of denormalization.
+A related tool is the materialized view, which is a query result stored as a table and refreshed on a schedule or on demand:
+
+```sql
+CREATE MATERIALIZED VIEW DailySalesSummary AS
+SELECT
+    CAST(CreatedAt AS DATE) AS SaleDate,
+    COUNT(*) AS OrderCount,
+    SUM(Total) AS TotalAmount
+FROM Orders
+GROUP BY CAST(CreatedAt AS DATE);
+```
+
+Materialized views shift the refresh responsibility to the database rather than the application. They are useful when the database engine supports them, but they introduce their own refresh latency and storage costs.
+
+That maintenance burden is the real price of denormalization, whether managed through application code or through database views.
 
 ## Consistency Strategies For Denormalized Data
 

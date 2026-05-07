@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-Database design is the discipline of turning business concepts into tables, keys, constraints, and access paths that remain correct under change. A good design does not only store today's fields. It preserves identity, models relationships clearly, supports the expected query patterns, and allows the system to evolve without turning every feature into a schema exception.
-
-This chapter stays focused on primary database design rather than on full-scale distributed data architecture. Partitioning and sharding are discussed, but only as later-stage consequences of design and scale rather than as default starting points.
+Database design is the discipline of turning business concepts into tables, keys, constraints, and access paths that remain correct under change. A good design does not only store today's fields. It preserves identity, models relationships clearly, supports the expected query patterns, and allows the system to evolve without turning every feature into a schema exception. Partitioning and sharding are discussed later, but only as consequences of design and scale rather than as default starting points.
 
 ## From Business Concepts To Relational Structure
 

@@ -94,7 +94,11 @@ CREATE TABLE NotificationDeliveries
 );
 ```
 
-Add an outbox table so database write and message publication are reliable.
+### Outbox Pattern for Reliable Publication
+
+A naive approach writes to the database and then publishes a message to the queue. If the application crashes between the database write and the queue publish, the notification is stored but never delivered. Conversely, publishing before the database write risks delivering a notification that the application cannot confirm was persisted.
+
+The outbox pattern solves this by treating message publication as part of the database transaction. Instead of publishing directly, the application inserts an outbox record in the same transaction as the notification and delivery records.
 
 ```sql
 CREATE TABLE OutboxMessages
@@ -107,6 +111,10 @@ CREATE TABLE OutboxMessages
     RetryCount INT NOT NULL DEFAULT 0
 );
 ```
+
+A separate outbox processor polls for unpublised records (`PublishedAt IS NULL`), publishes them to the message broker, and marks them as published. If the processor crashes mid-publish, the message remains unpublised and will be picked up on the next poll cycle. This guarantees at-least-once delivery: every outbox record eventually reaches the queue, and the worker must handle duplicate delivery via idempotency.
+
+The outbox pattern ensures that the notification record and the delivery message are never durably out of sync: both or neither are persisted.
 
 ## Queue Message Contract
 
@@ -246,9 +254,9 @@ Do:
 - apply retention policy;
 - audit admin access.
 
-## Practice Task
+## Verification
 
-Design and implement:
+Key aspects to verify:
 
 1. notification API;
 2. notification database tables;

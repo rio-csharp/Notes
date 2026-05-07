@@ -347,7 +347,7 @@ Look at:
 
 ## Flakiness Causes
 
-Common causes:
+Typical sources of flakiness:
 
 - fixed sleeps;
 - shared mutable data;
@@ -368,23 +368,4 @@ Better practices:
 - trace on retry;
 - small number of high-value flows.
 
-## Practice Task
 
-Create E2E tests for:
-
-1. login.
-2. create order.
-3. approve order.
-4. permission denied page.
-5. file upload.
-6. report download.
-7. payment callback simulation.
-
-For each test, write:
-
-```text
-How is test data created?
-How is authentication handled?
-What user-visible result proves success?
-What could make the test flaky?
-```

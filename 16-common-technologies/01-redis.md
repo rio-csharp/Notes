@@ -22,14 +22,14 @@ Redis is often described as single-threaded, but the more precise engineering st
 
 > Redis command execution is mostly single-threaded for core data operations, while Redis may use additional threads for networking I/O, persistence, lazy freeing, or other background work depending on version and configuration.
 
-Why single-threaded command execution works well:
+Single-threaded execution works well because:
 
 - most operations are memory-based and very fast;
 - no complex locking is needed for normal commands;
 - command execution is deterministic;
 - event loop handles many client connections efficiently.
 
-Important consequence:
+A key consequence of this execution model:
 
 - one slow command can block other commands;
 - big keys and expensive operations are dangerous;
@@ -190,9 +190,7 @@ Eviction depends on `maxmemory-policy`, such as:
 - `allkeys-lfu`;
 - `volatile-ttl`.
 
-Practical explanation:
-
-> TTL expiration does not mean Redis deletes every expired key at the exact millisecond. Redis combines lazy and active expiration. Eviction is a separate memory-pressure behavior controlled by maxmemory policy.
+TTL expiration does not mean Redis deletes every expired key at the exact millisecond. Redis combines lazy and active expiration. Eviction is a separate memory-pressure behavior controlled by maxmemory policy.
 
 ## String
 
@@ -586,9 +584,7 @@ But for some use cases, behavior depends on business risk:
 | distributed lock | fail safely; do not assume lock acquired |
 | session storage | user may need to re-login |
 
-Engineering perspective:
-
-> I decide fail-open or fail-closed based on business risk. For cache reads, I usually degrade to database with rate protection. For security controls, I may fail closed.
+The decision to fail open or fail closed depends on business risk. For cache reads, degrade to database with rate protection. For security controls, failing closed is often appropriate.
 
 ## Distributed Lock
 
@@ -668,12 +664,4 @@ public sealed class LoginRateLimiter
 }
 ```
 
-## Practice Task
-
-Implement:
-
-1. product cache with cache aside;
-2. null caching for missing product;
-3. randomized TTL;
-4. cache invalidation after update;
-5. login rate limiter.
+These patterns -- cache-aside reads, null-value caching, TTL jitter, explicit invalidation on writes, and rate limiter construction -- represent the core caching and Redis usage patterns in production .NET applications.

@@ -4,8 +4,6 @@
 
 OAuth 2.0 and OpenID Connect are often introduced through login diagrams, but their real importance lies in trust delegation. OAuth answers whether a client may obtain delegated access to a resource. OpenID Connect adds an identity layer so that the client can know who authenticated. Confusing those two purposes leads to fragile security designs, especially when tokens are reused outside their intended boundaries.
 
-This chapter focuses on the trust model behind OAuth and OIDC rather than on memorizing every flow variant.
-
 ## OAuth Versus OpenID Connect
 
 OAuth 2.0 is fundamentally about authorization delegation:
@@ -75,7 +73,61 @@ When the API receives a bearer token, it should validate:
 
 A valid signature alone is not enough. A token may be validly signed and still be intended for another audience, issued by the wrong authority, expired, or missing the claims required for the requested operation.
 
-This is one of the most important mental models in applied security: cryptographic validity is not the same thing as authorization validity.
+Cryptographic validity is not the same thing as authorization validity.
+
+In ASP.NET Core, this validation surface is configured when registering authentication. The following example configures the API to accept access tokens from an OAuth 2.0 authority, validates the expected audience and issuer, and maps the `scope` claim into the principal for policy-based authorization:
+
+```csharp
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = "https://idp.example.com";
+        options.Audience = "api://orders";
+
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = "https://idp.example.com",
+            ValidateAudience = true,
+            ValidAudience = "api://orders",
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            NameClaimType = "sub",
+            RoleClaimType = "role"
+        };
+
+        // Extract scopes from the token and expose them as claims
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                var scopeClaims = context.Principal?
+                    .FindAll("scope")
+                    .SelectMany(s => s.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    .Select(s => new Claim("scope", s))
+                    .ToList();
+
+                if (scopeClaims?.Count > 0)
+                {
+                    var identity = context.Principal?.Identity as ClaimsIdentity;
+                    identity?.AddClaims(scopeClaims);
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Orders.Write", policy =>
+        policy.RequireClaim("scope", "orders.write"));
+    options.AddPolicy("Orders.Read", policy =>
+        policy.RequireClaim("scope", "orders.read"));
+});
+```
+
+This configuration ensures the API rejects tokens not intended for its audience, tokens signed by an unknown authority, expired tokens, and tokens lacking the required scope claims for the requested operation.
 
 ## Scopes, Roles, And Permissions
 
@@ -89,7 +141,7 @@ Mature systems usually need more than one of these layers. A token that says the
 
 Refresh tokens deserve special treatment because they extend access over time. Rotation and reuse detection are therefore common hardening techniques. If a refresh token is used once and then appears again after it was already rotated away, the system may need to treat that as potential theft rather than as a normal retry.
 
-This is a good example of OAuth design extending beyond protocol correctness into session-risk management.
+Refresh-token rotation and reuse detection are common hardening techniques that extend the design beyond protocol correctness into session-risk management.
 
 ## Browser Storage And BFF Patterns
 

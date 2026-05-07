@@ -4,7 +4,7 @@
 
 Frontend architecture is the set of decisions that makes a frontend application understandable, changeable, testable, and reliable as it grows.
 
-It is not only folder names. It includes:
+It is not only folder names — it encompasses dependency rules, module boundaries, routing architecture, state placement, and how the codebase is organized.
 
 ## A Practical React Structure
 
@@ -71,7 +71,7 @@ This structure has four important layers:
 - `shared`: reusable infrastructure that is not owned by a single feature.
 - `styles`: global styles, design tokens, and reset rules.
 
-## Why Feature-Based Structure Works
+## Feature-Based Structure
 
 A feature-based structure keeps related code close together.
 
@@ -134,8 +134,6 @@ Risky:
 // shared/ui/Table.tsx
 import type { Order } from "@/features/orders/types";
 ```
-
-Why this is risky:
 
 `shared/ui/Table.tsx` becomes business-aware. A generic table should not know what an order is. Once shared code imports feature code, the dependency direction becomes unclear and changes become harder to reason about.
 
@@ -593,8 +591,6 @@ The shared component owns accessibility and consistency. The feature component o
 
 A design system is a shared language for UI.
 
-Chinese note:
-
 It usually includes:
 
 - color tokens;
@@ -840,12 +836,7 @@ export const appConfig = {
 };
 ```
 
-Why this matters:
-
-- missing variables fail fast;
-- invalid URLs are caught before runtime API errors;
-- feature flags become explicit;
-- deployment environments are easier to compare.
+Validating environment variables at startup means missing variables fail fast, invalid URLs are caught before runtime API errors, feature flags become explicit, and deployment environments are easier to compare.
 
 ## Error Boundaries
 
@@ -992,8 +983,6 @@ Costs:
 - cross-app communication complexity;
 - observability across multiple frontend applications.
 
-Engineering perspective:
-
 Start with a modular frontend unless team boundaries and deployment boundaries clearly justify micro-frontends. A folder structure problem should usually be solved with modular architecture before adding runtime integration complexity.
 
 ## Common Architecture Smells
@@ -1010,19 +999,6 @@ Start with a modular frontend unless team boundaries and deployment boundaries c
 - Design-system variants grow without rules.
 - Feature flags are never removed.
 
-## Practical Checklist
+## Architecture Health
 
-Before considering a frontend architecture healthy, check:
-
-```text
-Can a new developer find the code for one feature quickly?
-Can one feature be changed without touching unrelated features?
-Are shared components truly generic?
-Is server state handled separately from client state?
-Are route params and environment variables validated?
-Are large routes lazy-loaded?
-Are errors contained by boundaries?
-Do components expose accessible states?
-Are tests written at the same boundaries as the architecture?
-Can obsolete feature flags be found and removed?
-```
+A healthy frontend architecture makes it possible for a new developer to find the code for one feature quickly, change one feature without touching unrelated features, and rely on shared components that are truly generic. Server state is handled separately from client state. Route params and environment variables are validated. Large routes are lazy-loaded. Errors are contained by boundaries. Components expose accessible states. Tests are written at the same boundaries as the architecture. Obsolete feature flags can be found and removed.

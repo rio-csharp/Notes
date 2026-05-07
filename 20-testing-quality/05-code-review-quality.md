@@ -101,11 +101,7 @@ public async Task ApproveAsync(int orderId, int userId, CancellationToken ct)
 }
 ```
 
-Problem:
-
-```text
 The order is updated before permission is checked.
-```
 
 Better:
 
@@ -311,11 +307,7 @@ useEffect(() => {
 }, [query]);
 ```
 
-Issue:
-
-```text
 Multiple requests can resolve out of order when query changes quickly.
-```
 
 Improved version:
 
@@ -453,23 +445,4 @@ The reviewer should:
 - approve only when comfortable with the risk;
 - ask for context when unclear.
 
-## Practice Task
 
-Review a pull request and write notes for:
-
-1. correctness.
-2. authorization.
-3. database migration risk.
-4. error handling.
-5. performance.
-6. frontend states.
-7. test coverage.
-
-Use this format:
-
-```text
-Finding:
-Risk:
-Suggested change:
-Blocking or non-blocking:
-```

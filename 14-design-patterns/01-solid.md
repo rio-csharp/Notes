@@ -10,7 +10,7 @@ A class should have one reason to change.
 
 This does not mean "one method per class." It means the class should represent one coherent responsibility.
 
-### Problem Example
+### Single Responsibility Violation
 
 ```csharp
 public sealed class OrderService
@@ -53,7 +53,7 @@ This class changes when:
 - invoice PDF layout changes;
 - validation rules change.
 
-### Better Separation
+### Separated Responsibilities
 
 ```csharp
 public sealed class CreateOrderHandler
@@ -106,7 +106,7 @@ Code should be open for extension but closed for modification.
 
 This means new behavior should often be added by adding a new implementation, not editing a large fragile method.
 
-### Problem Example
+### Open/Closed Violation
 
 ```csharp
 public sealed class DiscountCalculator
@@ -204,7 +204,7 @@ Now adding a new policy usually means adding a class and DI registration.
 
 Subtypes should be usable wherever their base types are expected without surprising behavior.
 
-### Problem Example
+### Liskov Substitution Violation
 
 ```csharp
 public abstract class ReportExporter
@@ -231,7 +231,7 @@ public sealed class LiveDashboardExporter : ReportExporter
 
 `LiveDashboardExporter` violates the expectation of `ReportExporter`. Code that accepts `ReportExporter` expects `Export` to work.
 
-### Better Model
+### Separate Abstractions
 
 ```csharp
 public interface IReportExporter
@@ -286,7 +286,7 @@ If code expects width and height to be independently changeable, `Square` breaks
 
 Clients should not be forced to depend on methods they do not use.
 
-### Problem Example
+### Interface Segregation Violation
 
 ```csharp
 public interface IUserService
@@ -347,7 +347,7 @@ Focused interfaces reduce unnecessary coupling.
 
 High-level modules should not depend on low-level modules. Both should depend on abstractions.
 
-### Problem Example
+### Dependency Inversion Violation
 
 ```csharp
 public sealed class OrderPaymentService
@@ -362,7 +362,7 @@ public sealed class OrderPaymentService
 
 The business workflow depends directly on Stripe construction and configuration.
 
-### Better Design
+### Dependency Inversion Applied
 
 ```csharp
 public interface IPaymentGateway
@@ -470,22 +470,13 @@ export function useOrdersQuery(filters: OrderFilters) {
 
 Components depend on the hook contract, not low-level HTTP details.
 
-## Common Misconceptions
+These principles are frequently misunderstood:
 
-- SRP means one method per class.
-- OCP means never modify existing code.
-- LSP only matters for inheritance-heavy code.
-- ISP means every method needs its own interface.
-- DIP means every class must have an interface.
-- SOLID always requires more abstractions.
+- SRP means one method per class &mdash; it actually means one reason to change.
+- OCP means never modify existing code &mdash; it means new behavior should usually be added through new implementations rather than editing fragile methods.
+- LSP only matters for inheritance-heavy code &mdash; it applies wherever subtypes are expected to be substitutable.
+- ISP means every method needs its own interface &mdash; it means clients should not depend on methods they do not use.
+- DIP means every class must have an interface &mdash; it means high-level policy should not depend on low-level details.
+- SOLID always requires more abstractions &mdash; it requires the right abstractions at the right boundaries.
 
-## Practical Checklist
-
-```text
-Does this class/component have one clear reason to change?
-Is new variation handled by adding code or editing a fragile switch?
-Can implementations be substituted without surprising behavior?
-Do consumers depend only on methods they need?
-Does high-level policy depend on low-level technical details?
-Does the abstraction remove real coupling, or only add ceremony?
-```
+Each of the five principles can be applied as a diagnostic question during design and review. Does a class have a single clear reason to change? Is new variation handled by adding code rather than editing a fragile switch? Can implementations be substituted without surprising behavior? Do consumers depend only on methods they need? Does high-level policy depend on low-level technical details? Does the abstraction remove real coupling or only add ceremony? Asking these questions regularly produces more maintainable code.

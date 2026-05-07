@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-Most EF Core performance work is not about clever micro-optimizations. It is about making the read and write path reflect how the database actually works: selecting less data, tracking fewer objects, reducing round trips, preserving index-friendly predicates, and choosing set-based operations when object-by-object updates are unnecessary.
-
-This chapter closes the EF Core section by turning the earlier concepts into an operational tuning framework.
+Most EF Core performance work is not about clever micro-optimizations. It is about making the read and write path reflect how the database actually works: selecting less data, tracking fewer objects, reducing round trips, preserving index-friendly predicates, and choosing set-based operations when object-by-object updates are unnecessary. The earlier concepts around context lifetime, tracking, query translation, and set-based operations together form an operational tuning framework.
 
 ## Diagnose Before Tuning
 
@@ -69,6 +67,22 @@ var orders = await _dbContext.Orders
 ```
 
 This reduces memory usage, snapshot creation, relationship fix-up work, and the likelihood that large read operations will pollute a request's tracked graph. It does not make every query fast, but it avoids paying write-oriented infrastructure cost on read-oriented paths.
+
+For contexts that serve predominantly read-heavy workloads, the default tracking mode can be changed at the context level:
+
+```csharp
+public sealed class ReadOnlyDbContext : DbContext
+{
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder
+            .UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking)
+            .UseSqlServer(connectionString);
+    }
+}
+```
+
+This eliminates the need to append `AsNoTracking()` to every read query. Individual queries that require tracking can opt in with `AsTracking()`.
 
 ## Round Trips And The N+1 Pattern
 
@@ -192,6 +206,22 @@ await _dbContext.Orders
 ```
 
 This avoids loading every row into memory and bypasses change tracking. The trade-off is that domain methods, entity callbacks, and graph-level invariants are also bypassed. That is acceptable only when the operation is fundamentally a data maintenance action rather than a rich domain command.
+
+## Batch Size And Command Batching
+
+When `SaveChanges` processes multiple insert, update, or delete commands, EF Core batches them into a single round trip rather than issuing each command individually. The batch size is controlled by the provider and can be configured:
+
+```csharp
+optionsBuilder.UseSqlServer(connectionString, options =>
+{
+    options.MinBatchSize(1);
+    options.MaxBatchSize(100);
+});
+```
+
+For large bulk operations, the default batching behavior can consume significant memory as EF Core builds the command set before execution. In such cases, `ExecuteUpdate` and `ExecuteDelete` are often a better choice because they bypass the tracked graph entirely and generate a single set-based statement.
+
+Batch size tuning is most relevant for write-heavy workloads where `SaveChanges` processes tens or hundreds of commands in one call. For ordinary request-scoped operations with a handful of changes, the defaults are usually adequate.
 
 ## Compiled Queries
 

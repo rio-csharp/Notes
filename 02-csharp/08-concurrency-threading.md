@@ -4,7 +4,7 @@
 
 Concurrency is the discipline of making multiple operations progress over overlapping periods of time. Threading is one of the mechanisms the runtime uses to make that possible, but it is not the whole story. In production .NET systems, the harder problems usually appear when several operations contend for shared state, shared execution capacity, or limited downstream resources.
 
-The previous chapter explained asynchronous control flow. This chapter begins where `async` and `await` stop being enough on their own. Once several operations interact, engineers must reason about thread safety, worker availability, synchronization, backpressure, and coordination under load.
+Once several operations interact, engineers must reason about thread safety, worker availability, synchronization, backpressure, and coordination under load.
 
 ## Concurrency Versus Parallelism
 
@@ -36,11 +36,28 @@ worker returns to the pool
 
 This pooled model is one reason thread misuse has system-wide consequences. When worker threads are blocked or monopolized, unrelated work may suffer too.
 
+**ThreadPool architecture.** The .NET ThreadPool manages two distinct categories of threads:
+
+- **Worker threads** — handle CPU-bound work queued via `Task.Run`, `ThreadPool.QueueUserWorkItem`, timer callbacks, and continuations. These threads execute managed code.
+- **I/O completion threads** — handle completions from the OS I/O completion port mechanism. When an overlapped I/O operation (network read, file read) finishes, the OS notifies the CLR via an I/O completion port, and an I/O completion thread picks up the notification. These threads are not used for CPU work and are critical for async I/O throughput.
+
+The distinction matters because starvation in one pool does not directly block the other, but the two pools interact. When worker threads are exhausted, continuations that would run on worker threads are delayed, which in turn delays processing of I/O completions that depend on those continuations.
+
+**The hill-climbing algorithm.** The ThreadPool does not use a fixed thread count. It uses an adaptive algorithm called "hill-climbing" that monitors throughput — measured as the rate of work-item completion — and adjusts the thread count to maximize it. When new work items are queued and threads are busy, the algorithm introduces new threads at a controlled rate (typically one every 500 ms after an initial burst), measuring whether throughput improves. If adding threads increases throughput, it continues; if throughput plateaus or declines (suggesting contention), it stops. This is why the ThreadPool can appear slow to react under sudden load spikes: the injection rate is deliberately conservative to avoid overshooting into contention territory.
+
+**`ThreadPool.SetMinThreads`.** The minimum thread count is the number of threads the ThreadPool keeps available even when idle. Setting this value at application startup is important for high-throughput servers because the hill-climbing algorithm starts from the minimum, not from zero. If the minimum is too low, the application experiences latency spikes during startup or load surges while the ThreadPool slowly injects threads. A common ASP.NET Core recommendation is to set minimum worker and I/O completion threads to values proportional to expected concurrency:
+
+```csharp
+ThreadPool.SetMinThreads(workerThreads: 100, completionPortThreads: 100);
+```
+
+This does not create 100 threads immediately; it ensures the ThreadPool will inject threads up to that count without hill-climbing hesitation. Setting the minimum too high wastes memory; setting it too low causes unnecessary latency under load.
+
 ## ThreadPool Starvation As A System Failure
 
 ThreadPool starvation happens when work is queued but available workers are not arriving quickly enough to keep the system responsive.
 
-Common causes include:
+ThreadPool starvation happens when:
 
 - blocking async code with `.Result` or `.Wait()`;
 - synchronous dependency calls in high-concurrency paths;
@@ -67,13 +84,13 @@ continuations wait for workers
 latency rises across the application
 ```
 
-The fix is usually not a local trick. It is architectural discipline: async end to end where the work is genuinely asynchronous, bounded CPU work, and careful control over background concurrency.
+The response is architectural discipline: async end to end where the work is genuinely asynchronous, bounded CPU work, and careful control over background concurrency.
 
 ## Diagnosing Worker Exhaustion
 
 Starvation often presents as a throughput or latency problem rather than a crash.
 
-Typical symptoms include:
+Starvation often presents as:
 
 - sudden latency spikes;
 - timeouts across otherwise unrelated endpoints;
@@ -81,7 +98,7 @@ Typical symptoms include:
 - stack traces showing many blocked workers;
 - long delays before simple continuations run.
 
-Useful evidence includes:
+Relevant evidence covers:
 
 - `dotnet-counters` ThreadPool metrics;
 - traces showing blocked work;
@@ -90,6 +107,33 @@ Useful evidence includes:
 - dependency timing.
 
 This diagnostic pattern matters because many teams initially misread starvation as "the server needs more threads." More often the real question is why existing workers are being held in non-productive waits.
+
+A minimal observation workflow often starts with:
+
+```bash
+dotnet-counters monitor --process-id <pid> System.Runtime
+```
+
+This produces live counter output:
+
+```text
+[System.Runtime]
+    CPU Usage (%)
+    Working Set (MB)
+    GC Heap Size (MB)
+    Gen 0 GC / sec
+    Gen 1 GC / sec
+    Gen 2 GC / sec
+    Time in GC (%)
+    Allocation Rate (B / 1 sec)
+    ThreadPool Thread Count
+    ThreadPool Queue Length
+    ThreadPool Completed Work Item Count
+    Lock Contention Count
+    Exception Count
+```
+
+During starvation diagnosis, the critical counters are `ThreadPool Thread Count` (is it stuck near the minimum despite queued work?), `ThreadPool Queue Length` (is it growing without bound?), and `ThreadPool Completed Work Item Count` (is throughput flat while queue depth rises?). Together these reveal whether the ThreadPool is injecting threads, whether work is backing up, and whether the system is making forward progress. This does not replace deeper tracing, but it gives a practical entry point for watching ThreadPool and runtime pressure while the workload is running.
 
 ## Shared Mutable State And Race Conditions
 
@@ -138,7 +182,29 @@ public void Increment()
 
 The strength of `lock` is that it protects a critical section rather than a single variable. That makes it useful when several related mutations must happen together. Its danger is that poorly scoped lock regions can become bottlenecks or deadlock hazards.
 
-In practice, two habits matter most:
+**`lock` is `Monitor.Enter` / `Monitor.Exit`.** The C# `lock` statement compiles to a `try/finally` block wrapping `Monitor.Enter` and `Monitor.Exit`:
+
+```csharp
+// lock (_gate) { body } compiles approximately to:
+bool lockTaken = false;
+try
+{
+    Monitor.Enter(_gate, ref lockTaken);
+    // body
+}
+finally
+{
+    if (lockTaken) Monitor.Exit(_gate);
+}
+```
+
+The `lockTaken` flag ensures `Monitor.Exit` is called only when the lock was successfully acquired, preventing corrupted state if `Monitor.Enter` throws. This `try/finally` structure means exceptions that escape the critical section still release the lock — which is usually correct but can leave protected state partially mutated.
+
+**`lock` cannot span `await`.** `Monitor` tracks thread ownership. When a thread calls `Monitor.Enter`, it owns the lock; only that same thread can call `Monitor.Exit`. If an `await` occurs inside a `lock` block, the continuation after the `await` may execute on a different thread. When that new thread attempts to exit the monitor (via the `finally` block), `Monitor.Exit` throws a `SynchronizationLockException` because the calling thread does not own the lock. The compiler prevents this situation for the simple `lock` keyword — it produces error CS1996 ("Cannot await in the body of a lock statement") — but code using `Monitor.Enter` / `Monitor.Exit` directly can fall into this trap at runtime.
+
+This thread-affinity constraint is the reason `SemaphoreSlim` (which is not thread-affine) replaces `lock` in asynchronous code paths.
+
+Two guidelines protect lock safety:
 
 - keep lock duration short;
 - avoid slow or external work inside the lock.
@@ -189,6 +255,44 @@ public async Task SyncCustomerAsync(Customer customer, CancellationToken ct)
 
 The point here is not speed. It is load shaping. A semaphore can protect the application and the downstream system from excessive parallelism even when each individual operation is correct in isolation.
 
+A more realistic outbound-integration example looks like this:
+
+```csharp
+public sealed class CustomerSyncService
+{
+    private readonly SemaphoreSlim _apiLimit = new(5);
+    private readonly ICustomerApi _customerApi;
+
+    public CustomerSyncService(ICustomerApi customerApi)
+    {
+        _customerApi = customerApi;
+    }
+
+    public async Task SyncManyAsync(
+        IEnumerable<Customer> customers,
+        CancellationToken ct)
+    {
+        var tasks = customers.Select(customer => SyncOneAsync(customer, ct));
+        await Task.WhenAll(tasks);
+    }
+
+    private async Task SyncOneAsync(Customer customer, CancellationToken ct)
+    {
+        await _apiLimit.WaitAsync(ct);
+        try
+        {
+            await _customerApi.UpsertAsync(customer, ct);
+        }
+        finally
+        {
+            _apiLimit.Release();
+        }
+    }
+}
+```
+
+This example makes the trade-off more concrete. The application still processes many customers concurrently, but it does not let outbound API pressure grow without bound. That is exactly the kind of coordination problem `SemaphoreSlim` solves well.
+
 ## Deadlocks And Ordering Problems
 
 Deadlock occurs when operations wait on one another in a cycle that never resolves.
@@ -222,7 +326,60 @@ public void Method2()
 
 If one thread acquires `_a` and another acquires `_b`, both can wait forever.
 
-The broader lesson is that concurrency bugs often arise from ordering assumptions that remain invisible until load or timing changes. Consistent lock ordering, short critical sections, and avoiding lock-plus-I/O combinations reduce the risk substantially.
+Concurrency bugs often arise from ordering assumptions that remain invisible until load or timing changes. Consistent lock ordering, short critical sections, and avoiding lock-plus-I/O combinations reduce the risk substantially.
+
+## Livelock — Progress Without Forward Motion
+
+Livelock occurs when threads are actively executing but none makes forward progress because each reacts to the others' activity by yielding or retrying. Unlike deadlock, where threads are blocked waiting, livelocked threads are busy — but busy doing nothing useful.
+
+A common livelock pattern arises from spin-based retry loops with conflicting backoff:
+
+```csharp
+private int _attempts;
+
+public void DoWork()
+{
+    while (true)
+    {
+        if (Interlocked.CompareExchange(ref _attempts, 1, 0) == 0)
+        {
+            try
+            {
+                // Critical work
+                return;
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _attempts, 0);
+            }
+        }
+
+        // Both threads see contention, both yield, both retry, repeat
+        Thread.Yield();
+    }
+}
+```
+
+If two threads enter this method simultaneously, both see `_attempts` is 0, both attempt `CompareExchange`, one succeeds and one fails. The failing thread calls `Thread.Yield()` and retries. But if the successful thread completes quickly and releases the lock before the failing thread resumes, the next attempt may succeed. The livelock risk emerges when timing aligns such that threads repeatedly collide, yield, and collide again — each deferring to the other, neither holding the resource long enough to make meaningful progress, but none blocked.
+
+`SpinWait` offers a more controlled spin than `Thread.Yield`:
+
+```csharp
+var spinWait = new SpinWait();
+
+while (true)
+{
+    if (Interlocked.CompareExchange(ref _attempts, 1, 0) == 0)
+    {
+        try { return; }
+        finally { Interlocked.Exchange(ref _attempts, 0); }
+    }
+
+    spinWait.SpinOnce();
+}
+```
+
+`SpinWait.SpinOnce()` begins with short spins (a few CPU cycles) and progressively yields the thread or sleeps after enough iterations. This reduces the collision probability compared to a naked `Thread.Yield()` loop, but the fundamental vulnerability remains: spin-based coordination does not guarantee progress. When correctness requires guaranteed forward progress, use `lock`, `SemaphoreSlim`, or `Channel<T>` rather than spin loops.
 
 ## Concurrent Collections
 
@@ -290,7 +447,77 @@ await foreach (var job in channel.Reader.ReadAllAsync(ct))
 }
 ```
 
+The capacity value is not incidental. It is the activation point for backpressure in this design. Once the channel is bounded, writers eventually have to slow down or wait. Without that bound, the application has a queue but not a meaningful overload-control strategy.
+
 This pattern is often safer than unbounded fire-and-forget task creation because it makes overload visible and manageable rather than silently converting it into memory growth and thread contention.
+
+A fuller pipeline example makes that clearer:
+
+```csharp
+public sealed record OrderJob(int OrderId);
+
+var channel = Channel.CreateBounded<OrderJob>(new BoundedChannelOptions(100)
+{
+    FullMode = BoundedChannelFullMode.Wait
+});
+
+var producer = Task.Run(async () =>
+{
+    foreach (var orderId in orderIds)
+    {
+        await channel.Writer.WriteAsync(new OrderJob(orderId), ct);
+    }
+
+    channel.Writer.Complete();
+}, ct);
+
+var consumers = Enumerable.Range(0, 4)
+    .Select(_ => Task.Run(async () =>
+    {
+        await foreach (var job in channel.Reader.ReadAllAsync(ct))
+        {
+            await ProcessJobAsync(job, ct);
+        }
+    }, ct))
+    .ToArray();
+
+await Task.WhenAll(consumers.Prepend(producer));
+```
+
+Now the backpressure story is visible in code. Producers and consumers are both explicit, capacity is explicit, and overload control is part of the design rather than an accidental side effect.
+
+## Unbounded Channels And Overload Shedding
+
+`Channel.CreateUnbounded<T>()` creates a channel with no capacity limit. Writes never wait — `WriteAsync` always completes synchronously. This eliminates backpressure entirely, which sounds convenient but is precisely the danger: producers can outpace consumers indefinitely, and memory grows without bound.
+
+```csharp
+var unbounded = Channel.CreateUnbounded<OrderJob>();
+
+// This never waits — memory risk if consumers are slower than producers
+await unbounded.Writer.WriteAsync(new OrderJob(orderId), ct);
+```
+
+Unbounded channels are appropriate only when the producer rate is guaranteed not to exceed the consumer rate, or when memory pressure is acceptable and the application would rather drop nothing. In most production systems, bounding the channel is the safer default.
+
+`BoundedChannelFullMode` provides overload-shedding strategies beyond simple waiting:
+
+```csharp
+// DropWrite: newest item is discarded when channel is full
+var dropNewest = Channel.CreateBounded<OrderJob>(new BoundedChannelOptions(100)
+{
+    FullMode = BoundedChannelFullMode.DropWrite
+});
+
+// DropOldest: oldest item is removed to make room for the newest
+var dropOldest = Channel.CreateBounded<OrderJob>(new BoundedChannelOptions(100)
+{
+    FullMode = BoundedChannelFullMode.DropOldest
+});
+```
+
+`DropWrite` discards the incoming item when the channel is full — appropriate for fire-and-forget telemetry where newer data is not more important than already-queued data. `DropOldest` evicts the oldest item to make room — appropriate when fresher data is more valuable than stale data, such as real-time price updates or sensor readings where an old value is useless by the time a consumer processes it.
+
+Both modes sacrifice completeness for predictable memory and latency. The trade-off should be explicit: the system chooses which data to lose under overload rather than letting unbounded growth crash the process.
 
 ## CPU-Bound Work In Request-Driven Systems
 
@@ -314,6 +541,38 @@ Possible responses include:
 - scaling compute separately from the request tier.
 
 The common anti-pattern is using `Task.Run` as though it were an architecture. It can move CPU work to a worker thread, but it does not make the work cheaper and often does not solve the system-level contention problem.
+
+## Throttled Concurrent Async With `Parallel.ForEachAsync`
+
+When a workload requires executing many asynchronous operations with a controlled degree of concurrency, `Parallel.ForEachAsync` (.NET 6+) combines parallelism with async awareness:
+
+```csharp
+public async Task<List<CustomerResult>> SyncAllCustomersAsync(
+    IEnumerable<Customer> customers,
+    CancellationToken ct)
+{
+    var results = new ConcurrentBag<CustomerResult>();
+
+    await Parallel.ForEachAsync(
+        customers,
+        new ParallelOptions
+        {
+            MaxDegreeOfParallelism = 8,
+            CancellationToken = ct
+        },
+        async (customer, token) =>
+        {
+            var result = await _customerApi.UpsertAsync(customer, token);
+            results.Add(new CustomerResult(customer.Id, result.Status));
+        });
+
+    return results.ToList();
+}
+```
+
+`MaxDegreeOfParallelism` is the critical parameter. It caps the number of concurrently executing iterations, which bounds both local thread usage and downstream pressure. This is the async equivalent of a bounded semaphore over a collection but integrated directly into the parallel infrastructure.
+
+`Parallel.ForEachAsync` is not a substitute for `Task.WhenAll` and is not universally faster. It adds scheduling overhead from partitioning and work-stealing. Its value is in scenarios where the number of items is large, each item involves I/O, and unbounded concurrent I/O would overwhelm local or remote resources. When the item count is small and the operations are already well-behaved, `Task.WhenAll` is simpler and sufficient.
 
 ## Periodic And Background Coordination
 
@@ -342,3 +601,42 @@ public sealed class CleanupWorker : BackgroundService
 ```
 
 The operational details matter here too. Repeated work should usually observe shutdown tokens, decide how failures affect later iterations, and avoid accidental overlap unless overlap is explicitly acceptable.
+
+## ThreadPool Registration Patterns
+
+Two additional ThreadPool patterns are useful in specific low-level scenarios.
+
+**`ThreadPool.RegisterWaitForSingleObject`** bridges OS wait handles to the ThreadPool. It registers a `WaitHandle` and a callback; when the handle is signaled or a timeout elapses, the callback executes on a ThreadPool thread:
+
+```csharp
+var waitHandle = new EventWaitHandle(false, EventResetMode.AutoReset);
+
+ThreadPool.RegisterWaitForSingleObject(
+    waitHandle,
+    (state, timedOut) =>
+    {
+        if (timedOut)
+        {
+            _logger.LogWarning("Wait timed out");
+            return;
+        }
+        // Handle signal
+    },
+    state: null,
+    timeout: TimeSpan.FromSeconds(30),
+    executeOnlyOnce: true);
+```
+
+This pattern predates `async`/`await` and is less common in modern code, but it remains useful for integrating with legacy synchronization primitives, named pipes, and OS-level events. The `executeOnlyOnce` parameter controls whether the registration persists for repeated signals or fires once. When set to `false`, the callback re-registers automatically after each signal, which can create overlapping executions if signals arrive faster than the callback completes.
+
+**`ThreadPool.UnsafeQueueUserWorkItem`** bypasses the `ExecutionContext` capture that `QueueUserWorkItem` performs. Capturing `ExecutionContext` propagates ambient state — `AsyncLocal<T>` values, security context, culture — to the worker thread. This capture is correct by default but allocates. `UnsafeQueueUserWorkItem` skips the capture, trading safety for performance:
+
+```csharp
+ThreadPool.UnsafeQueueUserWorkItem(state =>
+{
+    // ExecutionContext is NOT captured — AsyncLocal values may be lost
+    ProcessItem((WorkItem)state!);
+}, item);
+```
+
+This is appropriate only when the callback has no dependency on ambient context and the performance difference has been measured. Incorrect use can cause security context leaks (where work runs with unintended identity) or `AsyncLocal<T>` corruption. Most application code should use `Task.Run` or `QueueUserWorkItem` and let the runtime manage context capture correctly. `UnsafeQueueUserWorkItem` is a library-author optimization, not a general-purpose tool.

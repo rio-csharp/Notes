@@ -20,7 +20,7 @@ HTTP request/response
 
 TCP is a byte stream, not a message protocol.
 
-This means TCP does not preserve your application-level "message boundaries".
+This means TCP does not preserve application-level message boundaries.
 
 If the application sends:
 
@@ -81,9 +81,7 @@ Benefits:
 - improved multiplexing behavior compared with HTTP/2 over TCP;
 - built-in TLS 1.3 style security.
 
-Practical answer:
-
-> HTTP/1.1 is request/response over TCP with keep-alive. HTTP/2 adds binary framing and multiplexing over one TCP connection. HTTP/3 uses QUIC over UDP to reduce some TCP-level head-of-line blocking issues.
+HTTP/1.1 is request/response over TCP with keep-alive. HTTP/2 adds binary framing and multiplexing over one TCP connection. HTTP/3 uses QUIC over UDP to reduce some TCP-level head-of-line blocking issues.
 
 ### HTTPS / TLS
 
@@ -113,17 +111,15 @@ Production notes:
 - termination may happen at load balancer, reverse proxy, or application server;
 - use HSTS for browser-facing HTTPS sites where appropriate.
 
-## TCP Sticky Packet And Half Packet
+## TCP Message Framing
 
-These names are common in Chinese engineering practice:
+The underlying problems are:
 
-More precise English wording:
+- TCP stream coalescing (multiple sends read as one);
+- TCP fragmentation at application read boundary (one send split across reads);
+- the general message framing problem.
 
-- TCP stream coalescing;
-- TCP fragmentation at application read boundary;
-- message framing problem.
-
-### Sticky Packet Example
+### Stream Coalescing Example
 
 Sender writes:
 
@@ -140,7 +136,7 @@ Receiver might read:
 
 If the receiver assumes one read equals one message, it breaks.
 
-### Half Packet Example
+### Fragmentation Example
 
 Sender writes:
 
@@ -157,7 +153,7 @@ Read 2: "ge json}\n"
 
 If the receiver tries to parse after Read 1, it fails because the message is incomplete.
 
-## Why Sticky/Half Packets Happen
+## Conditions That Cause Stream Coalescing And Fragmentation
 
 Reasons include:
 
@@ -171,13 +167,11 @@ Reasons include:
 - TLS framing;
 - proxies or gateways.
 
-Key idea:
+The network is allowed to split or combine bytes. The application protocol must define how to find complete messages.
 
-> The network is allowed to split or combine bytes. Your application protocol must define how to find complete messages.
+## Solving The Message Framing Problem
 
-## How To Solve Sticky/Half Packet Problems
-
-Common framing strategies:
+Framing strategies:
 
 ### 1. Delimiter-Based Protocol
 
@@ -243,7 +237,7 @@ Prefer existing protocols when possible:
 - gRPC uses HTTP/2 framing;
 - Kafka has its own binary protocol framing.
 
-TCP sticky and half-packet problems are not bugs in TCP. They happen because TCP is a byte stream. The solution is to design proper message framing, such as delimiter-based framing, length-prefix framing, fixed-length messages, or using an existing framed protocol such as HTTP, WebSocket, or gRPC.
+TCP stream coalescing and fragmentation are not bugs in TCP. They happen because TCP is a byte stream. The solution is to design proper message framing, such as delimiter-based framing, length-prefix framing, fixed-length messages, or using an existing framed protocol such as HTTP, WebSocket, or gRPC.
 
 ## Simple Length-Prefix Parser Mental Model
 
@@ -263,7 +257,7 @@ while (true)
 
         if (buffer.Count < 4 + length)
         {
-            break; // half packet: wait for more bytes
+            break; // incomplete message: wait for more bytes
         }
 
         var payload = buffer.Skip(4).Take(length).ToArray();
@@ -280,25 +274,17 @@ while (true)
 - protect against huge declared lengths;
 - handle disconnects and timeouts.
 
-## Why HTTP Usually Hides This From You
+## HTTP Abstraction Of Message Framing
 
-In ASP.NET Core, you usually do not manually solve sticky packet problems for normal HTTP APIs.
+In ASP.NET Core, TCP message-framing problems are rarely encountered for normal HTTP APIs because Kestrel parses HTTP, HTTP defines message boundaries, request headers and body length/chunking are handled by the server, and controllers receive already-parsed requests.
 
-Why:
-
-- Kestrel parses HTTP;
-- HTTP defines message boundaries;
-- request headers and body length/chunking are handled by the server;
-- controllers receive already-parsed requests.
-
-But you should understand the concept for:
+Understanding the underlying concept remains important for:
 
 - custom TCP protocols;
 - socket programming;
 - WebSocket message handling;
 - high-performance networking;
-- debugging strange network behavior;
-- learning checks that test fundamentals.
+- debugging strange network behavior.
 
 ## HTTP Request
 
@@ -416,6 +402,8 @@ Safe:
 - should not change server state.
 - `GET` should be safe.
 
+Idempotent:
+
 - repeated requests have same effect.
 - `GET`, `PUT`, and `DELETE` are generally idempotent by design.
 
@@ -505,9 +493,7 @@ Binary download example:
 return File(bytes, "application/pdf", "report.pdf");
 ```
 
-Common mistake:
-
-> Sending JSON without `Content-Type: application/json` can prevent correct model binding.
+Sending JSON without `Content-Type: application/json` can prevent correct model binding.
 
 ## Cookies And Headers
 
@@ -575,12 +561,12 @@ CORS protects browsers. It is not a replacement for authentication or authorizat
 
 ## HTTP Design Notes
 
-HTTP status codes should communicate server intent precisely. `401 Unauthorized` means the request is not authenticated or presents invalid credentials. `403 Forbidden` means the user is authenticated but still not permitted to perform the requested action.
+Several HTTP design principles recur throughout API development and deserve emphasis.
 
-`POST` is typically used to create resources or trigger non-idempotent actions. `PUT` usually replaces a resource representation and should be idempotent. That distinction matters when clients retry requests and when APIs communicate resource semantics clearly.
+Status codes communicate server intent precisely. `400 Bad Request` or `422 Unprocessable Entity` indicates invalid client input. `401 Unauthorized` means the request lacks valid credentials. `403 Forbidden` means authentication succeeded but access is denied. These distinctions matter because clients and intermediaries rely on them for retry, caching, and error-handling behavior.
 
-CORS preflight is the browser's `OPTIONS` probe that checks whether a cross-origin request is allowed before the real request is sent. Because CORS is enforced by browsers rather than by the API protocol itself, it should never be treated as the application's true security boundary. APIs still need authentication, authorization, rate limiting, and input validation.
+HTTP method semantics are not stylistic conventions. `GET` should be safe and idempotent. `PUT` replaces a resource and should be idempotent. `POST` creates resources or triggers non-idempotent actions. These semantics affect retries, caching, browser behavior, proxies, and client expectations. When a `POST` operation carries financial or other side-effect risk, an idempotency key header provides an additional safety mechanism.
 
-Validation failures commonly return `400 Bad Request` or, in some API styles, `422 Unprocessable Entity`. In ASP.NET Core APIs using `[ApiController]`, invalid model state usually maps to `400`, which makes that status code the most common default.
+CORS is enforced by browsers rather than by the API protocol. A preflight `OPTIONS` request checks whether a cross-origin request is allowed before the real request is sent. Because CORS is browser-enforced, it should never be treated as the application's true security boundary. APIs still need authentication, authorization, rate limiting, and input validation regardless of CORS configuration.
 
-TCP sticky-packet and half-packet problems exist because TCP is a byte stream rather than a message protocol. One logical message may span several reads, and several logical messages may arrive in one read. ASP.NET Core applications usually do not face this directly because Kestrel handles HTTP framing, including content length, chunking, and header parsing. Those lower-level concerns matter more when implementing custom socket protocols or transport layers directly.
+TCP stream coalescing and fragmentation are inherent to TCP as a byte-stream protocol. ASP.NET Core applications rarely encounter these concerns directly because Kestrel handles HTTP framing, including content length, chunking, and header parsing. These lower-level concerns matter most when implementing custom socket protocols or transport layers directly.

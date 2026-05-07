@@ -182,7 +182,7 @@ jobs:
         run: npm run build
 ```
 
-## Why Use `npm ci` Instead Of `npm install` In CI?
+## npm ci vs npm install in CI
 
 `npm ci` installs exactly from `package-lock.json`.
 
@@ -269,6 +269,95 @@ Artifacts make deployment auditable:
 
 - who approved the promotion.
 
+## Build Caching Strategies
+
+Build caching reduces pipeline time by avoiding redundant work. Two common patterns apply to .NET and React projects.
+
+### .NET Package Cache
+
+Restoring NuGet packages on every CI run is wasteful when the dependency set has not changed. GitHub Actions supports caching the NuGet packages directory:
+
+```yaml
+- name: Cache NuGet packages
+  uses: actions/cache@v4
+  with:
+    path: ~/.nuget/packages
+    key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/*.fsproj') }}
+    restore-keys: |
+      nuget-${{ runner.os }}-
+```
+
+The cache key includes a hash of all project files. When project files change, the cache is invalidated and a new one is created. The `restore-keys` fallback finds the most recent cache for the same OS if no exact match exists.
+
+### npm Cache
+
+For frontend dependencies:
+
+```yaml
+- name: Cache npm
+  uses: actions/cache@v4
+  with:
+    path: ~/.npm
+    key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+    restore-keys: |
+      npm-${{ runner.os }}-
+```
+
+When combined with `npm ci`, this ensures deterministic, cached dependency resolution. The lock file is the authoritative source; the cache merely avoids re-downloading.
+
+### Docker Layer Caching
+
+For Docker image builds, layer caching can be configured using GitHub Actions cache:
+
+```yaml
+- name: Build and push
+  uses: docker/build-push-action@v6
+  with:
+    cache-from: type=gha
+    cache-to: type=gha,mode=max
+```
+
+This stores build cache in the GitHub Actions cache service, making subsequent builds faster even across different workflow runs.
+
+## Pipeline Security
+
+CI/CD pipelines have broad access to source code, secrets, and deployment targets. Protecting the pipeline is critical.
+
+### Supply Chain Security
+
+- Pin action versions by commit SHA rather than tag to prevent tag hijacking
+- Use `npm audit` or `dotnet list package --vulnerable` to detect known-vulnerable dependencies
+- Consider dependency review tools that flag new vulnerabilities in pull requests
+- Sign container images and verify signatures during deployment
+
+### Secret Hygiene
+
+Secrets should be stored in the CI platform secret store or cloud secret manager.
+
+Rules:
+
+- never print secrets;
+- do not pass secrets as command-line arguments when logs may capture them;
+- scope secrets by environment;
+- prefer short-lived tokens and OpenID Connect federation;
+- rotate leaked credentials immediately;
+- avoid giving pull requests from forks access to production secrets.
+
+### Protected Environments
+
+GitHub Actions can require approval before deploying to production:
+
+```yaml
+jobs:
+  deploy-production:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Deploying after environment approval"
+```
+
+Approved environments also support deployment branch policies and secret scoping, ensuring only authorized branches can deploy to production.
+
 ## Environment Configuration
 
 Application configuration should be injected by environment.
@@ -304,9 +393,7 @@ VITE_API_BASE_URL=https://api.example.com
 VITE_AUTHORITY=https://login.example.com
 ```
 
-Important:
-
-> Frontend environment variables are usually embedded into static JavaScript during build. They are not secrets.
+Frontend environment variables are usually embedded into static JavaScript during build. They are not secrets.
 
 ## Database Migrations
 
@@ -364,8 +451,6 @@ Release 2:
 Release 3:
   - Remove FullName after all old app versions are gone.
 ```
-
-Chinese note:
 
 ## Deployment Strategies
 
@@ -486,30 +571,6 @@ Were messages/events changed?
 Were client-side assets cached by browsers/CDNs?
 ```
 
-## Secrets In CI/CD
-
-Secrets should be stored in the CI platform secret store or cloud secret manager.
-
-Rules:
-
-- never print secrets;
-- do not pass secrets as command-line arguments when logs may capture them;
-- scope secrets by environment;
-- prefer short-lived tokens and OpenID Connect federation;
-- rotate leaked credentials immediately;
-- avoid giving pull requests from forks access to production secrets.
-
-GitHub Actions can use environment approvals:
-
-```yaml
-jobs:
-  deploy-production:
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - run: echo "Deploying after environment approval"
-```
-
 ## OpenID Connect For Cloud Deployment
 
 Instead of storing long-lived cloud credentials in GitHub secrets, a workflow can request a short-lived identity token.
@@ -524,8 +585,6 @@ GitHub Actions job
   -> deployment uses temporary token
 ```
 
-Chinese note:
-
 This reduces the risk of leaked permanent credentials.
 
 ## Common Pipeline Failures
@@ -539,27 +598,4 @@ This reduces the risk of leaked permanent credentials.
 | Production uses untested code | Rebuilt during deploy | Build once, promote artifact |
 | Secrets appear in logs | Echoing env vars or verbose tools | Mask secrets and reduce logging |
 
-## Practice Task
 
-Design a pipeline for:
-
-1. .NET API build and tests.
-2. React type check, lint, tests, and build.
-3. Integration tests with SQL Server.
-4. Docker image build and push.
-5. EF Core migration script generation.
-6. Staging deployment.
-7. Smoke tests.
-8. Production promotion.
-9. Rollback or roll-forward plan.
-
-Write down:
-
-```text
-What triggers the pipeline?
-What artifacts are produced?
-Which secrets are needed?
-Which steps block deployment?
-How is the deployed version verified?
-What happens if deployment fails?
-```

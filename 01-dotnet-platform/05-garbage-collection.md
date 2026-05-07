@@ -1,86 +1,38 @@
 # .NET Garbage Collection
 
-## Core Idea
+Garbage collection (GC) automatically manages memory for managed objects in .NET. The GC determines which objects are still reachable from GC roots and which can be reclaimed.
 
-Garbage Collection (GC) automatically manages memory for managed objects in .NET.
+This chapter establishes the runtime model that performance and troubleshooting chapters build on. The emphasis is on the mechanism — reachability, generations, heap regions, and the operational consequences of allocation patterns.
 
-GC answers one main question:
+## Managed Heap And Reachability
 
-> Which objects are still reachable, and which objects can be reclaimed?
-
-For this chapter, the important goal is not to turn the reader into a memory diagnostics specialist immediately. The goal is to establish the runtime model that later performance and troubleshooting chapters can build on.
-
-## Managed Heap
-
-When you create an object:
+When an object is created with `new`, it lives on the managed heap. The variable holds a reference; the GC tracks object reachability from a set of roots: local variables on active stacks, static fields, CPU registers, GC handles, and the finalization queue.
 
 ```csharp
 var user = new User { Name = "Alice" };
 ```
 
-the object usually lives on the managed heap. The variable `user` holds a reference.
-
-GC tracks object reachability from roots such as:
-
-- local variables on active stacks;
-- static fields;
-- CPU registers;
-- GC handles;
-- finalization queue.
-
-If an object cannot be reached from any root, it is eligible for collection.
-
-Reachability diagram:
+If an object cannot be reached from any root, it is eligible for collection — not immediately collected, but reclaimable during a future collection cycle.
 
 ```text
+GC roots → local variable user → User object → Address object
+Result: User and Address are reachable, GC preserves them.
+
 GC roots
-  -> local variable user
-      -> User object
-          -> Address object
-
-Result:
-  User and Address are reachable, so GC keeps them.
+User object → Address object   (no root reaches User)
+Result: User and Address are eligible for collection.
 ```
-
-Unreachable diagram:
-
-```text
-GC roots
-
-User object
-  -> Address object
-
-Result:
-  no root can reach User, so User and Address are eligible for collection.
-```
-
-Eligible for collection does not mean immediately collected. It means GC is allowed to reclaim it during a future collection.
 
 ## Generations
 
-.NET GC uses generations:
+The .NET GC is generational because most objects die young. Collecting only young objects is cheaper than scanning the entire heap every time.
 
-- Gen 0: short-lived objects;
-- Gen 1: buffer between short and long-lived;
-- Gen 2: long-lived objects;
-- LOH: Large Object Heap.
+- **Gen 0**: Short-lived objects. Collected most frequently — typically when the allocation budget for Gen 0 is exhausted.
+- **Gen 1**: Buffer between short-lived and long-lived objects. Objects that survive a Gen 0 collection are promoted to Gen 1.
+- **Gen 2**: Long-lived objects. Collected infrequently and at higher cost. A full Gen 2 collection scans the entire managed heap.
+- **LOH** (Large Object Heap): Objects at or above approximately 85,000 bytes. Collected with Gen 2; compaction is optional and expensive. The threshold is not exactly 85 KB in all cases — arrays of doubles (8-byte elements) cross the LOH threshold at around 10,000 elements, and multi-dimensional arrays and strings have their own internal overhead that affects the exact boundary.
 
-Why generations exist:
-
-Most objects die young.
-
-For example:
-
-```csharp
-public string BuildMessage(string name)
-{
-    return $"Hello, {name}";
-}
-```
-
-Temporary strings may become Gen 0 garbage quickly.
-
-Example of short-lived allocations:
+Short-lived allocations dominate typical application code:
 
 ```csharp
 public string BuildCsvLine(Order order)
@@ -89,88 +41,38 @@ public string BuildCsvLine(Order order)
 }
 ```
 
-If this runs for thousands of orders, many temporary strings may be created. Most die quickly, which is why Gen 0 exists.
+Each call creates a temporary string. When this runs for thousands of orders, many strings are allocated and quickly become garbage. Gen 0 absorbs this churn efficiently.
 
-Example of long-lived allocation:
+Long-lived allocations follow a different path. Objects referenced by static collections survive into Gen 2 and remain there until explicitly removed:
 
 ```csharp
 public static readonly List<Order> CachedOrders = new();
 ```
 
-Objects referenced by static collections can survive into Gen 2 and stay there until removed.
+## Mark, Sweep, And Compact
 
-## Under The Hood: Mark, Sweep, Compact
-
-At a high level, garbage collection answers one question:
-
-> Which objects are still reachable from GC roots?
-
-Conceptual phases:
+A garbage collection conceptually proceeds through phases:
 
 ```text
-1. Mark reachable objects from GC roots.
-2. Identify unreachable objects.
-3. Reclaim unreachable memory.
-4. Compact movable heap segments when appropriate.
+1. Mark reachable objects from GC roots
+2. Identify unreachable objects
+3. Reclaim unreachable memory
+4. Compact movable heap segments (when appropriate)
 ```
 
-If an object is reachable from a root, it stays alive.
+Objects reachable from any root stay alive. Objects with no reachable path are reclaimed. A "memory leak" in managed code typically means an object remains reachable even though the application no longer logically needs it. Common retention patterns include static collections without eviction, event handlers never unsubscribed, timers holding references, `AsyncLocal` values retaining data, and logging scopes accumulating state.
 
-If not, it can be collected.
+## SOH, LOH, And POH
 
-This is why "memory leak" in C# usually means:
+The managed heap is divided into regions with different allocation and collection characteristics.
 
-> An object is still reachable even though the application no longer logically needs it.
+The **Small Object Heap** (SOH) houses ordinary small objects across Gen 0, Gen 1, and Gen 2. It is typically compacted during collection, which reduces fragmentation.
 
-Common causes:
+The **Large Object Heap** (LOH) stores objects at or above approximately 85 KB — large arrays, large strings, large byte buffers. LOH is collected with Gen 2, and compaction is more expensive and less frequent. Repeated large allocations create sustained memory pressure.
 
-- static collections;
-- event handlers not unsubscribed;
-- long-lived caches without eviction;
-- timers holding references;
-- `AsyncLocal` or logging scopes retaining data longer than expected.
-
-## SOH, LOH, POH
-
-.NET managed heap has several important areas.
-
-SOH: Small Object Heap.
-
-- normal small objects;
-- Gen 0, Gen 1, Gen 2;
-- usually compacted.
-
-LOH: Large Object Heap.
-
-- large objects, commonly arrays or large strings;
-- collected with Gen 2;
-- compaction behavior is different and can be costly;
-- repeated large allocations create memory pressure.
-
-POH: Pinned Object Heap.
-
-- used for pinned objects;
-- helps reduce fragmentation caused by pinned objects in normal heap areas.
-
-These heap regions matter because not all allocations behave the same way:
-
-- large buffers can go to LOH;
-- pinned objects can prevent compaction around them;
-- repeated allocation of large arrays can cause Gen 2 pressure.
-
-For example, an LOH-sized allocation may look like this:
+The **Pinned Object Heap** (POH) isolates pinned objects, reducing fragmentation they would otherwise cause in normal heap regions. Pinning is most common during interop, when a managed buffer must be passed to native code at a fixed address:
 
 ```csharp
-var buffer = new byte[100_000]; // likely large enough for LOH
-```
-
-If this happens frequently in a request path, it can increase Gen 2 collections and memory fragmentation pressure.
-
-A pinned object example looks like this:
-
-```csharp
-using System.Runtime.InteropServices;
-
 var buffer = new byte[1024];
 var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
 
@@ -184,132 +86,97 @@ finally
 }
 ```
 
-Pinned objects should be used carefully because they restrict the GC's ability to move objects during compaction. At this stage, the important lesson is conceptual: some allocations and interop patterns create disproportionately expensive memory behavior even when the source code looks simple.
+Pinned objects restrict the GC's ability to move objects during compaction. They are necessary for interop but should be freed promptly and minimized in allocation-heavy paths.
 
-## Workstation GC vs Server GC
+## Workstation GC And Server GC
 
-.NET has different GC modes.
+.NET provides two GC modes with different throughput and latency characteristics.
 
-Workstation GC:
+**Workstation GC** is optimized for client applications and lower resource usage. It is the default for desktop and non-server workloads. Workstation GC uses a single heap and collects on the thread that triggered the collection (concurrent with other managed threads for Gen 2 background collections, but Gen 0 and Gen 1 collections are blocking). This mode minimizes memory footprint and thread count at the cost of lower throughput under sustained allocation.
 
-- optimized for client apps and lower resource usage;
-- common for desktop-like workloads.
+**Server GC** is optimized for throughput on multi-core machines. It creates a separate heap and a dedicated GC thread per logical processor, enabling parallel collection across all heaps simultaneously. Server GC is the default for ASP.NET Core applications. Server GC threads run at `THREAD_PRIORITY_HIGHEST`, and collections happen in parallel across all heaps, reducing pause time for a given allocation rate compared to workstation mode.
 
-Server GC:
+Configuration typically lives in the project file:
 
-- optimized for throughput on multi-core servers;
-- uses multiple heaps;
-- common for ASP.NET Core server applications.
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+</Project>
+```
 
-Server GC is usually preferred for high-throughput server apps, while workstation GC is lighter. The best choice depends on workload, latency requirements, CPU cores, and memory behavior.
+Or in `runtimeconfig.json`:
 
-## Background GC And Pauses
-
-GC can pause managed threads at certain points. This is often called stop-the-world pause.
-
-Modern .NET has background GC to reduce pause impact, especially for Gen 2 collections, but GC pauses can still matter.
-
-Pause impact depends on:
-
-- allocation rate;
-- live object graph size;
-- Gen 2 frequency;
-- LOH pressure;
-- pinned objects;
-- finalizers;
-- memory limits in containers.
-
-Common ways to reduce GC pressure include:
-
-- avoid unnecessary allocations in hot paths;
-- reuse buffers with pooling;
-- avoid boxing in hot loops;
-- avoid huge temporary strings;
-- use streaming instead of loading entire files;
-- keep caches bounded;
-- measure before optimizing.
-
-During some GC phases, managed threads are paused so the GC can safely inspect and update object references. Modern .NET works hard to reduce pause time, but high allocation rate and large live object graphs can still hurt tail latency.
-
-## Large Object Heap
-
-Objects around 85 KB or larger go to the Large Object Heap.
-
-Examples:
-
-- large arrays;
-- large strings;
-- large byte buffers.
-
-LOH is collected with Gen 2 and can contribute to memory pressure.
-
-For repeated large buffers, consider:
-
-```csharp
-var buffer = ArrayPool<byte>.Shared.Rent(1024 * 1024);
-
-try
+```json
 {
-    // use buffer
-}
-finally
-{
-    ArrayPool<byte>.Shared.Return(buffer);
+  "runtimeOptions": {
+    "configProperties": {
+      "System.GC.Server": true
+    }
+  }
 }
 ```
 
-This pattern appears in ordinary web work more often than it first seems. File upload handlers, compression paths, JSON processing, image transformation, and outbound HTTP integration can all allocate large temporary buffers if written carelessly. Pooling is not required everywhere, but knowing where large-array churn comes from is part of professional runtime awareness.
+A runtime check confirms what the process is using:
+
+```csharp
+Console.WriteLine($"Server GC: {System.Runtime.GCSettings.IsServerGC}");
+```
+
+### Container Memory Limits And GC
+
+In containerized environments, .NET reads cgroup memory limits to determine GC heap sizing. When a container has a 512 MB memory limit, the GC sizes its heaps accordingly — not as if it had the full machine memory. This has several consequences:
+
+- **GC heap count in Server GC** depends on the CPU count visible to the container. A container limited to 1 CPU gets one GC heap even with Server GC enabled, reducing parallelism benefits.
+- **GC triggering thresholds** are calculated as a fraction of the container memory limit, not the host's physical memory. A 512 MB container triggers Gen 2 collections earlier than the same application on a 16 GB VM.
+- **Memory pressure** is reported through `GC.GetGCMemoryInfo()`, which reflects the container's perspective: `TotalAvailableMemoryBytes` shows what the cgroup allows, not what the host has.
+- **`DOTNET_GCHeapHardLimit`** and `DOTNET_GCHeapHardLimitPercent` provide explicit control over the GC heap's maximum size, overriding cgroup-derived values:
+
+```bash
+# Limit GC heap to 256 MB regardless of container memory
+export DOTNET_GCHeapHardLimit=0x10000000
+# Or as a percentage of container memory
+export DOTNET_GCHeapHardLimitPercent=50
+```
+
+The decision between Workstation and Server GC is workload-dependent. Server GC suits throughput-oriented web services and multi-core server processes. Workstation GC suits lighter client processes and cases where lower resource usage matters more than maximum throughput. In memory-constrained containers, Workstation GC with its single heap and lower overhead can sometimes outperform Server GC — the reduced thread count and simpler collection mechanics can offset the parallelism loss when memory is the bottleneck rather than CPU. Measurements under realistic load and actual container limits are the only reliable guide.
+
+## GC Pauses
+
+The GC pauses managed threads during certain collection phases — often called stop-the-world pauses. Modern .NET uses background GC to reduce pause impact, especially for Gen 2 collections, but pauses can still affect tail latency under load.
+
+Pause impact depends on allocation rate, live object graph size, Gen 2 frequency, LOH pressure, pinned objects, finalizers, and container memory limits. Reducing GC pressure involves deliberate allocation discipline in hot paths:
+
+- Avoid unnecessary allocations in loops and request handlers.
+- Reuse buffers with `ArrayPool<T>`.
+- Avoid boxing in hot loops.
+- Use streaming instead of loading entire files into memory.
+- Bound caches with eviction policies.
+- Measure before optimizing — allocation reduction that complicates code without measurable benefit is rarely worth it.
 
 ## IDisposable Is Not GC
 
-`IDisposable` releases unmanaged or external resources deterministically.
-
-Examples:
-
-- database connections;
-- file handles;
-- streams;
-- sockets;
-- timers.
+`IDisposable` releases unmanaged or external resources deterministically. The GC eventually reclaims managed memory; `Dispose` releases resources immediately.
 
 ```csharp
 using var stream = File.OpenRead("data.txt");
+// stream.Dispose() called at end of scope — file handle released now
 ```
 
-GC eventually reclaims memory. `Dispose` releases resources now.
-
-An async dispose example looks like this:
-
-```csharp
-await using var stream = File.OpenRead("large-file.dat");
-```
-
-In ASP.NET Core, the same principle appears like this:
+In ASP.NET Core, scoped services like `DbContext` are disposed by the DI container at the end of each request:
 
 ```csharp
 builder.Services.AddDbContext<AppDbContext>();
 ```
 
-`DbContext` is usually scoped. The DI container disposes it at the end of the request scope, which returns database-related resources promptly.
+Finalizers provide a safety net for unmanaged resources but are expensive. The GC must promote objects with finalizers by at least one generation and schedule finalizer thread execution. Prefer `SafeHandle` for native handles and `IDisposable` for deterministic cleanup.
 
-## Finalizer
+## Managed Memory Leaks
 
-Finalizers are expensive and should be rare.
+Managed memory leaks occur when objects remain reachable through references the application no longer needs.
 
-```csharp
-~NativeResourceWrapper()
-{
-    ReleaseNativeHandle();
-}
-```
-
-Prefer `SafeHandle` for native handles.
-
-## Common Managed Memory Leak
-
-Managed memory can still leak if references remain.
-
-An event subscription leak looks like this.
+The classic pattern is an event subscription from a short-lived object to a long-lived publisher:
 
 ```csharp
 public sealed class LongLivedPublisher
@@ -321,18 +188,14 @@ public sealed class ShortLivedSubscriber
 {
     public ShortLivedSubscriber(LongLivedPublisher publisher)
     {
-        publisher.Changed += HandleChanged;
+        publisher.Changed += HandleChanged;  // subscriber is now reachable from publisher
     }
 
-    private void HandleChanged(object? sender, EventArgs e)
-    {
-    }
+    private void HandleChanged(object? sender, EventArgs e) { }
 }
 ```
 
-If the subscriber does not unsubscribe, the publisher keeps it alive.
-
-Fix:
+The publisher holds a delegate reference to the subscriber's handler, which keeps the subscriber alive as long as the publisher exists. Implementing `IDisposable` and unsubscribing resolves this:
 
 ```csharp
 public sealed class ShortLivedSubscriber : IDisposable
@@ -350,13 +213,11 @@ public sealed class ShortLivedSubscriber : IDisposable
         _publisher.Changed -= HandleChanged;
     }
 
-    private void HandleChanged(object? sender, EventArgs e)
-    {
-    }
+    private void HandleChanged(object? sender, EventArgs e) { }
 }
 ```
 
-A cache example is equally common:
+Unbounded caches create a similar retention problem:
 
 ```csharp
 public static class ProductCache
@@ -365,21 +226,11 @@ public static class ProductCache
 }
 ```
 
-This is not automatically a leak, but it becomes leak-like behavior if entries are never removed, never expired, and the application keeps accumulating data it no longer truly needs. In managed systems, many "memory leaks" are really retention-policy bugs.
+This is not automatically a leak, but it becomes leak-like behavior when entries are never removed and the cache accumulates data the application no longer needs. Most managed memory leaks are retention-policy bugs, not GC failures.
 
-## Reducing Allocations
+## Allocation Discipline
 
-Common techniques:
-
-- avoid unnecessary string concatenation in loops;
-- use `StringBuilder` for repeated string building;
-- use pooling for large buffers;
-- use `Span<T>` and `Memory<T>` where appropriate;
-- avoid unnecessary LINQ in hot paths;
-- avoid boxing;
-- reuse expensive objects if thread-safe.
-
-For example:
+Reducing allocations in hot paths is a practical skill that builds on the GC model:
 
 ```csharp
 var builder = new StringBuilder();
@@ -392,30 +243,21 @@ foreach (var item in items)
 return builder.ToString();
 ```
 
-.NET GC tracks objects on the managed heap and decides whether they are still reachable from GC roots. Objects that are no longer reachable can be reclaimed. Generational collection exists because most allocations are short-lived, so collecting younger generations is usually cheaper than scanning the entire heap each time.
+`StringBuilder` avoids the intermediate string allocations that concatenation in a loop would create. For large temporary buffers, pooling avoids repeated LOH allocations:
 
-Managed memory leaks are still possible in C#. When objects remain referenced through static collections, event subscriptions, timers, caches without eviction, or long-lived closures, the GC cannot collect them even if the application no longer needs them logically.
+```csharp
+var buffer = ArrayPool<byte>.Shared.Rent(1024 * 1024);
 
-`Dispose` and GC solve different problems. GC reclaims managed memory automatically. `Dispose` releases external resources deterministically, such as file handles, sockets, database connections, and native handles.
+try
+{
+    // use buffer
+}
+finally
+{
+    ArrayPool<byte>.Shared.Return(buffer);
+}
+```
 
-## Practical Reading Of GC Pressure
+Pooling is not required everywhere, but knowing where large-array churn originates — file upload handlers, compression paths, JSON processing, image transformation, HTTP integration — is part of professional runtime awareness.
 
-In production systems, GC often becomes visible indirectly through symptoms such as latency spikes, rising memory usage, or sustained allocation pressure.
-
-At the chapter level, the key point is not to memorize every diagnostic command. The key point is to understand the conceptual questions:
-
-- Is allocation rate unusually high?
-- Is the live object graph larger than expected?
-- Are large buffers or pinned objects increasing pressure?
-- Are objects being retained for logical reasons such as caches, events, timers, or static references?
-
-Detailed operational investigation belongs more naturally to the later performance and troubleshooting chapters. What belongs here is the ability to connect symptoms such as latency spikes, rising memory usage, or large object churn back to the basic GC model of reachability, generations, heap regions, and retention.
-
-A useful first-pass engineering checklist is therefore:
-
-- Are we allocating too much in hot paths?
-- Are large buffers being created repeatedly?
-- Are long-lived references, caches, or event subscriptions retaining objects unexpectedly?
-- Are latency spikes correlated with heavier Gen 2 or LOH pressure?
-
-That level of reasoning is often enough to decide whether the next step should be code review, allocation measurement, or deeper production diagnostics.
+The GC model connects allocation patterns to operational symptoms. High Gen 0 collection frequency indicates heavy short-lived allocation. Elevated Gen 2 collections suggest long-lived object retention or LOH pressure. Latency spikes under load often correlate with GC activity. The conceptual framework — reachability, generations, heap regions, and retention — guides the decision between code review, allocation measurement, and deeper production diagnostics.

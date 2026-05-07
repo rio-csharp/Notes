@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-`DbContext` is the operational center of EF Core. It is the object through which the application queries the database, tracks entity instances, coordinates updates, and commits a unit of work. The change tracker is not a secondary convenience attached to that process. It is one of the main reasons EF Core can translate object-level changes into relational commands.
-
-This chapter begins with `DbContext` because most of the rest of EF Core only makes sense once its execution model is clear. Query behavior, relationship fix-up, update patterns, concurrency handling, and performance trade-offs all depend on how long a context lives, what it tracks, and when that tracked state is converted into SQL.
+`DbContext` is the operational center of EF Core. It is the object through which the application queries the database, tracks entity instances, coordinates updates, and commits a unit of work. The change tracker is not a secondary convenience attached to that process. It is one of the main reasons EF Core can translate object-level changes into relational commands. Query behavior, relationship fix-up, update patterns, concurrency handling, and performance trade-offs all depend on how long a context lives, what it tracks, and when that tracked state is converted into SQL.
 
 ## `DbContext` As A Unit Of Work Boundary
 
@@ -130,9 +128,21 @@ That comparison is part of change detection. Conceptually, EF Core needs to know
 
 In many applications, this happens automatically and invisibly enough that it is easy to forget there is real work involved. That work becomes visible once the tracked graph becomes large or once `SaveChanges` is called too frequently inside loops.
 
-## `DetectChanges` And Its Cost Model
+## `DetectChanges` Mechanism
 
-`DetectChanges` scans tracked entries and compares current state with the snapshot EF Core previously recorded.
+When EF Core begins tracking an entity, the change tracker stores a snapshot of each property value in an internal data structure keyed by the entity's primary key and entry identity. `DetectChanges` iterates over all tracked entries and compares each property's current value against that stored snapshot using `Object.Equals`. If any value differs, the entry's state transitions from `Unchanged` to `Modified` and the affected properties are recorded.
+
+This comparison is not free. For a small number of tracked entities the overhead is negligible, but the cost grows linearly with both the number of tracked entities and the number of properties per entity. Additionally, `DetectChanges` performs relationship fix-up during the same pass: it examines foreign key values to wire navigation properties together.
+
+EF Core calls `DetectChanges` implicitly at several points -- most notably before `SaveChanges` and when using methods such as `Find`, `Local`, or `Entry`. Applications can suppress this automatic behavior through:
+
+```csharp
+context.ChangeTracker.AutoDetectChangesEnabled = false;
+```
+
+Disabling it is appropriate only when the application controls change detection explicitly and understands which operations depend on it. In most ordinary request-scoped work, the default automatic behavior is correct and the cost is unimportant.
+
+## `DetectChanges` Cost Model
 
 For small units of work, that cost is often negligible. For large graphs or repeated save calls, it becomes material. A pattern such as:
 
@@ -157,6 +167,24 @@ await _dbContext.SaveChangesAsync(ct);
 ```
 
 For large batch-style operations, EF Core may still not be the best mechanism. Set-based updates, raw SQL, or provider-specific bulk tooling may be more appropriate because the change tracker is optimized for ordinary application units of work, not for arbitrarily large data movement jobs.
+
+## The `Local` View Of Tracked Entities
+
+Each `DbSet<T>` exposes a `Local` property that returns an `ObservableCollection<T>` representing all entities currently tracked in the `Unchanged`, `Modified`, or `Added` state for that entity type. This collection stays synchronized with the change tracker: adding an item to `Local` calls `Add` on the underlying set, and entities that become `Detached` or `Deleted` are removed.
+
+`Local` is valuable when an application needs to work with a cached, in-memory view of tracked data for a given unit of work:
+
+```csharp
+var existingCustomers = _dbContext.Customers.Local;
+
+if (!existingCustomers.Any(c => c.Email == request.Email))
+{
+    var customer = new Customer { Email = request.Email, Name = request.Name };
+    _dbContext.Customers.Add(customer);
+}
+```
+
+`Local` does not trigger a database query. It reflects only the entities the context is already tracking. If the needed entities are not yet loaded, the application must first issue a query or use `Find`, which checks the identity map before hitting the database.
 
 ## Tracking Queries And No-Tracking Queries
 
@@ -191,7 +219,19 @@ No-tracking queries reduce:
 - relationship fix-up overhead;
 - accidental coupling between read models and later updates in the same scope.
 
-This distinction is foundational for the rest of the chapter. EF Core is often most effective when write-oriented flows and read-oriented flows are treated differently instead of using full tracking everywhere by habit.
+This distinction is foundational. EF Core is often most effective when write-oriented flows and read-oriented flows are treated differently instead of using full tracking everywhere by habit. For contexts that serve predominantly read-heavy workloads, the default tracking behavior can be changed at the context level:
+
+```csharp
+public sealed class AppDbContext : DbContext
+{
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+    }
+}
+```
+
+This eliminates the need to append `AsNoTracking()` to every query. Individual queries that require tracking can opt in with `AsTracking()`.
 
 ## Identity Resolution Without Full Tracking
 
@@ -287,7 +327,7 @@ SaveChanges
   -> update tracked state
 ```
 
-This pipeline explains why EF Core can insert a parent row, obtain the generated key, and then insert related children within one save operation:
+Command ordering is one of the most important internal steps. EF Core builds a dependency graph from the entity metadata: parent rows must be inserted before children that reference them, and children must be deleted before their parents. The ordering logic inspects foreign key relationships, principal-dependent direction, and key generation strategy to determine the correct sequence. Without this step, a single `SaveChanges` call that adds both an `Order` and its `OrderItems` would fail with a foreign key violation because the order row's primary key (needed as the child's foreign key) might not yet exist.
 
 ```csharp
 var order = new Order(customerId);
@@ -297,7 +337,9 @@ _dbContext.Orders.Add(order);
 await _dbContext.SaveChangesAsync(ct);
 ```
 
-The context understands enough about the tracked graph to translate that object change into the right relational sequence.
+The context understands enough about the tracked graph to translate that object change into the right relational sequence: it inserts the `Order` row first, retrieves the generated key from the database, applies that key to the child's foreign key property, and then inserts the `OrderItem` row -- all within one transaction.
+
+For providers that support it, EF Core may also batch multiple commands into a single round trip rather than issuing them individually, reducing network latency for operations that affect many rows.
 
 ## Context Pooling
 
@@ -316,8 +358,6 @@ This is one reason a `DbContext` should primarily represent persistence infrastr
 
 ## Design Consequences
 
-Three practical design rules follow from this chapter.
+Keep `DbContext` short-lived and aligned with a real unit of work. Treat tracking as an intentional cost paid for update-oriented behavior rather than as the default shape of every query. Preserve explicit update boundaries instead of trying to force EF Core into bulk-processing or graph-replacement patterns it was not primarily designed to optimize.
 
-First, keep `DbContext` short-lived and aligned with a real unit of work. Second, treat tracking as an intentional cost paid for update-oriented behavior rather than as the default shape of every query. Third, preserve explicit update boundaries instead of trying to force EF Core into bulk-processing or graph-replacement patterns it was not primarily designed to optimize.
-
-Those rules are simple, but they explain a large share of both EF Core's strengths and its failure modes.
+These principles explain a large share of both EF Core's strengths and its failure modes.

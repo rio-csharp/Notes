@@ -8,7 +8,7 @@ The three standard lifetimes are singleton, scoped, and transient. On paper they
 
 ## Lifetime As Reuse And Ownership
 
-The easiest way to understand lifetimes is to think in terms of caching and scope ownership.
+Lifetimes can be understood in terms of caching and scope ownership.
 
 ```text
 Application root provider
@@ -142,7 +142,7 @@ It is tempting to think of transient as the "safe default," but that is only par
 
 ## Lifetime Direction And Dependency Flow
 
-One of the most important conceptual rules is that longer-lived services should not depend directly on shorter-lived ones in a way that captures them for too long.
+A central principle of lifetime design is that longer-lived services should not depend directly on shorter-lived ones in a way that captures them for too long.
 
 The dangerous case is usually:
 
@@ -205,7 +205,7 @@ The container disposes services it creates according to the owning scope or prov
 
 - singleton disposables are disposed when the root provider shuts down;
 - scoped disposables are disposed when the scope ends;
-- transient disposables may still be tracked if the container creates them inside a scope.
+- transient disposables are tracked and disposed by the scope that created them — the container always owns disposal for services it creates, regardless of lifetime.
 
 This is one reason lifetime is also about ownership. The container is not simply memoizing objects. It is managing the boundary within which those objects remain valid and the point at which they should be cleaned up.
 

@@ -30,9 +30,7 @@ Sec-WebSocket-Accept: ...
 
 After the upgrade, the connection becomes a persistent bidirectional WebSocket connection.
 
-Practical explanation:
-
-> WebSocket begins with an HTTP upgrade handshake. After the server returns `101 Switching Protocols`, both sides communicate over WebSocket frames on the same connection.
+WebSocket begins with an HTTP upgrade handshake. After the server returns `101 Switching Protocols`, both sides communicate over WebSocket frames on the same connection.
 
 ## WebSocket Frames
 
@@ -94,9 +92,7 @@ Options:
 - Azure SignalR Service;
 - message broker integration.
 
-Engineering perspective:
-
-> Scaling WebSocket/SignalR is not only CPU scaling. You must handle connection affinity, broadcast across instances, reconnects, backpressure, and authentication for long-lived connections.
+Scaling WebSocket/SignalR is not only CPU scaling. Connection affinity, broadcast across instances, reconnects, backpressure, and authentication for long-lived connections must all be addressed.
 
 ## Use Cases
 
@@ -195,7 +191,7 @@ public sealed class NotificationHub : Hub<INotificationClient>
 }
 ```
 
-Important:
+Hub authorization requires:
 
 - authenticate the connection;
 - authorize hub methods;
@@ -331,13 +327,4 @@ Reliable notification pattern:
 
 This combines durable storage with real-time delivery.
 
-## Practice Task
-
-Build:
-
-1. notification hub;
-2. join user group;
-3. send notification from API;
-4. React client connection;
-5. reconnect handling;
-6. authorization check.
+Building a robust real-time notification system requires combining hub authorization, group management, client reconnection handling, and durable storage fallback as described in this chapter.

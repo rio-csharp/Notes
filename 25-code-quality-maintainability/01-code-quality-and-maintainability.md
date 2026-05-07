@@ -6,7 +6,7 @@ Code quality is not about making code look clever. It is about making software e
 
 Good code supports future work. It helps the next engineer understand the intention, change behavior safely, and diagnose problems when production behaves differently from expectations.
 
-## What Maintainable Code Feels Like
+## Characteristics of Maintainable Code
 
 Maintainable code is:
 
@@ -131,7 +131,7 @@ public async Task<IActionResult> ApproveOrder(int id, CancellationToken ct)
 }
 ```
 
-Problems:
+This approach has several problems:
 
 - controller owns business rules;
 - email is sent before database commit;
@@ -725,16 +725,26 @@ Useful signals:
 
 Metrics should guide investigation, not replace judgment.
 
-## Practice Task
+## Iterative Improvement Cycle
 
-Take a long service method and:
+Improving code quality is an iterative process. When working with an existing codebase, a systematic approach helps avoid overwhelming changes while making meaningful progress:
 
-1. identify responsibilities;
-2. extract validation;
-3. move business rules into domain methods;
-4. replace primitive values with domain types where useful;
-5. add unit tests for domain rules;
-6. add integration tests for API boundaries;
-7. improve names;
-8. add safe logs;
-9. document remaining debt.
+1. **Identify responsibilities** in the target method or class. Understand what each code path does and which concerns it mixes (validation, authorization, data access, business rules, side effects, logging, response mapping).
+
+2. **Extract validation** into guard clauses or dedicated validation steps. This separates precondition checks from core logic.
+
+3. **Move business rules into domain methods** so that entities and value objects protect their own invariants. A method like `order.Approve(userId, timestamp)` is safer than setting `order.Status = "Approved"` externally.
+
+4. **Replace primitive values with domain types** where the type prevents repeated validation and makes invalid states harder to represent. For example, `Money` instead of `decimal`, `EmailAddress` instead of `string`.
+
+5. **Add unit tests for domain rules** to document and protect the behavior of extracted methods.
+
+6. **Add integration tests for API boundaries** to verify that the overall endpoint behavior, authorization, and error handling work correctly together.
+
+7. **Improve names** to reveal intent. A method called `ProcessData` communicates less than `ApproveSubmittedOrder`.
+
+8. **Add safe logs** with structured context (identifiers, correlation ID) to make production behavior observable.
+
+9. **Document remaining debt** so future engineers know what trade-offs remain and when to revisit them.
+
+This cycle keeps improvement measurable and incremental. Each step builds on the previous one, and each checkpoint is independently testable and deployable.

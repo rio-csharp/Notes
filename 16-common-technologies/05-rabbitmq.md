@@ -234,7 +234,7 @@ public sealed class OrderEmailConsumer : BackgroundService
 }
 ```
 
-Important points:
+Key aspects of this consumer setup:
 
 - `autoAck: false` means manual acknowledgement.
 - `BasicAck` happens only after successful processing.
@@ -394,12 +394,4 @@ Monitor:
 
 Queue depth by itself is not enough. A growing queue plus flat consumer throughput usually means consumers are failing, too slow, or under-provisioned.
 
-## Practice Task
-
-Design:
-
-1. order email queue;
-2. retry queue;
-3. dead-letter queue;
-4. idempotent consumer;
-5. queue depth alert.
+The RabbitMQ patterns presented -- exchange routing, manual acknowledgment, dead-letter queues, delayed retry, and idempotent consumption -- provide a robust foundation for business message processing.

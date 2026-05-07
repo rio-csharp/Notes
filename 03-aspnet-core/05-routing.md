@@ -101,6 +101,8 @@ public IActionResult GetByGuid(Guid id)
 
 Constraints improve routing precision, but they are not business validation. `{id:int}` proves that the segment is an integer, not that the referenced order exists or that the caller may access it. This distinction helps avoid confusing transport-level shape checks with application-level correctness.
 
+Constraints also influence endpoint selection priority. When multiple routes match a request, the routing system prefers the route with more specific constraints. A route with `{id:int}` is ranked higher than one with `{id}` because the constraint narrows the set of matching requests. This priority mechanism is one reason route design should use constraints deliberately rather than relying on parameter types alone for disambiguation.
+
 ## Resource-Oriented Route Design
 
 A good route structure usually expresses resources and subresources rather than action names disguised as URLs.

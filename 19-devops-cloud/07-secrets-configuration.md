@@ -329,9 +329,7 @@ spec:
                 name: orders-api-secrets
 ```
 
-Important:
-
-> Kubernetes Secrets are base64-encoded by default, not magically safe. Security depends on RBAC, encryption at rest, cluster access control, and operational discipline.
+Kubernetes Secrets are base64-encoded by default, not magically safe. Security depends on RBAC, encryption at rest, cluster access control, and operational discipline.
 
 Many production clusters use external secret operators to sync from Key Vault or another secret store.
 
@@ -529,26 +527,4 @@ Are frontend values non-secret?
 Are environment-specific values documented?
 ```
 
-## Practice Task
 
-Create configuration for a .NET API with:
-
-1. `PaymentOptions`.
-2. `JwtOptions`.
-3. Local user secrets.
-4. Environment variable overrides.
-5. Startup validation.
-6. Azure Key Vault loading.
-7. A feature flag.
-8. A rule that frontend config contains no secrets.
-
-Then explain:
-
-```text
-Which values are secrets?
-Where does each value come from in development?
-Where does each value come from in production?
-Which values can be safely exposed to React?
-How would you rotate the payment API key?
-What should happen if Jwt:Authority is missing?
-```

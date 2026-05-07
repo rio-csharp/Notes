@@ -184,7 +184,7 @@ public ListNode? DetectCycle(ListNode? head)
 }
 ```
 
-Why it works:
+How the algorithm works:
 
 After slow and fast meet, moving one pointer from head and one from the meeting point at the same speed makes them meet at the cycle entry.
 
@@ -274,11 +274,4 @@ public ListNode? AddTwoNumbers(ListNode? l1, ListNode? l2)
 }
 ```
 
-## Practice Problems
-
-- Reverse Linked List
-- Merge Two Sorted Lists
-- Linked List Cycle
-- Middle of Linked List
-- Remove Nth Node From End
-- Add Two Numbers
+The linked list manipulation patterns covered here -- reversal, two-pointer traversal, and dummy-node construction -- are foundational techniques that reappear in more complex data structure problems.

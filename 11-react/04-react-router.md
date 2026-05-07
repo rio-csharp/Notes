@@ -179,9 +179,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 ```
 
-Important:
-
-Frontend route protection is not security boundary. Backend must enforce authorization.
+Frontend route protection is not a security boundary. Backend must enforce authorization.
 
 Permission-aware guard:
 
@@ -274,25 +272,14 @@ function OrderDetailPage() {
 }
 ```
 
-### What state should be in URL?
+## Under The Hood: Client-Side Routing
 
-> State that should be shareable, bookmarkable, or restorable, such as search filters, page number, sort field, and selected tab.
+React Router uses the browser's History API (`pushState`, `replaceState`, and the `popstate` event) to manage URL changes without triggering a full page reload. When a user clicks a `<Link>` or calls `navigate()`, React Router intercepts the navigation, updates the URL via the History API, and renders the matching route component instead of fetching a new page from the server. This is the key difference between client-side routing and traditional server-rendered navigation.
 
-### What is protected route?
+React Router also supports a hash-based router (`HashRouter`) that uses the URL hash fragment for navigation. Hash routing works in environments where the server cannot be configured to serve the same HTML for all routes, but it produces less clean URLs and is generally avoided when the server can be configured properly.
 
-> A route that checks authentication or permission before rendering. It improves UX but does not replace backend authorization.
+State that should be shareable, bookmarkable, or restorable — such as search filters, page number, sort field, and selected tab — belongs in the URL rather than in local component state. This makes navigation resilient to page refreshes and allows users to share or bookmark specific application states.
 
-### Why use nested routes?
+A protected route checks authentication or permission before rendering. It improves user experience by hiding inaccessible functionality but does not replace backend authorization, which must always enforce access control independently.
 
-> Nested routes allow shared layouts and route-specific content through `Outlet`.
-
-## Practice Task
-
-Build routes:
-
-1. `/login`;
-2. `/orders`;
-3. `/orders/:id`;
-4. protected admin route;
-5. query params for order filters;
-6. 404 page.
+Nested routes allow shared layouts and route-specific content through the `Outlet` component. The parent route renders a layout shell, and the child route's element renders into the `Outlet` position. This avoids duplicating layout code across pages and keeps routing structure aligned with the visual hierarchy.

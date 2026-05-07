@@ -4,8 +4,6 @@
 
 Networks fail, clients retry, proxies repeat requests, and users submit forms twice. Idempotency is the discipline that keeps those ordinary failures from producing duplicate business effects. It is therefore not a niche payment concern. It is a core reliability property for APIs that create or trigger important state transitions.
 
-This chapter focuses on how APIs remain safe under repeated delivery and why that safety must be designed rather than assumed.
-
 ## HTTP Idempotency And Business Idempotency
 
 Some HTTP methods are naturally idempotent by semantics, such as `PUT` and `DELETE`, at least when implemented correctly. `POST` is not idempotent by default because repeated submission often creates repeated side effects.
@@ -59,13 +57,108 @@ The stronger pattern is:
 - keep the business effect and the idempotency record within one atomic boundary when possible;
 - handle concurrent duplicate insertion safely by reloading the stored result.
 
+A concrete implementation might use a service layer that mediates between the controller and storage, guaranteeing atomicity through a unique constraint:
+
+```csharp
+public sealed class IdempotentOrderService
+{
+    private readonly OrdersDbContext _db;
+    private readonly IOrderProcessingEngine _engine;
+
+    public IdempotentOrderService(OrdersDbContext db, IOrderProcessingEngine engine)
+    {
+        _db = db;
+        _engine = engine;
+    }
+
+    public async Task<OrderCreatedResult> CreateOrderAsync(
+        CreateOrderRequest request,
+        string idempotencyKey,
+        CancellationToken ct)
+    {
+        // Attempt to claim the idempotency key — fails atomically if taken
+        var record = await _db.IdempotencyRecords
+            .FirstOrDefaultAsync(r => r.Key == idempotencyKey, ct);
+
+        if (record is not null)
+        {
+            // Key already processed — return the stored result
+            return DeserializeResult(record.ResultData);
+        }
+
+        // Compute a hash of the request for conflict detection
+        var requestHash = ComputeHash(request);
+
+        using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        // Insert idempotency record with a unique constraint — catches races
+        var newRecord = new IdempotencyRecord
+        {
+            Key = idempotencyKey,
+            RequestHash = requestHash,
+            Status = "Processing",
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        _db.IdempotencyRecords.Add(newRecord);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException) when (IsUniqueConstraintViolation())
+        {
+            // Another request won the race; reload and return its result
+            await transaction.RollbackAsync(ct);
+            var existing = await _db.IdempotencyRecords
+                .FirstAsync(r => r.Key == idempotencyKey, ct);
+            return DeserializeResult(existing.ResultData);
+        }
+
+        // We own the key — perform the actual business operation
+        var order = await _engine.CreateOrderAsync(request, ct);
+
+        // Store the result and mark as complete
+        newRecord.Status = "Completed";
+        newRecord.ResultData = SerializeResult(order);
+        await _db.SaveChangesAsync(ct);
+
+        await transaction.CommitAsync(ct);
+
+        return order;
+    }
+}
+```
+
+The controller then delegates responsibility without needing to reason about concurrency or storage details:
+
+```csharp
+[HttpPost]
+public async Task<ActionResult<OrderCreatedResult>> Create(
+    CreateOrderRequest request,
+    [FromHeader(Name = "Idempotency-Key")] string idempotencyKey,
+    CancellationToken ct)
+{
+    if (string.IsNullOrWhiteSpace(idempotencyKey))
+        return BadRequest("Idempotency-Key header is required.");
+
+    var result = await _idempotentService.CreateOrderAsync(
+        request, idempotencyKey, ct);
+
+    return result.IsExisting
+        ? Ok(result)           // Returned previous result
+        : CreatedAtAction(     // First-time creation
+            nameof(GetById), new { id = result.OrderId }, result);
+}
+```
+
 ## Request Identity And Conflict Detection
 
 The idempotency key alone is not enough. The server should also know whether the repeated request is semantically the same request.
 
 That is why implementations often store a request hash. If the same key is reused with a different payload, the system should not silently replay the prior response or create a second resource. It should surface a conflict because the caller is no longer asking to repeat the same intent.
 
-This is a subtle but important contract principle: retries should be repeatable, not ambiguous.
+Retries should be repeatable, not ambiguous.
 
 ## Response Replay
 
@@ -85,8 +178,6 @@ The same principles apply:
 - make processing safe under repeat delivery;
 - rely on durable uniqueness rather than in-memory assumptions;
 - keep the side effect and the "processed" record aligned as closely as possible.
-
-This is why idempotency belongs in a broader reliability chapter rather than in a payment-only appendix.
 
 ## Expiration And Operational Limits
 

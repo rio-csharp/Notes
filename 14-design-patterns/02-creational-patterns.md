@@ -391,22 +391,13 @@ setUser((current) =>
 );
 ```
 
-## Common Misconceptions
+These patterns are often misunderstood:
 
-- Factory always means a separate factory class.
-- DI and Factory solve the same problem.
-- Builder is only for production code.
-- Singleton is always bad.
-- DI singleton is safe even with mutable per-request state.
-- Prototype means deep clone by default.
+- A factory does not always require a separate factory class.
+- DI and Factory serve different purposes; they complement each other rather than competing.
+- Builder is useful for both production code and test data.
+- Singleton is not inherently bad &mdash; the risk is mutable state shared across requests.
+- A DI-managed singleton with mutable per-request state is dangerous.
+- Prototype does not imply deep cloning by default.
 
-## Practical Checklist
-
-```text
-Does creation depend on runtime data?
-Does the object need many optional construction steps?
-Do related objects need to be created consistently?
-Can DI manage the lifetime instead of manual singleton code?
-Is the factory hiding dependencies like a service locator?
-Is the builder making setup clearer or just adding ceremony?
-```
+When applying creational patterns, consider whether creation depends on runtime data, whether the object needs many optional construction steps, whether related objects must be created consistently, whether DI can manage the lifetime instead of manual singleton code, whether the factory is hiding dependencies like a service locator, and whether the builder is making setup clearer or only adding ceremony.

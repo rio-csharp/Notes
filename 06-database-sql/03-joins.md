@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-Joins are how relational databases combine rows from different tables according to key relationships. They are central to relational querying because normalized schemas rarely keep all useful information in one table. The important skill is not memorizing join names. It is understanding what result set each join shape produces and how filtering choices can subtly change that shape.
-
-This chapter focuses on joins as relationship queries rather than as syntax trivia.
+Joins are how relational databases combine rows from different tables according to key relationships. They are central to relational querying because normalized schemas rarely keep all useful information in one table. Understanding joins means knowing what result set each join shape produces and how filtering choices can subtly change that shape.
 
 ## Inner Joins
 
@@ -29,6 +27,18 @@ LEFT JOIN Orders o ON o.CustomerId = c.Id;
 ```
 
 This is useful when the absence of related data is still meaningful. The unmatched right-side columns appear as `NULL`, allowing the result set to represent both "has related row" and "does not have related row" within one query.
+
+## Cross Joins
+
+A cross join produces the cartesian product of two tables -- every row from the left combined with every row from the right:
+
+```sql
+SELECT c.Name, p.Name
+FROM Customers c
+CROSS JOIN Products p;
+```
+
+Cross joins are rarely used in application queries because the result set size grows multiplicatively. They are sometimes useful for generating test data, building calendar tables, or producing exhaustive combinations for reporting.
 
 ## Right And Full Joins
 
@@ -138,3 +148,11 @@ This is why join performance is not a separate topic from indexing and query opt
 Join patterns also reveal design quality. If every common query requires many large joins, the schema may be overly normalized for the application's read needs. If no joins are needed because data is duplicated everywhere, the schema may be carrying integrity risk. Good database design usually produces joins that are meaningful and frequent, but not pathological.
 
 That is the deeper lesson of joins: they are not only query operators. They are also evidence of how the schema decomposes real business relationships.
+
+## Set Operations Versus Joins
+
+It is worth distinguishing joins from set operations (`UNION`, `INTERSECT`, `EXCEPT`). Joins combine columns from different tables based on a relationship predicate. Set operations combine rows from different queries of the same shape.
+
+A join answers: "how are these entities related?" A set operation answers: "which rows appear in one or both result sets?" The two tools serve different structural purposes and are not interchangeable.
+
+Set operations are discussed in more detail in the SQL basics chapter, but the distinction matters here because teams sometimes reach for joins when a set operation would express the intent more clearly, or the reverse.

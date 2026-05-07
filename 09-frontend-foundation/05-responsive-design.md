@@ -222,24 +222,85 @@ Responsive image:
 
 This page keeps controls usable on mobile, prevents table overflow from breaking layout, and avoids fixed-width containers.
 
-### What is responsive design?
+### Fluid Typography and Spacing
 
-> Responsive design adapts layout and content to different screen sizes and device capabilities using flexible grids, media queries, responsive images, and adaptive interaction patterns.
+Responsive design is not limited to layout grids. Typography and spacing should also adapt to viewport size. The `clamp()` function provides a way to define size ranges that scale smoothly:
 
-### How do you handle tables on mobile?
+```css
+body {
+  font-size: clamp(1rem, 0.75rem + 0.5vw, 1.25rem);
+}
 
-> Depending on the use case, I use horizontal scroll, hide less important columns, or transform rows into cards. For data-heavy admin apps, horizontal scroll is often acceptable.
+.container {
+  padding: clamp(1rem, 0.5rem + 2vw, 2rem);
+}
+```
 
-### Mobile-first vs desktop-first?
+The first argument is the minimum value, the second is the preferred value (using viewport units), and the third is the maximum value. This eliminates hard breakpoints for simple size adjustments.
 
-> Mobile-first starts with small-screen styles and adds complexity for larger screens. It often leads to simpler responsive CSS.
+### Container Queries
 
-## Practice Task
+Container queries allow components to respond to their parent container's size rather than the viewport size. This is useful for reusable components that appear in different layout contexts:
 
-Make an admin order page responsive:
+```css
+.card-container {
+  container-type: inline-size;
+  container-name: card-grid;
+}
 
-1. sidebar collapses;
-2. filters stack;
-3. table scrolls horizontally;
-4. buttons remain usable;
-5. text does not overflow.
+@container card-grid (max-width: 30rem) {
+  .card {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container card-grid (min-width: 30rem) {
+  .card {
+    grid-template-columns: 200px 1fr;
+  }
+}
+```
+
+Container queries are supported in all modern browsers as of 2024. They complement media queries: use container queries for component-level adaptations and media queries for page-level layout changes.
+
+### Tables on Mobile Strategies
+
+Data tables present a specific challenge on narrow screens because tables are inherently two-dimensional. Four practical strategies exist:
+
+1. **Horizontal scroll** (shown in the example above): The table maintains its structure inside a scrollable wrapper. This preserves full data visibility and is the simplest approach for data-heavy applications.
+
+2. **Hidden columns**: Use media queries to hide less important columns on small screens. Add a toggle to reveal hidden columns if needed.
+
+3. **Card transformation**: Convert each table row into a stacked card layout on narrow screens. This works well for short lists but can be impractical for tables with many columns.
+
+4. **Server-side adaptation**: Return different data structures for mobile views, reducing the data shown per row and paginating more aggressively.
+
+For administrative applications with many columns, horizontal scroll is often the most practical choice because it preserves data density without restructuring.
+
+### Mobile-First CSS Strategy
+
+Mobile-first stylesheets start with the narrow-screen layout as the default and add complexity for larger screens using `min-width` media queries:
+
+```css
+/* Base: single-column layout for narrow screens */
+.layout {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+/* Add sidebar at wider viewports */
+@media (min-width: 48rem) {
+  .layout {
+    grid-template-columns: 16rem minmax(0, 1fr);
+  }
+}
+
+/* Add third column at even wider viewports */
+@media (min-width: 72rem) {
+  .layout {
+    grid-template-columns: 16rem 1fr 20rem;
+  }
+}
+```
+
+This approach forces focus on essential content first and typically results in less CSS than desktop-first (which uses `max-width` to remove features at smaller sizes). The selector weight is uniform across breakpoints -- each media query simply overrides the base declaration -- avoiding specificity conflicts.

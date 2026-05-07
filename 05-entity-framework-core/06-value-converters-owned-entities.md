@@ -100,6 +100,26 @@ This is especially relevant for:
 - collection-like converted values;
 - serialized representations that do not compare correctly by reference.
 
+A concrete example: suppose an `Email` value object is immutable and implements value equality, but a `PhoneNumber` type is mutable and uses reference equality by default. EF Core needs to know how to compare two `PhoneNumber` instances to detect changes:
+
+```csharp
+modelBuilder.Entity<User>()
+    .Property(u => u.PhoneNumber)
+    .HasConversion(
+        phone => phone.ToString(),
+        value => PhoneNumber.Parse(value))
+    .HasValueComparer(new ValueComparer<PhoneNumber>(
+        (a, b) => a.Equals(b),
+        v => v.GetHashCode(),
+        v => v.Clone()));
+```
+
+The three arguments to `ValueComparer<T>` are:
+
+1. A lambda that checks equality between two instances.
+2. A lambda that produces a hash code for an instance.
+3. A lambda that creates a snapshot copy (used to store original values for change detection).
+
 If EF Core cannot compare the value accurately, change tracking may miss real changes or report changes where none semantically occurred. That is not only a persistence problem. It can also distort concurrency behavior and update generation.
 
 The broader lesson is that conversion and change tracking are linked. A converter answers how to persist the value. A comparer answers how to reason about sameness.
@@ -132,6 +152,10 @@ modelBuilder.Entity<Order>()
         address.Property(a => a.Country).HasMaxLength(100);
     });
 ```
+
+By default, EF Core maps owned types into the same table as the owner -- a strategy called table splitting. The `Order` table receives columns such as `ShippingAddress_Line1`, `ShippingAddress_City`, and so on. This avoids a separate table and keeps reads efficient, but it also means all columns are stored with every row regardless of whether the optional owned type is populated.
+
+Owned types can also be mapped to a separate table using `ToTable()`. This is useful when the owned type has many columns or is shared across entity types, but it introduces the operational cost of an additional join for every query that materializes the owner.
 
 Owned types are useful when the conceptual object has multiple fields but no independent identity outside the owner.
 

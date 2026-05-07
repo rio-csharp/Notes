@@ -4,8 +4,6 @@
 
 An API contract is the public shape through which clients understand the system. DTOs exist to protect and shape that contract. They are not an unnecessary mapping layer placed between controllers and entities. They are the mechanism that decouples external behavior from internal persistence and domain change.
 
-This chapter focuses on contract shape, request and response boundaries, error consistency, and how to evolve an API without casually breaking clients.
-
 ## Internal Models Versus Public Contracts
 
 An entity model and an API contract solve different problems.

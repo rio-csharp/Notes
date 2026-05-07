@@ -63,21 +63,40 @@ Look at:
 - elapsed time;
 - actual execution plan.
 
-## Execution Plan Basics
+## Execution Plan Mechanics
 
-Common operators:
+The query optimizer translates SQL into an execution plan by estimating the cost of alternative strategies and selecting the cheapest one. Estimates are based on statistics -- histograms and density vectors that describe the data distribution in each index or column.
 
-| Operator | Meaning |
-|---|---|
-| Index Seek | uses index to directly find matching range |
-| Index Scan | scans many/all index rows |
-| Key Lookup | uses clustered key to fetch missing columns |
-| Sort | sorts rows, can be expensive |
-| Hash Match | used for joins/aggregates, can be expensive |
-| Nested Loops | often good for small outer input |
-| Merge Join | efficient when both inputs sorted |
+### How the Optimizer Works
 
-Index scan is not always bad, and index seek is not always enough. Look at row counts, reads, and total plan cost.
+1. The optimizer parses the query and generates candidate plan variants (using different join strategies, access methods, and operator orderings).
+2. For each variant, it estimates the row count at each operator using statistics. These estimates drive the cost calculation.
+3. The cheapest plan (by estimated I/O and CPU cost) is selected and cached.
+
+When estimated rows differ significantly from actual rows, the optimizer may choose a suboptimal plan. For example, estimating 100 rows when the actual count is 1,000,000 could push the optimizer toward a nested loops join when a hash join would be better.
+
+### Key Operators and Their Implications
+
+| Operator | Mechanism | Cost Signal |
+|---|---|---|
+| **Index Seek** | Traverses the B-tree to find a range of rows matching a predicate. Cost scales with tree depth and number of matching rows, not total table size. | Low for selective predicates; high for broad ranges. |
+| **Index Scan** | Reads all leaf-level pages of an index (or table). Cost scales with total pages, not row count selected. | Better than a seek when most rows match. |
+| **Key Lookup** | For each row found in a non-clustered index, fetches the remaining columns from the clustered index via the row locator. Each lookup is a random I/O operation. | High for large row counts; often eliminated with covering or included columns. |
+| **Sort** | Materializes and orders rows. Requires memory (sort buffer in tempdb if rows exceed memory grant). | Expensive for large inputs; avoid by serving pre-sorted data via an index. |
+| **Hash Match** | Builds a hash table from one input and probes with the other. Used for joins and aggregates when inputs are large and unsorted. | Memory-intensive for large build inputs; spills to tempdb if memory is insufficient. |
+| **Nested Loops** | For each row in the outer input, probes the inner input. Efficient when outer input is small and inner input has a useful index. | O(N * M) in the worst case; ideal when outer input is tiny. |
+| **Merge Join** | Both inputs are sorted on the join key, then merged in a single pass. | Efficient for large, pre-sorted inputs; avoids sorting if indexes already provide sort order. |
+
+Index scan is not always bad, and index seek is not always sufficient. Evaluate by comparing actual row counts, logical reads, and the overall plan shape. A scan that reads 50 pages to return 90% of a small table is fine; a scan that reads 500,000 pages because of a missing predicate is a problem.
+
+### Debugging Plan Issues
+
+When optimizing a slow query:
+
+1. Compare **estimated rows vs actual rows** in the execution plan. A large discrepancy indicates stale statistics or a poorly selective parameter sniff.
+2. Identify **Key Lookup** operators -- these often dominate cost in OLTP queries. Add INCLUDE columns or a covering index.
+3. Look for **Sort** operators above a large row estimate; an index on the sort columns may eliminate them.
+4. Check **memory grants**: a large discrepancy between granted and used memory points to cardinality estimation errors and can cause unnecessary memory pressure.
 
 ## Index Design
 
@@ -102,7 +121,7 @@ ON Orders (TenantId, Status, CreatedAt DESC)
 INCLUDE (TotalAmount);
 ```
 
-Why:
+Index design rationale:
 
 ```text
 TenantId, Status help filtering.
@@ -157,34 +176,47 @@ Trade-off:
 
 ## SARGability
 
-SARGable queries can use indexes effectively.
+SARGable (Search ARGument ABLE) predicates can use an index seek. When a predicate is non-SARGable, the query optimizer cannot use the B-tree structure to narrow the search range and must fall back to scanning.
 
-Risky:
+### Mechanism
 
-```sql
-WHERE YEAR(CreatedAt) = 2026
+An index B-tree organizes values in sorted order. A seek works by navigating the tree to the first matching value and then scanning forward. This requires the comparison to be of the form:
+
+```
+<column> <operator> <expression>
 ```
 
-Better:
+When the column is wrapped in a function -- `YEAR(CreatedAt)`, `LOWER(Email)`, `CONVERT(varchar, Date)` -- the optimizer cannot reverse the function to determine which index keys to navigate toward. It must evaluate the function for every row in the index to find matches.
+
+### Non-SARGable Patterns
 
 ```sql
+-- Cannot seek: YEAR() must be evaluated for every row
+WHERE YEAR(CreatedAt) = 2026
+
+-- Can seek: the optimizer sees a range of index key values to target
 WHERE CreatedAt >= '2026-01-01'
   AND CreatedAt < '2027-01-01'
 ```
 
-Risky:
-
 ```sql
+-- Cannot seek: LOWER() evaluated per row
 WHERE LOWER(Email) = LOWER(@Email)
-```
 
-Better:
-
-```sql
+-- Can seek: precomputed normalized value
 WHERE NormalizedEmail = @NormalizedEmail
 ```
 
-Applying functions to columns often prevents efficient index seeks.
+### Other Non-SARGable Patterns
+
+- `WHERE Column LIKE '%prefix'` -- leading wildcard prevents seek.
+- `WHERE Column + @offset = @target` -- arithmetic on the column.
+- `WHERE ISNULL(Column, 0) = @value` -- NULL handling wrapping.
+- `WHERE CAST(Column AS type) = @value` -- type conversion on the column.
+
+### Exceptions
+
+When the table is small, a scan may be perfectly acceptable. SARGability matters most for large tables queried by selective predicates. Always measure the actual impact before rewriting queries.
 
 ## EF Core Query Shape
 
@@ -282,23 +314,32 @@ ORDER BY CreatedAt DESC, Id DESC;
 
 ## Lock Contention
 
-Symptoms:
+Lock contention occurs when concurrent transactions compete for the same data resources. SQL Server uses lock managers with multiple granularity levels: row (key), page, and table. The database engine automatically escalates row locks to page or table locks when a single transaction accumulates more than 5,000 locks on the same object or when memory pressure from lock structures is detected. Lock escalation can convert many fine-grained locks into a single blocking bottleneck.
 
-- queries wait;
-- timeouts;
-- high blocking sessions;
-- deadlocks.
+### Lock Types
 
-Common causes:
+- **Shared (S)**: held during read operations (SELECT). Multiple shared locks can coexist on the same resource.
+- **Exclusive (X)**: held during write operations (INSERT, UPDATE, DELETE). Only one exclusive lock can exist on a resource, and it blocks all other lock requests.
+- **Update (U)**: held on the initial read phase of an update to prevent deadlocks with other concurrent updates. Converted to exclusive when the actual write occurs.
+- **Intent locks**: signal the intent to acquire a lock at a finer granularity (e.g., intent exclusive at the table level means the transaction holds exclusive locks on some rows).
 
-- long transactions;
-- missing indexes;
-- updating many rows;
-- inconsistent update order;
-- high isolation level;
-- user interaction inside transaction.
+### Symptoms
 
-Find blocking:
+- queries wait on `LCK_M_*` wait types;
+- timeouts and slow response times;
+- high blocking chains visible in `sys.dm_exec_requests`;
+- deadlocks in error logs.
+
+### Typical Sources
+
+- **Long transactions**: holding locks increases contention probability. Keep transaction duration minimal.
+- **Missing indexes**: an index scan may lock more rows than strictly necessary, escalating contention.
+- **Updating many rows in one transaction**: triggers lock escalation, blocking all concurrent access to the table.
+- **Inconsistent update order**: two transactions updating resources A and B in opposite order create a deadlock cycle.
+- **High isolation level**: `SERIALIZABLE` holds range locks that block inserts into predicate ranges.
+- **User interaction inside a transaction**: reading data, presenting it to a user, waiting for input, and then writing the result keeps locks held for seconds (or longer).
+
+### Identifying Blocking
 
 ```sql
 SELECT
@@ -312,6 +353,12 @@ FROM sys.dm_exec_requests r
 CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
 WHERE r.blocking_session_id <> 0;
 ```
+
+This query returns the head blocker and the blocked session, along with the wait type and SQL text. The `wait_type` column indicates the specific lock class (e.g., `LCK_M_S` for shared lock wait, `LCK_M_X` for exclusive lock wait).
+
+### Deadlock Analysis
+
+When a deadlock occurs, SQL Server selects a victim (the transaction with the lowest rollback cost) and terminates it with error 1205. The deadlock graph -- available in the system health session or via extended events -- shows the resources involved and the lock order for each transaction. Analyze the deadlock graph to identify which resources need consistent ordering or shorter lock duration.
 
 ## Deadlock Prevention
 
@@ -379,40 +426,71 @@ await using var dbContext = await _dbContextFactory.CreateDbContextAsync(ct);
 
 ## Statistics And Parameter Sniffing
 
-SQL Server uses statistics to estimate row counts.
+### Statistics Mechanism
 
-Bad estimates can lead to bad plans.
+SQL Server maintains statistics as multi-column histograms on index key columns and optionally on non-indexed columns. A histogram divides the data range into up to 200 steps, storing the number of rows and the density of distinct values within each step. When a query references a column with a filter predicate, the optimizer looks up the predicate value in the histogram to estimate selectivity.
 
-Helpful actions:
+Statistics become stale when data is modified (inserts, updates, deletes) beyond a threshold. SQL Server automatically updates statistics when approximately 20% of rows in a table with more than 500 rows have changed, but for large tables this threshold may not trigger frequently enough. Queries compiled against stale statistics produce inaccurate row estimates, leading to suboptimal plans.
 
-- update statistics;
-- check actual vs estimated rows;
-- consider query/index changes;
-- investigate parameter-sensitive plans.
+### Parameter Sniffing
 
-Parameter sniffing means SQL Server compiles a plan based on one parameter value that may be bad for another value.
+When SQL Server compiles a query plan for a parameterized query or stored procedure, it "sniffs" the parameter value provided on first execution. The resulting plan is optimized for that specific value. If the procedure is later called with a different value whose data distribution is significantly different, the cached plan may perform poorly.
 
-Do not blindly add hints. First understand the plan.
+Example:
+
+```sql
+-- First call: @Status = 'Shipped' (returns 50 rows)
+-- Optimizer generates a plan with a narrow index seek.
+EXEC GetOrdersByStatus @Status = 'Shipped'
+
+-- Second call: @Status = 'Pending' (returns 500,000 rows)
+-- The cached seek-based plan is terrible for this value.
+EXEC GetOrdersByStatus @Status = 'Pending'
+```
+
+### Mitigation Strategies
+
+| Strategy | Approach | Trade-off |
+|---|---|---|
+| **Update statistics** | Keep statistics current for volatile tables. | May not help with fundamental data skew. |
+| **Recompile hint** | `OPTION (RECOMPILE)` generates a new plan each execution. | Adds compilation overhead; acceptable for infrequent queries. |
+| **Optimize for unknown** | `OPTION (OPTIMIZE FOR UNKNOWN)` uses average density instead of sniffed value. | Plan may not be optimal for any specific value but avoids worst-case. |
+| **Query multiple plans** | Split the procedure into separate code paths for different value ranges. | Increases code complexity. |
+| **Plan guide** | Force a specific plan via query store or plan guide. | Maintenance burden; plan may become stale. |
+
+Do not blindly add hints. First capture the actual execution plan, compare estimated vs actual rows, and determine whether the plan shape changes with different parameter values.
 
 ## Read Scaling
 
-Options:
+Before scaling reads horizontally, ensure queries are already optimized -- adding replicas to mask a missing-index problem wastes infrastructure.
 
-- optimize queries first;
-- caching;
-- read replicas;
-- CQRS read models;
-- reporting database;
-- materialized/summary tables;
-- denormalized read models;
-- search index such as Elasticsearch for search workloads.
+### Options (Ordered by Increasing Complexity)
 
-Read replicas help only if:
+1. **Optimize queries and indexes first.** Many read-performance problems are solved by better indexing, not by adding infrastructure.
+2. **Caching**: in-memory cache for hot data, distributed cache for cross-instance sharing (see the Caching section in Chapter 1 of this topic).
+3. **Read replicas**: asynchronous secondary copies of the primary database. Queries are routed to the replica, keeping the primary free for writes. Requires careful connection routing and tolerance for replication lag (typically sub-second in the same region, but can grow under high write load).
+4. **CQRS read models**: a separate read-optimized database populated by events from the write side. The read schema can differ entirely from the write schema (denormalized, pre-joined, with precomputed aggregates). This adds event processing infrastructure but provides the most flexibility.
+5. **Materialized / summary tables**: precomputed aggregations refreshed on a schedule or via triggers. Useful for dashboards and reports that query large fact tables.
+6. **Search index**: Elasticsearch, Azure Cognitive Search, or similar for full-text search, faceted navigation, and complex filtering that would be awkward or slow in a relational database.
 
-- workload is read-heavy;
-- replication lag is acceptable;
-- the application routes reads safely;
-- consistency expectations are clear.
+### Read Replica Mechanics
+
+Asynchronous replication sends committed transactions from the primary's transaction log to the replica, which replays them. The replica may lag behind the primary by some duration (typically milliseconds to seconds, depending on the write volume and network latency). Applications that read from replicas must tolerate reading slightly stale data.
+
+Transaction log replication types:
+
+| Type | Mechanism | Typical Lag |
+|---|---|---|
+| **Always On Availability Groups** | Synchronous or asynchronous log block shipping | < 1 second (async in same region) |
+| **Transactional Replication** | Log reader agent publishes commands to distribution database | 1-30 seconds |
+| **Log Shipping** | Periodic log backup restore | Minutes (configurable) |
+
+Read replicas help only when:
+
+- workload is predominantly read-heavy (e.g., 90%+ reads);
+- replication lag is acceptable for the read path;
+- the application routes reads to replicas safely (via connection string configuration or middleware);
+- consistency expectations between read and write paths are clearly defined and communicated.
 
 ## Practical Query Tuning Checklist
 
@@ -431,12 +509,12 @@ Are statistics stale?
 Did data volume change recently?
 ```
 
-## Practice Task
+## Verification
 
-Analyze an order list query:
+An order list query can be verified by:
 
-1. capture execution plan;
-2. add composite index;
-3. compare logical reads;
-4. test offset vs keyset pagination;
-5. simulate blocking transaction.
+1. capturing the execution plan;
+2. adding a composite index;
+3. comparing logical reads;
+4. testing offset vs keyset pagination;
+5. simulating a blocking transaction.

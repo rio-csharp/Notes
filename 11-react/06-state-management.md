@@ -300,24 +300,12 @@ This separates:
 - local UI state inside small components;
 - global user/permission state in context or a store.
 
-### Context vs Redux?
+Context shares values through the component tree without passing props manually at every level. However, context is not a state management solution in itself — it is a dependency injection mechanism. When the context value changes, every consumer in the tree re-renders, even if a consumer only reads a part of the value that did not change. This makes context unsuitable for rapidly changing values consumed by many components. Mitigations include splitting contexts (one for frequently changing data, one for setters) and memoizing context values with `useMemo` so that consumers do not re-render on ancestor re-renders that did not produce a new context value.
 
-> Context shares values through component tree but is not a full state management solution. Redux provides structured state updates, middleware, devtools, and predictable patterns for complex global state.
+Zustand achieves selective re-rendering through a different mechanism. Instead of propagating values through React context, Zustand stores state outside the React tree and uses a subscription model. When a component selects a slice of state (e.g., `useUiStore(state => state.isSidebarOpen)`), it subscribes to changes only for that specific path. When the store updates, only subscribed components re-render, not the entire subtree. This makes Zustand more efficient than context for values that change frequently or are consumed by many independent components.
 
-### Why not put all API data in Redux?
+Redux provides structured state updates through reducers, middleware, and DevTools integration. Redux Toolkit simplifies this with `createSlice` and Immer-based immutable updates. For large teams and complex state transitions, the structure of Redux provides predictable patterns that scale. For simpler global state, Zustand or context may suffice.
 
-> API data is server state. It needs caching, refetching, stale handling, retries, and invalidation. React Query handles these concerns better.
+API data is server state. It needs caching, refetching, stale handling, retries, and invalidation. React Query handles these concerns better than any client-side store because it is purpose-built for the asynchronous, cache-oriented nature of server data.
 
-### What state belongs in URL?
-
-> State that should be shareable or restorable, such as filters, pagination, search, and selected tabs.
-
-## Practice Task
-
-Build order list using:
-
-1. local state for modal;
-2. URL state for filters;
-3. React Query for orders;
-4. global state for current user;
-5. permission-based action visibility.
+State that should be shareable or restorable — such as filters, pagination, search, and selected tabs — belongs in the URL rather than in local or global state. URL state survives page refreshes, is shareable, and integrates naturally with server-side rendering.

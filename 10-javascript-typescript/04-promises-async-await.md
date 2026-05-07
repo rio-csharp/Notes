@@ -209,24 +209,82 @@ const result = await Promise.race([
 
 For fetch cancellation, prefer `AbortController` so the request is actually cancelled.
 
-### What is a Promise?
+### Promise States and Settling Behavior
 
-> A Promise represents a future asynchronous result that can be fulfilled or rejected.
+A Promise can exist in one of three states:
 
-### async/await vs then?
+1. **Pending**: Initial state, neither fulfilled nor rejected.
+2. **Fulfilled**: The promise resolved successfully with a value.
+3. **Rejected**: The promise failed with a reason (typically an Error).
 
-> They both work with promises. `async/await` makes asynchronous code look more like synchronous control flow and is often easier to read.
+Once a promise settles (fulfills or rejects), its state is immutable. Calling `resolve()` or `reject()` a second time has no effect. This makes promises safe for caching and one-shot operations:
 
-### Promise.all vs allSettled?
+```ts
+const cachedFetch = new Map<string, Promise<Order>>();
 
-> `Promise.all` rejects when any promise rejects. `Promise.allSettled` waits for all promises and returns each result status.
+function getOrder(id: number): Promise<Order> {
+  const key = String(id);
+  if (!cachedFetch.has(key)) {
+    cachedFetch.set(key, fetchOrder(id));
+  }
+  return cachedFetch.get(key)!;
+}
+```
 
-## Practice Task
+The first caller triggers the fetch; subsequent callers receive the same promise (and therefore the same result or error) without re-executing the operation.
 
-Build:
+### Promise Chaining Patterns
 
-1. typed fetch wrapper;
-2. parallel loading with `Promise.all`;
-3. partial loading with `Promise.allSettled`;
-4. cancellation with `AbortController`;
-5. error UI for failed request.
+Promise chains provide sequential composition without nesting. Each `.then()` returns a new promise, allowing the chain to continue:
+
+```ts
+fetchOrder(id)
+  .then(order => validateOrder(order))
+  .then(validated => submitOrder(validated))
+  .then(result => notifyUser(result))
+  .catch(error => handleError(error))
+  .finally(() => hideSpinner());
+```
+
+Error propagation flows through the chain: if any step throws or returns a rejected promise, subsequent `.then()` handlers are skipped until a `.catch()` is reached. This mirrors the `try/catch` behavior of synchronous code.
+
+When chaining with `.then()`, the callback can return:
+- A plain value (wrapped in a resolved promise).
+- A promise (the next `.then()` waits for its settlement).
+- A thrown value (converted to a rejected promise).
+
+For parallel operations with shared error handling, `Promise.all` rejects at the first failure. If you need individual error handling for each parallel operation, attach independent `.catch()` handlers before `Promise.all`:
+
+```ts
+const results = await Promise.all([
+  fetchUser(id).catch(err => ({ error: err })),
+  fetchOrders(id).catch(err => ({ error: err }))
+]);
+```
+
+### async/await vs Promise Chains
+
+`async/await` and `.then()` chains are semantically equivalent -- both operate on promises. The choice is primarily about readability and control flow:
+
+**Use `async/await` when:**
+- The logic is sequential with natural dependencies between steps.
+- You need `try/catch` error handling that mirrors synchronous code.
+- The code involves conditionals or loops over async results.
+
+**Use `.then()` when:**
+- Building a functional pipeline of transformations.
+- Working in a context where `async` is not available (older callbacks, some event handlers).
+- Handling each step with independent error recovery.
+
+The `withTimeout` and `getJson` examples earlier in this chapter demonstrate `async/await` with error handling. The pattern of composing async utilities with promises (like `Promise.all`, `Promise.race`, and `Promise.allSettled`) works identically with both syntaxes because both consume and return promises.
+
+### Promise Combinators Compared
+
+| Method | Behavior | Use case |
+|--------|----------|----------|
+| `Promise.all` | Rejects on first rejection; returns array of results | Parallel requests where any failure means overall failure |
+| `Promise.allSettled` | Waits for all; returns `{status, value/reason}` objects | Parallel requests with individual error handling |
+| `Promise.race` | Settles on first settlement (resolve or reject) | Timeout patterns (though AbortController is preferred for fetch) |
+| `Promise.any` | Settles on first fulfillment; rejects only if all reject | Redundant requests (race multiple sources) |
+
+`Promise.allSettled` is particularly useful for batch operations where partial failure is acceptable, such as sending notifications to multiple users where some deliveries may fail independently.

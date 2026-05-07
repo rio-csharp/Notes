@@ -55,19 +55,11 @@ Good performance work is evidence-driven.
 
 ## Latency vs Throughput
 
-Latency:
+Latency measures how long a single request takes from submission to completion. Throughput measures how many requests the system completes per unit of time.
 
-```text
-How long one request takes.
-```
+These two dimensions interact through Little's Law: `L = lambda * W` (concurrency equals arrival rate times latency). When a system is driven past its saturation point, request queues grow inside the server. Every new request must wait for queued requests ahead of it, so observed latency rises even though the actual service time per request remains unchanged. This means throughput can appear to increase while latency degrades sharply, because the system is accepting work faster than it can complete it and requests are piling up.
 
-Throughput:
-
-```text
-How many requests are completed per unit of time.
-```
-
-You can increase throughput while hurting latency if you overload the system. This is why p95 and p99 latency matter.
+This is why tail latency metrics -- p95 and p99 -- matter more than averages. A rising p95 or p99 signals queue buildup well before average latency becomes concerning, giving operations teams an early warning that the system is approaching saturation.
 
 ## Metrics To Watch
 
@@ -146,36 +138,44 @@ Blocking can cause thread pool starvation.
 
 ## Thread Pool Starvation
 
-Symptoms:
+Thread pool starvation occurs when the thread pool has no available threads to schedule new work, even though the machine has CPU capacity to spare.
+
+### Mechanism
+
+When ASP.NET Core receives an HTTP request, it dispatches the request to a thread pool thread. If that thread calls `.Result` or `.Wait()` on an incomplete `Task`, the calling thread blocks synchronously, waiting for the operation to complete. While blocked, that thread cannot process other requests.
+
+The thread pool's hill-climbing algorithm attempts to compensate by injecting additional threads, but the injection rate is deliberately slow -- typically one new thread every 500 milliseconds to 2 seconds. Under a sudden burst of blocking calls, requests accumulate in the queue far faster than new threads can be added, causing latency to spike even while CPU utilization remains moderate.
+
+### Symptoms
 
 - requests queue up;
 - latency rises sharply;
 - CPU may be low or moderate;
 - many threads are blocked;
 - thread pool queue length grows;
-- `.Result`, `.Wait()`, `Thread.Sleep`, or sync I/O appears in request path.
+- `.Result`, `.Wait()`, `Thread.Sleep`, or synchronous I/O appears in the request path.
 
-Risky:
+### Risky Pattern
 
 ```csharp
 public string GetReport()
 {
-    Thread.Sleep(500);
+    Thread.Sleep(500);        // blocks the calling thread for 500 ms
     return "done";
 }
 ```
 
-Better:
+In an async controller action, the thread is freed during `await`. A synchronous sleep or blocking call prevents that:
 
 ```csharp
 public async Task<string> GetReportAsync(CancellationToken ct)
 {
-    await Task.Delay(500, ct);
+    await Task.Delay(500, ct); // does not block any thread
     return "done";
 }
 ```
 
-`Task.Delay` does not block a thread while waiting.
+`Task.Delay` returns a task that completes after a timer fires, leaving the calling thread free to process other requests. The same principle applies to I/O: use `await` with async APIs rather than `.Result`.
 
 ## CPU-Bound Work
 
@@ -208,9 +208,15 @@ Use background jobs when work is slow, CPU-heavy, or retryable.
 
 ## Allocation And GC Pressure
 
-High allocation rate can increase GC frequency and latency.
+### Mechanism
 
-Risky:
+The .NET garbage collector uses a generational model: objects are allocated in Gen 0 (small, short-lived), promoted to Gen 1 if they survive a collection, and then to Gen 2 (long-lived). Large objects (85,000+ bytes) go directly to the Large Object Heap (LOH), which is collected only during Gen 2 collections.
+
+The GC triggers a collection when a generation's allocation budget is exhausted. Higher allocation rates cause more frequent collections. Gen 0 collections are cheap and fast (sub-millisecond), but frequent Gen 1 and especially Gen 2 collections introduce noticeable application pauses because the runtime must suspend managed threads to compact reachable objects.
+
+High allocation rate also increases CPU usage from the collection work itself. In server GC mode (the default for ASP.NET Core), each logical processor gets its own heap and collection thread, so allocations scale well -- but every object still must be collected eventually.
+
+### Risky Pattern: String Concatenation
 
 ```csharp
 public string BuildCsv(IEnumerable<OrderDto> orders)
@@ -226,7 +232,9 @@ public string BuildCsv(IEnumerable<OrderDto> orders)
 }
 ```
 
-Better:
+Each `+=` creates a new string and abandons the old one, generating N allocations for N iterations.
+
+### Better: StringBuilder
 
 ```csharp
 public string BuildCsv(IEnumerable<OrderDto> orders)
@@ -245,7 +253,11 @@ public string BuildCsv(IEnumerable<OrderDto> orders)
 }
 ```
 
-For very large exports, stream instead of building everything in memory.
+`StringBuilder` maintains an internal buffer segment, reducing allocations to O(log N) buffer expansions instead of O(N) strings.
+
+### For Large Data Sets: Stream
+
+For very large exports, stream the output instead of building everything in memory. Streaming keeps the working set proportional to the page size rather than the total data size, avoiding both high allocation rate and LOH pressure.
 
 ## Streaming Large Responses
 
@@ -274,17 +286,25 @@ Streaming reduces peak memory usage.
 
 ## Caching
 
-Use caching for expensive or frequently accessed data.
+Use caching for expensive or frequently accessed data to reduce latency and protect downstream resources.
 
-Levels:
+### Cache Levels
 
-- in-memory cache;
-- distributed cache;
-- CDN;
-- browser cache;
-- database read models.
+- **In-memory cache** (`IMemoryCache`): fastest, local to a single process, lost on restart.
+- **Distributed cache** (`IDistributedCache` with Redis, SQL Server): shared across processes, survives restarts, adds network round-trip.
+- **CDN**: caches static or semi-static responses at edge locations for geographic latency reduction.
+- **Browser cache**: reduces repeat requests for the same resource via `Cache-Control` headers.
+- **Database read models**: precomputed or denormalized tables that serve query-heavy workloads without joins or aggregations.
 
-In-memory cache:
+### In-memory Cache Internals
+
+`IMemoryCache` is backed by `MemoryCache`, which uses a dictionary of `CacheEntry` objects with expiration tracking. Entries can be evicted based on:
+
+- **Absolute expiration**: entry expires at a fixed time.
+- **Sliding expiration**: entry expires after a period of inactivity; each access resets the timer.
+- **Size limit**: total cache size can be bounded; entries near the limit are evicted via a least-frequently-used policy.
+- **Expiration tokens**: entries can be tied to external signals (file change, database notification) for proactive invalidation.
+- **Callback on eviction**: a registered delegate fires when an entry is removed, useful for cleanup or logging.
 
 ```csharp
 builder.Services.AddMemoryCache();
@@ -296,6 +316,7 @@ public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
     return await _cache.GetOrCreateAsync("categories:v1", async entry =>
     {
         entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(30);
+        entry.SlidingExpiration = TimeSpan.FromMinutes(5);
 
         return await _dbContext.Categories
             .AsNoTracking()
@@ -306,18 +327,22 @@ public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
 }
 ```
 
-Cache only when:
+`GetOrCreateAsync` performs an atomic check-and-set: if the key exists, the factory is not called. This avoids redundant database queries from concurrent cache misses within the same process.
+
+### When to Cache
 
 - data is read frequently;
 - data can tolerate staleness or invalidation is clear;
-- cache hit rate is measurable;
-- failure behavior is defined.
+- cache hit rate is measurable and high enough to justify complexity;
+- failure behavior is defined (what happens when cache is unavailable).
 
 ## Cache Stampede Protection
 
-If many requests miss the same cache key, all may hit the database.
+A cache stampede occurs when a cache entry expires and multiple concurrent requests all miss simultaneously. Each request attempts to regenerate the expensive value, creating a thundering-herd problem that can overload the database or upstream service.
 
-Single-process protection:
+### Single-Process Protection
+
+The pattern is a double-checked lock: on cache miss, acquire a local semaphore, then check the cache again before regenerating. The second check prevents redundant work when multiple requests arrive at the same time.
 
 ```csharp
 private static readonly SemaphoreSlim CategoryLock = new(1, 1);
@@ -333,6 +358,8 @@ public async Task<CategoryDto[]> GetCategoriesSafeAsync(CancellationToken ct)
 
     try
     {
+        // Double-check: another thread may have populated the cache
+        // while this thread was waiting for the lock.
         if (_cache.TryGetValue("categories:v1", out cached))
         {
             return cached;
@@ -349,7 +376,15 @@ public async Task<CategoryDto[]> GetCategoriesSafeAsync(CancellationToken ct)
 }
 ```
 
-For multiple app instances, use distributed locking or request coalescing carefully.
+A subtle timing risk remains: cache entries may be set with an absolute expiration, causing all instances to expire at nearly the same moment. Using sliding expiration or adding a random jitter to the expiration time spreads the renewal load across a wider window.
+
+### Multi-Instance Protection
+
+When multiple application instances share a cache, a local semaphore protects only within one process. For cross-instance stampede protection, options include:
+
+- **Distributed locking** (Redis `RedLock`, `SET NX`): one instance wins the lock and regenerates; others wait or serve stale data.
+- **Request coalescing** with a distributed semaphore (e.g., Redis `SemaphoreSlim` pattern).
+- **Early expiration** (probabilistic early recomputation): cache entries are refreshed before they actually expire when the remaining TTL falls below a computed threshold based on request rate.
 
 ## Pagination
 
@@ -437,25 +472,55 @@ That can cause socket exhaustion in long-running services.
 
 ## External Calls
 
-Use:
+External dependencies (payment gateways, third-party APIs, databases) introduce latency, availability, and correctness risks. The following patterns, collectively known as resilience engineering, mitigate these risks.
 
-- timeouts;
-- retries with backoff and jitter;
-- circuit breaker;
-- bulkhead;
-- fallback where appropriate.
+### Timeouts
 
-Do not retry everything.
+Every external call must have a timeout. Without one, a slow dependency can hold a thread indefinitely, leading to thread pool starvation and cascading latency.
 
-Risky:
+```csharp
+builder.Services.AddHttpClient<IPaymentClient, PaymentClient>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+```
+
+### Retries with Backoff and Jitter
+
+Retries compensate for transient failures (network hiccups, provider throttling). Exponential backoff prevents the retry storm from amplifying load on an already-strained dependency. Jitter prevents synchronized retry waves when many clients observe the same failure simultaneously.
+
+```text
+Try 1: wait 100 ms
+Try 2: wait 400 ms + random(0..200)
+Try 3: wait 900 ms + random(0..400)
+```
+
+Use a library such as Polly for configurable retry policies. .NET 8+ includes built-in resilience via `Microsoft.Extensions.Http.Resilience`.
+
+### Circuit Breaker
+
+A circuit breaker monitors failure rates and stops sending requests when the failure rate exceeds a threshold. After a cooldown period, it allows a probe request; if it succeeds, the circuit closes again. This protects the caller from wasting resources on a failing dependency and gives the dependency time to recover.
+
+States: **Closed** (normal operation) -> **Open** (requests fail fast) -> **Half-Open** (probing for recovery).
+
+### Bulkhead
+
+A bulkhead isolates resources by allocating a fixed number of concurrent slots to each dependency. If one dependency saturates its slots, other dependencies remain unaffected. This prevents a single failing or slow dependency from exhausting the entire thread pool.
+
+### Fallback
+
+When all retries are exhausted, a fallback provides a degraded response -- serving cached data, returning a default value, or redirecting to a secondary provider.
+
+### Idempotency for Safe Retries
+
+Do not retry everything uniformly. Non-idempotent retries can cause data corruption.
 
 ```text
 POST /payments/charge fails
-retry blindly
-customer may be charged twice
+retry blindly -> customer may be charged twice
 ```
 
-Use idempotency keys for retryable commands.
+Use idempotency keys to make retries safe. The server detects the duplicate key and returns the previous result instead of executing the operation again.
 
 ```csharp
 public sealed record ChargePaymentRequest(
@@ -464,17 +529,31 @@ public sealed record ChargePaymentRequest(
     decimal Amount);
 ```
 
+### When to Apply
+
+| Pattern | Applies To |
+|---|---|
+| Timeout | every external call |
+| Retry | transient-safe, idempotent operations |
+| Circuit breaker | dependencies with failure modes |
+| Bulkhead | multiple dependencies, high concurrency |
+| Fallback | read operations, degraded-mode acceptable |
+
 ## Bounded Concurrency
 
-Unbounded parallel work can overload dependencies.
+Unbounded parallel work can overload downstream dependencies. When a service fans out N parallel calls without limiting concurrency, the dependency receives N simultaneous requests. If N is large enough, the dependency's connection pool, thread pool, or database can become saturated, causing timeouts and cascading failures.
 
-Risky:
+### The Risk
 
 ```csharp
+// Creates N simultaneous tasks with no concurrency limit.
+// If N is 5,000, the downstream system receives 5,000 concurrent calls.
 await Task.WhenAll(orderIds.Select(id => ProcessOrderAsync(id, ct)));
 ```
 
-Better:
+### Bounded Approaches
+
+**Parallel.ForEachAsync** limits concurrency via `MaxDegreeOfParallelism`. The runtime internally throttles task creation so that at most M tasks are in flight simultaneously.
 
 ```csharp
 var options = new ParallelOptions
@@ -489,7 +568,55 @@ await Parallel.ForEachAsync(orderIds, options, async (orderId, token) =>
 });
 ```
 
-Limit concurrency based on dependency capacity.
+**SemaphoreSlim** for more control over concurrent access to a shared resource:
+
+```csharp
+private readonly SemaphoreSlim _throttle = new(8, 8);
+
+public async Task ProcessOrdersAsync(IEnumerable<int> orderIds, CancellationToken ct)
+{
+    var tasks = orderIds.Select(async orderId =>
+    {
+        await _throttle.WaitAsync(ct);
+        try
+        {
+            await ProcessOrderAsync(orderId, ct);
+        }
+        finally
+        {
+            _throttle.Release();
+        }
+    });
+
+    await Task.WhenAll(tasks);
+}
+```
+
+**Channel-based producer-consumer** for backpressure-aware processing. A `Channel<T>` acts as a bounded queue: the producer blocks when the channel is full, naturally applying backpressure to the caller.
+
+```csharp
+var channel = Channel.CreateBounded<(int OrderId, CancellationToken Token)>(
+    new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.Wait });
+
+// Consumer: processes items at bounded concurrency
+var consumer = Task.Run(async () =>
+{
+    await foreach (var item in channel.Reader.ReadAllAsync(ct))
+    {
+        await ProcessOrderAsync(item.OrderId, item.Token);
+    }
+});
+
+// Producer: feeds items, blocks when channel is full
+foreach (var id in orderIds)
+{
+    await channel.Writer.WriteAsync((id, ct));
+}
+channel.Writer.Complete();
+await consumer;
+```
+
+The appropriate concurrency limit depends on the downstream dependency's capacity. Measure the dependency's p95 latency and error rate under increasing concurrency to find the saturation point, then set the limit well below it.
 
 ## Horizontal Scaling
 

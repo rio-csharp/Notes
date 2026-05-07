@@ -1,2 +1,4 @@
 dist/
 node_modules/
+.deepseek/
+_check_lines.py

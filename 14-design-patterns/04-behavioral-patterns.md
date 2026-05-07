@@ -487,21 +487,13 @@ Usage:
 
 The dialog behavior is reused while content varies.
 
-## Common Misconceptions
+These patterns carry several false assumptions:
 
-- Strategy is always better than `switch`.
-- Observer guarantees reliable event delivery.
-- Command means CQRS must be used.
-- Mediator automatically improves architecture.
-- Chain of Responsibility is only a backend pattern.
-- State pattern is required for every enum state.
+- Strategy is not always better than a simple `switch`; it earns its value when branches grow independently.
+- Observer does not guarantee reliable event delivery; persistence and retries must be designed explicitly.
+- Command does not require CQRS; the two are independent decisions.
+- Mediator does not automatically improve architecture; it is most useful when pipeline behavior is needed.
+- Chain of Responsibility is not only a backend pattern; middleware and request pipelines appear in many contexts.
+- State pattern is not required for every enum; explicit transition methods are often sufficient until logic becomes complex.
 
-## Practical Checklist
-
-```text
-Does behavior vary independently?
-Do many subscribers need to react to an event?
-Does the request need validation/logging/transaction pipeline behavior?
-Are state transitions scattered across the codebase?
-Would a simple method or switch be clearer?
-```
+When evaluating behavioral patterns, consider whether behavior varies independently, whether many subscribers need to react to an event, whether the request needs validation, logging, or transaction pipeline behavior, whether state transitions are scattered across the codebase, and whether a simple method or switch would be clearer.

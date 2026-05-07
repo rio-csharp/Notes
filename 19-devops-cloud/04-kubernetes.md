@@ -225,9 +225,7 @@ spec:
 
 `targetPort` is the container port.
 
-Common misconception:
-
-> If the Service selector does not match Pod labels, the Service has no endpoints. The DNS name may resolve, but traffic has nowhere useful to go.
+A common misunderstanding is that a Service always has reachable endpoints. If the Service selector does not match Pod labels, the Service has no endpoints. The DNS name may resolve, but traffic has nowhere useful to go.
 
 ## Ingress And External Traffic
 
@@ -264,8 +262,6 @@ Client
   -> Kubernetes Service
   -> ready Pod
 ```
-
-Key points:
 
 - TLS often terminates at ingress or load balancer;
 - path-based routing can send traffic to different services;
@@ -333,9 +329,7 @@ readinessProbe:
   periodSeconds: 10
 ```
 
-Common mistake:
-
-> Putting database checks in liveness can create restart storms. If the database is temporarily down, restarting every API pod usually makes recovery worse. Database dependency is often better in readiness, not liveness.
+Putting database checks in liveness can create restart storms. If the database is temporarily down, restarting every API pod usually makes recovery worse. Database dependency is often better in readiness, not liveness.
 
 ## Rolling Updates And Graceful Shutdown
 
@@ -352,9 +346,7 @@ During a rolling update:
 
 Kubernetes sends `SIGTERM` before killing the container.
 
-Chinese note:
-
-ASP.NET Core handles graceful shutdown through the host lifetime and cancellation tokens, but your code must cooperate.
+ASP.NET Core handles graceful shutdown through the host lifetime and cancellation tokens, but the application code must cooperate.
 
 Example:
 
@@ -462,13 +454,11 @@ builder.Services.Configure<RedisOptions>(
     builder.Configuration.GetSection("Redis"));
 ```
 
-Important:
-
-- Kubernetes Secrets are base64-encoded, not automatically fully secure;
-- restrict RBAC access;
-- consider cloud secret stores;
-- never log secrets;
-- rotate secrets with a deployment plan.
+- Kubernetes Secrets are base64-encoded, not automatically fully secure.
+- Restrict RBAC access.
+- Consider cloud secret stores.
+- Never log secrets.
+- Rotate secrets with a deployment plan.
 
 ## Horizontal Scaling And Stateless Apps
 
@@ -504,9 +494,7 @@ For app engineers, the key requirement is statelessness:
 - use external database/cache/object storage;
 - design background processing so duplicate work is safe.
 
-Engineering perspective:
-
-> Kubernetes can add replicas, but the application must be horizontally scalable. If the app depends on local memory sessions, local files, or non-idempotent background work, scaling can create correctness bugs.
+Kubernetes can add replicas, but the application must be horizontally scalable. If the app depends on local memory sessions, local files, or non-idempotent background work, scaling can create correctness bugs.
 
 ## Kubernetes Debugging Checklist
 
@@ -534,14 +522,4 @@ Common symptoms:
 | Random restarts | OOMKilled, liveness too strict, app crash |
 | Slow under load | CPU throttling, DB bottleneck, connection pool exhaustion |
 
-## Practice Task
 
-Create manifests for:
-
-1. .NET API deployment;
-2. service;
-3. config map;
-4. secret;
-5. liveness probe;
-6. readiness probe;
-7. resource requests and limits.

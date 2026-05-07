@@ -123,8 +123,6 @@ For simple coding exercises, `char` loops are usually fine. For production text 
 
 ## Two Sum
 
-Problem:
-
 Find two numbers that add up to target.
 
 ```csharp
@@ -189,8 +187,6 @@ This assumes lowercase English letters. For Unicode or arbitrary chars, use `Dic
 
 ## Prefix Sum
 
-Problem:
-
 Find range sum quickly.
 
 ```csharp
@@ -220,8 +216,6 @@ Prefix sums are useful when many range queries are asked on the same array.
 For one query, a direct loop may be simpler. For many queries, preprocessing pays off.
 
 ## Product Of Array Except Self
-
-Problem:
 
 For each index, return the product of all other elements without using division.
 
@@ -346,8 +340,6 @@ This is often faster when strings are long and the alphabet is fixed.
 
 ## In-place Removal
 
-Problem:
-
 Remove all occurrences of `value` and return the new length.
 
 ```csharp
@@ -393,12 +385,4 @@ Normalize(nums.AsSpan(1, 2));
 
 This modifies the slice over the original array.
 
-## Practice Problems
-
-- Two Sum
-- Valid Anagram
-- Group Anagrams
-- Maximum Subarray
-- Product of Array Except Self
-- Longest Consecutive Sequence
-- Longest Substring Without Repeating Characters
+These array and string patterns appear across the algorithm chapters that follow, providing the foundation for techniques such as two-pointer traversal, hash-based lookup, and sliding-window analysis.

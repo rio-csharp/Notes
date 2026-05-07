@@ -31,7 +31,7 @@ Write:
 App -> DB update -> delete cache
 ```
 
-Why delete cache instead of update cache?
+Deleting cache is preferred over updating in-place because:
 
 Deleting is often safer because the next read rebuilds cache from the database source of truth.
 
@@ -48,9 +48,7 @@ Sometimes used to reduce stale cache risk:
 
 This is not perfect. It is a mitigation for race conditions.
 
-Engineering perspective:
-
-> I prefer simple cache invalidation first. For high-risk consistency, I use versioned keys, event-based invalidation, or avoid cache for strongly consistent operations.
+Simple cache invalidation is the preferred starting point. For high-risk consistency, use versioned keys, event-based invalidation, or avoid cache for strongly consistent operations.
 
 ## Cache Consistency
 
@@ -98,9 +96,7 @@ Solutions:
 - rate limiting;
 - authentication/authorization before expensive lookup.
 
-Practical explanation:
-
-> Cache penetration means requests bypass the cache because the requested data does not exist. I prevent it with validation, short-lived null caching, Bloom filters for large known sets, and rate limiting.
+Cache penetration means requests bypass the cache because the requested data does not exist. It is prevented with validation, short-lived null caching, Bloom filters for large known sets, and rate limiting.
 
 Request pattern:
 
@@ -126,9 +122,7 @@ Solutions:
 - longer TTL for hot keys;
 - local cache for extremely hot read-mostly data.
 
-Practical explanation:
-
-> Cache breakdown is a hot-key expiration problem. I prevent it by ensuring only one request rebuilds the hot cache entry, or by refreshing it in the background before it expires.
+Cache breakdown is a hot-key expiration problem. It is prevented by ensuring only one request rebuilds the hot cache entry, or by refreshing it in the background before it expires.
 
 Request pattern:
 
@@ -157,9 +151,7 @@ Solutions:
 - graceful degradation;
 - multi-level cache where appropriate.
 
-Practical explanation:
-
-> Cache avalanche is when many cache entries fail or expire at the same time. I use TTL jitter, pre-warming, background refresh, and database protection so the database does not receive the full traffic spike.
+Cache avalanche is when many cache entries fail or expire at the same time. TTL jitter, pre-warming, background refresh, and database protection prevent the database from receiving the full traffic spike.
 
 ## Request Coalescing
 
@@ -185,9 +177,7 @@ This can be done with:
 - background refresh;
 - stale cache response while refresh happens.
 
-Important:
-
-> A local lock only protects one application instance. In a multi-instance deployment, consider whether you need a distributed lock or whether stale-while-revalidate is simpler.
+A local lock only protects one application instance. In a multi-instance deployment, consider whether a distributed lock is needed or whether stale-while-revalidate is simpler.
 
 ## Logical Expiration
 
@@ -260,7 +250,7 @@ Solutions:
 
 Redis design should not stop at "Redis is fast". A complete design explains what happens when Redis is slow or unavailable.
 
-Questions to decide:
+Key design questions to consider:
 
 - Is Redis a cache or source of truth?
 - Can the system fall back to database?
@@ -368,11 +358,7 @@ Cons:
 
 Redis Cluster shards data by hash slots.
 
-Important:
-
-- multi-key operations require keys in same hash slot;
-- client must support cluster;
-- resharding and failover need operational understanding.
+Multi-key operations require keys in the same hash slot.
 
 Hash tag example:
 
@@ -383,13 +369,4 @@ user:{123}:settings
 
 These keys share the same hash tag.
 
-## Practice Scenarios
-
-Explain designs for:
-
-1. product detail cache;
-2. permission cache;
-3. login rate limiter;
-4. flash sale stock control;
-5. hot key mitigation;
-6. Redis outage fallback.
+The design considerations covered in this chapter -- cache consistency, hot key mitigation, outage failover, and distributed locking -- apply to production Redis usage across caching, rate limiting, and real-time coordination scenarios.

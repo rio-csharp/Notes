@@ -4,8 +4,6 @@
 
 A well-designed web API is not merely a set of endpoints that happen to return JSON. It is a contract built on HTTP semantics, resource boundaries, status codes, and predictable representations. Good API design reduces accidental ambiguity for clients and makes system behavior easier to evolve, observe, and secure.
 
-This opening chapter establishes that foundation. The later files build on it by treating DTOs, pagination, versioning, idempotency, documentation, and file transfer as consequences of API contract design rather than as isolated implementation techniques.
-
 ## Resource-Oriented Thinking
 
 An API becomes easier to understand when it models resources and their relationships clearly.
@@ -26,7 +24,7 @@ GET /api/getOrders
 POST /api/createOrder
 ```
 
-The point is not stylistic purity. Resource-oriented naming gives the client a more stable mental model. The URI identifies the resource or collection, while the HTTP method expresses the action being attempted.
+Resource-oriented naming gives the client a more stable mental model. The URI identifies the resource or collection, while the HTTP method expresses the action being attempted.
 
 ## HTTP Methods And Meaning
 
@@ -48,7 +46,7 @@ A safe operation does not change server state in the normal course of use. `GET`
 
 An idempotent operation is one whose repeated application produces the same final effect as a single application. `PUT` and `DELETE` are often designed this way even though they are not safe.
 
-These properties are not academic. They influence how clients retry requests, how intermediaries behave, and how infrastructure treats failures. Later in this chapter, idempotency receives its own file because it becomes especially important for non-idempotent workflows such as payments and order submission.
+These properties are not academic. They influence how clients retry requests, how intermediaries behave, and how infrastructure treats failures. Idempotency becomes especially important for non-idempotent workflows such as payments and order submission.
 
 ## Status Codes As Behavior Signals
 
@@ -69,7 +67,7 @@ Some of the most important ones are:
 - `429 Too Many Requests` for rate limiting;
 - `500 Internal Server Error` for unexpected server-side failure.
 
-The important point is consistency. A client should be able to learn what the API means from the status code without reverse-engineering endpoint-specific exception behavior.
+A client should be able to learn what the API means from the status code without reverse-engineering endpoint-specific exception behavior.
 
 ## `201 Created`, `202 Accepted`, And Asynchronous Work
 

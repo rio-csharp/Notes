@@ -113,16 +113,31 @@ CREATE TABLE ExportJobs
 );
 ```
 
-## Performance
+## Performance Strategies for Large Data
 
-Use:
+Export systems must handle datasets that exceed available memory on the application server. The following strategies combine to keep memory and latency predictable.
 
-- streaming;
-- pagination/batching;
-- read replicas;
-- pre-aggregated tables;
-- background workers;
-- file storage.
+### Streaming
+
+Write the export file incrementally as rows are read from the database. This keeps the working set proportional to a single page of rows rather than the total dataset.
+
+Streaming avoids holding the whole export in memory, but the database still serves all the data. For very large exports, the query itself can be a bottleneck -- use keyset pagination in the worker to break the query into chunks.
+
+### Pagination / Batching
+
+Instead of one massive query, the worker fetches rows in pages (e.g., 10,000 rows at a time) using keyset pagination. Each page is written to the output file, then the next page is fetched. This keeps each individual query fast and prevents the database from holding a large result set in memory.
+
+### Read Replicas
+
+Route export queries to a read replica to avoid impacting the primary database's transaction throughput. Since exports tolerate slightly stale data (seconds of lag are acceptable), a replica is a natural fit.
+
+### Pre-aggregated / Materialized Tables
+
+For dashboards and scheduled reports that compute aggregations over millions of rows, precompute the results periodically into summary tables. The export worker reads from the summary table rather than scanning the raw fact table.
+
+### Background Workers
+
+Export generation moves to a background job. The API accepts the request and returns immediately; the job runs on a worker that can handle long-running, memory-intensive work without blocking the request pipeline.
 
 ## Streaming CSV
 
@@ -170,29 +185,59 @@ Avoid:
 - exporting in request thread;
 - no permission filter.
 
+## Scheduled Reports
+
+For recurring exports (daily sales summary, weekly inventory report), a scheduler triggers export job creation on a cron schedule.
+
+```csharp
+public async Task GenerateScheduledReportsAsync(CancellationToken ct)
+{
+    var schedules = await _dbContext.ReportSchedules
+        .Where(x => x.IsEnabled 
+            && x.NextRunAt <= DateTimeOffset.UtcNow)
+        .ToListAsync(ct);
+
+    foreach (var schedule in schedules)
+    {
+        var jobId = await _exportService.CreateExportJobAsync(
+            schedule.ToRequest(), ct);
+        
+        schedule.LastRunAt = DateTimeOffset.UtcNow;
+        schedule.NextRunAt = CalculateNextRun(schedule.CronExpression);
+    }
+
+    await _dbContext.SaveChangesAsync(ct);
+}
+```
+
+Design considerations:
+- Use row-level locking or status-based claiming to prevent multiple scheduler instances from creating duplicate jobs for the same schedule.
+- For schedules that generate large reports, stagger the execution time rather than running all at midnight.
+- Provide a way for users to preview the report before scheduling (subset of data, same format).
+
 ## Security
 
-Exports can leak lots of data.
+Exports can leak large volumes of sensitive data. Protect with:
 
-Protect with:
-
-- permission checks;
-- tenant filters;
-- audit logs;
-- expiration on download links;
-- masking sensitive fields where needed.
+- permission checks per report type;
+- tenant and user filters (enforced on the server, not requested from the client);
+- audit logs recording every export creation, download, and failure;
+- download link expiration (short-lived signed URLs);
+- masking sensitive fields (credit card numbers, PII) based on user role;
+- rate limiting for export creation to prevent abuse.
 
 ## Audit
 
-Export systems need audit logs because exports can contain large amounts of data.
+Export systems need thorough audit logs because a single export can contain thousands of customer records.
 
-Track:
+Track for each export:
 
-- user ID;
+- requesting user ID;
 - tenant ID;
-- report type;
-- filters;
-- row count;
-- file ID;
-- created time;
-- download time.
+- report type and parameters;
+- row count in the exported file;
+- file size;
+- file ID (for traceability);
+- creation time;
+- download time (each download);
+- failure reason if the export failed.

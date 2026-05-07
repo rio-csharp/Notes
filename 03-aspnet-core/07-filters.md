@@ -4,7 +4,7 @@
 
 Filters are part of MVC execution rather than part of the global HTTP pipeline. They run only when a request reaches controller-based endpoint execution, and they provide hooks around specific MVC stages such as authorization, resource execution, action execution, exception handling, and result execution.
 
-This makes filters useful when the required behavior depends on MVC-specific context such as action arguments, model state, controller metadata, or action results. It also means filters are not a general substitute for middleware. Their scope is narrower and their purpose is more local to controller execution.
+Filters are useful when the required behavior depends on MVC-specific context such as action arguments, model state, controller metadata, or action results. They are not a general substitute for middleware — their scope is narrower and their purpose is more local to controller execution.
 
 ## Filters In The Request Flow
 
@@ -53,6 +53,8 @@ Filters are appropriate when behavior depends on MVC-specific information such a
 - the ability to short-circuit inside controller execution.
 
 Once this difference is clear, many design decisions become easier. Global exception handling, correlation IDs, and security headers usually belong in middleware. Model-state-dependent logic, controller action timing, and result transformation often belong in filters.
+
+Minimal APIs have their own filter mechanism through the `IEndpointFilter` interface, which runs during endpoint execution. Endpoint filters are conceptually closer to action filters than to middleware, because they operate within the endpoint execution stage and can inspect handler arguments and results. They do not, however, have access to MVC-specific state such as `ModelState` or `ControllerContext`. The distinction is explored further in the Controllers and Minimal APIs chapter.
 
 ## Authorization Filters
 

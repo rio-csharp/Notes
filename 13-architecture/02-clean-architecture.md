@@ -252,9 +252,7 @@ Costs:
 - slower initial development for small apps;
 - risk of over-engineering.
 
-Engineering perspective:
-
-> I use Clean Architecture when business complexity and long-term maintainability justify the structure. For small CRUD apps, a simpler layered architecture may be enough. The point is dependency direction and separation of concerns, not ceremony.
+Clean Architecture is most valuable when business complexity and long-term maintainability justify the structure. For small CRUD apps, a simpler layered architecture may be enough. The important principle is dependency direction and separation of concerns, not ceremony.
 
 ## Project References
 
@@ -458,12 +456,4 @@ public static class OrderRequestMapper
 
 Do not expose EF entities directly as API contracts. API contracts change for clients; entities change for persistence and business rules.
 
-## Practice Task
-
-Build a small order module with:
-
-- Domain: `Order`, `OrderItem`, `OrderStatus`.
-- Application: `CreateOrderHandler`, `CancelOrderHandler`.
-- Infrastructure: EF Core repository.
-- API: controller endpoints.
-- Tests: unit tests for domain rules.
+Clean Architecture provides a structure that keeps business rules independent of infrastructure concerns. The value is not in the number of projects but in the dependency rule: inner layers define interfaces; outer layers implement them. Applied with judgment, this structure allows the core business logic to remain testable, framework-independent, and insulated from change in external systems.

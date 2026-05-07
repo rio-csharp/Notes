@@ -223,25 +223,60 @@ Avoid testing:
 - third-party library internals;
 - snapshots for complex UIs without purpose.
 
-### What does React Testing Library encourage?
+## Testing Custom Hooks
 
-> It encourages testing components the way users interact with them: by text, role, label, and visible behavior rather than implementation details.
+Custom hooks can be tested in isolation using `renderHook` from `@testing-library/react`.
 
-### Unit vs E2E frontend tests?
+```tsx
+import { renderHook, act } from "@testing-library/react";
+import { useDebouncedValue } from "./useDebouncedValue";
 
-> Component tests verify UI pieces in isolation. E2E tests verify complete user flows in a real browser.
+test("debounces value changes", async () => {
+  vi.useFakeTimers();
 
-### Why use MSW?
+  const { result, rerender } = renderHook(
+    ({ value }) => useDebouncedValue(value, 300),
+    { initialProps: { value: "a" } }
+  );
 
-> MSW mocks network requests at the request layer, making tests closer to real application behavior than mocking every API function manually.
+  expect(result.current).toBe("a");
 
-## Practice Task
+  rerender({ value: "ab" });
+  expect(result.current).toBe("a"); // still the old value
 
-Test:
+  act(() => { vi.advanceTimersByTime(300); });
+  expect(result.current).toBe("ab");
 
-1. order table empty state;
-2. order list loading state;
-3. API error state;
-4. create order form validation;
-5. successful submit;
-6. permission-hidden action button.
+  vi.useRealTimers();
+});
+```
+
+`renderHook` creates a test environment where the hook runs inside a component, supporting state updates, effects, and context providers. The `act` wrapper ensures all state updates and effects are flushed before assertions.
+
+## Accessibility Testing
+
+Accessibility issues can be caught with automated tools such as `jest-axe`:
+
+```tsx
+import { render } from "@testing-library/react";
+import { axe, toHaveNoViolations } from "jest-axe";
+
+expect.extend(toHaveNoViolations);
+
+test("OrderTable has no accessibility violations", async () => {
+  const { container } = render(
+    <OrderTable orders={[{ id: 1001, status: "Paid" }]} />
+  );
+
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
+```
+
+Automated accessibility testing catches common issues such as missing labels, insufficient color contrast, and incorrect ARIA attributes. It does not replace manual testing with assistive technologies, but it provides a fast feedback loop during development.
+
+React Testing Library encourages testing components the way users interact with them: by text, role, label, and visible behavior rather than implementation details. This approach produces tests that survive refactoring and give more confidence that the application works correctly from the user's perspective.
+
+Component tests verify UI pieces in isolation, often with mocked data and network responses. Integration tests verify interactions between components and data layers. E2E tests (via Playwright or Cypress) verify complete user flows in a real browser, including navigation, authentication, and network behavior. Each layer serves a different purpose: component tests are fast and focused, integration tests catch coordination bugs, and E2E tests validate the system as a whole.
+
+MSW (Mock Service Worker) mocks network requests at the request layer, intercepting actual `fetch` or `XMLHttpRequest` calls in tests. This is closer to real application behavior than manually mocking every API function, because it tests the actual data-fetching code paths.

@@ -2,9 +2,7 @@
 
 ## Core Idea
 
-Transactions define atomic boundaries for change. Isolation levels define how concurrent transactions can observe or interfere with one another. Locking and concurrency behavior are therefore not secondary implementation details. They are part of the correctness model of relational systems.
-
-This chapter explains those ideas at the database level so that later application-layer patterns, including ORM behavior and distributed workflow design, can rest on a firmer foundation.
+Transactions define atomic boundaries for change. Isolation levels define how concurrent transactions can observe or interfere with one another. Locking and concurrency behavior are therefore not secondary implementation details. They are part of the correctness model of relational systems. Understanding these ideas at the database level provides a firm foundation for later application-layer patterns, including ORM behavior and distributed workflow design.
 
 ## ACID As A Practical Model
 
@@ -59,7 +57,7 @@ That is why isolation level should be chosen according to correctness requiremen
 
 `Repeatable Read` and `Serializable` strengthen guarantees, but they may also enlarge lock duration or constrain concurrency more aggressively.
 
-`Snapshot` isolation uses versioned reads rather than traditional blocking reads, improving some concurrency patterns while still leaving write-conflict questions to be resolved.
+`Snapshot` isolation uses versioned reads rather than traditional blocking reads. When enabled, the database stores row versions in tempdb (in SQL Server). A `SELECT` under snapshot isolation reads the latest committed version as of the start of the transaction, without acquiring shared locks. This eliminates most read-write blocking but adds tempdb overhead and may increase the cost of write operations that must check for version conflicts.
 
 The key engineering point is that no isolation level is simply "best." Each is a different correctness-versus-concurrency trade.
 
@@ -93,7 +91,7 @@ Distinguishing among these states matters because the remedy depends on which on
 
 Deadlocks are often treated as random database bad luck. They are usually design signals.
 
-Common causes include:
+Typical contributing factors include:
 
 - inconsistent resource access order;
 - transactions that remain open too long;
@@ -108,6 +106,20 @@ One of the worst transaction patterns is holding a database transaction open whi
 
 Short transaction boundaries are therefore not only a performance recommendation. They are part of concurrency design.
 
+## Application-Level Coordination With `sp_getapplock`
+
+When database isolation levels are too coarse or too expensive for a specific concurrency requirement, SQL Server's `sp_getapplock` provides application-defined locking. It acquires a named lock that can be shared or exclusive, scoped to the current transaction:
+
+```sql
+EXEC sp_getapplock @Resource = 'OrderPayment_123',
+    @LockMode = 'Exclusive',
+    @LockTimeout = 5000;
+```
+
+This is useful for coordinating access to a specific business resource (such as a single order's payment flow) without using pessimistic locking on database rows. The lock is released when the transaction commits or rolls back.
+
+`sp_getapplock` should be used sparingly. It adds explicit serialization that can become a bottleneck if overused. It is most appropriate for operations where the database's native locking is not granular enough or where the application needs a named, transaction-scoped mutex across multiple database operations.
+
 ## Indexing And Concurrency
 
 Missing or weak indexes can increase deadlock and blocking risk because the database must inspect and lock more data to find the target rows. This is an important reminder that physical design supports correctness as well as speed.
@@ -116,7 +128,7 @@ A good index narrows the search space. A narrow search space often means fewer l
 
 ## Investigation And Operational Evidence
 
-When concurrency issues appear in production, evidence matters. Deadlock graphs, blocking chains, running requests, transaction duration, execution plans, and application traces all contribute to the diagnosis.
+When concurrency issues appear in production, evidence matters. Deadlock graphs (captured in SQL Server via the `system_health` Extended Events session or by enabling trace flag 1222), blocking chains, running requests, transaction duration, execution plans, and application traces all contribute to the diagnosis.
 
 The goal is not only to handle the immediate incident. It is to identify whether the real cause is query shape, index quality, workflow design, or isolation choice.
 

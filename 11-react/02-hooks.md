@@ -27,7 +27,7 @@ React relies on call order.
 
 ## Under The Hood: Why Hook Order Matters
 
-React associates hook state with a component's fiber and the order of hook calls.
+Internally, React stores hook state on the component's fiber node using a linked list. Each hook call during rendering appends a node to this list containing the hook's type, its current value, and a pointer to the next hook. The order of hook calls determines each hook's position in this linked list.
 
 Conceptual model:
 
@@ -85,9 +85,7 @@ function Counter({ enabled }: { enabled: boolean }) {
 }
 ```
 
-Practical explanation:
-
-> Hooks must be called in the same order on every render because React stores hook state by call order on the component fiber. Conditions should go inside the hook, not around the hook call.
+Hooks must be called in the same order on every render because React stores hook state by call order on the component fiber. Conditions should go inside the hook, not around the hook call.
 
 ## useState
 
@@ -203,7 +201,7 @@ cleanup old connection
 create new connection
 ```
 
-Common mistake:
+A common oversight is omitting cleanup:
 
 ```tsx
 useEffect(() => {
@@ -211,7 +209,7 @@ useEffect(() => {
 }, []);
 ```
 
-No cleanup means the interval can keep running after unmount.
+Without a cleanup function, the interval continues running after the component unmounts, which can lead to memory leaks and state updates on unmounted components.
 
 Bad:
 
@@ -337,24 +335,8 @@ Usage:
 const debouncedSearch = useDebouncedValue(search, 300);
 ```
 
-### Why do hooks have rules?
+React tracks hook state by the order of calls within a component, stored as a linked list on the component's fiber node. Conditional or nested hook calls can change this order between renders and break state association. This is why hooks must always be called at the top level of a component or custom hook, never inside conditions or loops.
 
-> React tracks hook state by call order. Conditional or nested hook calls can change the order between renders and break state association.
+A stale closure occurs when a function captures variables from a particular render cycle and later uses outdated values. This is commonly encountered inside `useEffect` callbacks or event handlers that close over state or props. Solutions include using functional updates (`setCount(c => c + 1)`) when the new value depends only on the previous value, adding the captured value to the dependency array, or storing the value in a ref to avoid capture issues.
 
-### What is stale closure?
-
-> A stale closure happens when a function captures old render values and later uses outdated state or props. Functional updates, refs, or correct dependencies can fix it.
-
-### useEffect vs useLayoutEffect?
-
-> `useEffect` runs after paint. `useLayoutEffect` runs synchronously after DOM mutations but before paint, useful for layout measurement. Overusing `useLayoutEffect` can hurt performance.
-
-## Practice Task
-
-Build:
-
-- `useDebouncedValue`;
-- `usePrevious`;
-- `useLocalStorage`;
-- `useApiQuery` wrapper;
-- a form with reducer-managed state.
+Effect timing follows a consistent lifecycle: React renders the component, commits DOM changes, the browser paints, then it runs `useEffect` callbacks. On dependency changes, the previous effect's cleanup runs before the new effect. `useLayoutEffect` runs synchronously after DOM mutations but before the browser paints, which makes it suitable for reading layout geometry or applying visible DOM changes that should not cause a flicker. Overusing `useLayoutEffect` can block the paint and hurt perceived performance, so it should be reserved for cases where synchronous measurement is genuinely required.

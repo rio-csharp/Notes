@@ -185,6 +185,10 @@ public sealed class CorrelationIdMiddleware
             ["CorrelationId"] = correlationId
         }))
         {
+            // BeginScope creates a logging scope that appends the key-value
+            // pair to every log message emitted within this block. The scope
+            // propagates through the async context automatically, so logs
+            // written by deep call chains carry the same CorrelationId.
             await _next(context);
         }
     }
@@ -458,28 +462,4 @@ Weak action item:
 Be more careful next time.
 ```
 
-## Practice Task
 
-Write an incident note for this scenario:
-
-```text
-POST /api/orders became slow after a deployment.
-p95 latency is 9 seconds.
-Error rate is 8%.
-Traces show most time is spent in SQL.
-Large tenants are affected more than small tenants.
-```
-
-Include:
-
-```text
-Symptom:
-Scope:
-Impact:
-Recent changes:
-Evidence:
-Hypothesis:
-Mitigation:
-Verification:
-Prevention actions:
-```

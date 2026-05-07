@@ -4,8 +4,6 @@
 
 Rate limiting is often introduced as a performance or API-governance feature, but in security-sensitive systems it is also an abuse-resistance control. It slows brute-force attacks, reduces credential-stuffing throughput, limits automated scraping, and helps preserve availability under both malicious and accidental pressure.
 
-This chapter treats rate limiting as part of application security rather than as a purely operational afterthought.
-
 ## Security-Sensitive Endpoints
 
 Some endpoints deserve stronger rate-limiting attention than others:
@@ -19,7 +17,7 @@ Some endpoints deserve stronger rate-limiting attention than others:
 - payment attempts;
 - webhook intake under abuse pressure.
 
-The point is not that every endpoint needs the same limit. The point is that the system should understand where retries are normal, where guesses are dangerous, and where request amplification is costly.
+The system should understand where retries are normal, where guesses are dangerous, and where request amplification is costly.
 
 ## Limit Keys And Identity Dimensions
 

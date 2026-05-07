@@ -111,9 +111,7 @@ Common tenant identification sources:
 - selected organization in user profile;
 - API key mapped to tenant.
 
-Security rule:
-
-> Do not trust a tenant ID from the client until the authenticated user or credential is verified to belong to that tenant.
+A critical security principle is to never trust a tenant ID from the client until the authenticated user or credential is verified to belong to that tenant.
 
 For browser apps, token claims and server-side membership checks are usually safer than trusting a request header alone.
 
@@ -415,7 +413,7 @@ ON Orders (TenantId, Status, CreatedAt DESC)
 INCLUDE (Total, CustomerId);
 ```
 
-Why:
+The index structure supports:
 
 - most queries filter by tenant;
 - it improves isolation of tenant-specific scans;
@@ -439,8 +437,6 @@ using (_logger.BeginScope(new Dictionary<string, object>
 ```
 
 Metrics should allow tenant-level debugging without creating too much cardinality.
-
-Chinese note:
 
 Do not label every metric with tenant ID in high-traffic systems unless the monitoring platform can handle it.
 
@@ -493,15 +489,4 @@ Blob path example:
 var blobName = $"tenants/{tenantId:N}/orders/{orderId}/files/{fileId:N}.pdf";
 ```
 
-## Practice Task
 
-Implement:
-
-1. tenant claim parsing.
-2. `ITenantContext`.
-3. EF Core query filter.
-4. tenant-aware cache keys.
-5. tenant-aware blob paths.
-6. background job tenant context.
-7. cross-tenant access tests.
-8. admin audit log.

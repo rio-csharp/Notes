@@ -170,6 +170,68 @@ Bad tests often:
 - duplicate implementation logic;
 - are hard to understand when they fail.
 
+## Test Doubles: Mocks, Stubs, Fakes, And Spies
+
+Test doubles replace real dependencies to isolate the code under test. Each type serves a different purpose:
+
+| Type | Purpose | Example |
+| --- | --- | --- |
+| **Stub** | Provides predetermined answers to calls made during the test | A repository stub that always returns a specific customer |
+| **Mock** | Verifies that specific interactions happened | A mock that asserts `SendEmailAsync` was called exactly once |
+| **Fake** | A lightweight working implementation of a dependency | An in-memory database, a `FakeEmailSender` that stores messages in a list |
+| **Spy** | Records interactions for later verification | A wrapper around a real object that tracks which methods were called |
+
+In practice, the boundary between these types is often blurry. The important distinction is:
+
+- **State verification**: Check the result of an operation. Use stubs to provide inputs, then assert on the returned value or observable state.
+- **Interaction verification**: Check that the code called the right methods with the right arguments. Use mocks when the side effect matters (sending an email, publishing an event), not the return value.
+
+Prefer state verification over interaction verification where possible. Tests that assert on mocks tend to be more coupled to implementation details. When a mock test fails, the failure often indicates a change in how the code is structured rather than a broken behavior.
+
+### Mocking in .NET
+
+```csharp
+using NSubstitute;
+
+public sealed class OrderApprovalTests
+{
+    [Fact]
+    public async Task Approve_Should_Send_Notification()
+    {
+        var notificationService = Substitute.For<INotificationService>();
+        var handler = new ApproveOrderHandler(notificationService);
+
+        await handler.HandleAsync(orderId: 1, userId: 100);
+
+        await notificationService.Received(1).SendAsync(
+            Arg.Is<Notification>(n => n.Type == "OrderApproved"));
+    }
+}
+```
+
+### Fakes in Practice
+
+Fakes are useful when a real dependency is too slow or unavailable but the test needs realistic behavior:
+
+```csharp
+public sealed class FakePaymentGateway : IPaymentGateway
+{
+    public Dictionary<string, PaymentResult> Results { get; } = new();
+
+    public Task<PaymentResult> ChargeAsync(ChargeRequest request)
+    {
+        if (Results.TryGetValue(request.OrderId, out var result))
+        {
+            return Task.FromResult(result);
+        }
+
+        return Task.FromResult(PaymentResult.Success());
+    }
+}
+```
+
+Use fakes for complex dependencies (databases, file systems, message queues) where every test would otherwise need extensive mock setup. The trade-off is maintenance: a fake must be kept in sync with the real interface.
+
 ## Arrange Act Assert
 
 Use a clear structure.
@@ -271,21 +333,4 @@ Good names describe:
 - the condition;
 - the expected result.
 
-## Practice Task
 
-For a simple order workflow, decide which tests belong in:
-
-1. unit tests.
-2. integration tests.
-3. E2E tests.
-
-Write the answers for:
-
-```text
-order validation
-order persistence
-authorization
-checkout flow
-payment callback
-error rendering in browser
-```

@@ -41,8 +41,6 @@ Commit phase:
 - run layout effects;
 - update refs.
 
-Rule:
-
 Do not perform side effects during render.
 
 Bad:
@@ -98,13 +96,11 @@ Fiber tree
 
 Each fiber represents work for a component or host element.
 
-Practical answer:
-
-> Fiber is React's internal unit-of-work architecture. It allows React to split rendering work, prioritize updates, and separate calculating the next UI from committing changes to the DOM.
+Fiber is React's internal unit-of-work architecture. It allows React to split rendering work, prioritize updates, and separate calculating the next UI from committing changes to the DOM.
 
 ## Trigger, Render, Commit
 
-A good review explanation:
+The rendering cycle:
 
 ```text
 1. Trigger: state, props, context, or external store update happens.
@@ -145,9 +141,7 @@ React can process these together instead of rendering three separate times.
 
 Modern React supports automatic batching in more scenarios than older versions.
 
-Key point:
-
-> State updates are scheduled. React may batch them, so reading state immediately after calling `setState` may still show the value from the current render.
+State updates are scheduled. React may batch them, so reading state immediately after calling `setState` may still show the value from the current render.
 
 Example:
 
@@ -192,15 +186,7 @@ function handleSearch(value: string) {
 }
 ```
 
-Important:
-
-- concurrent rendering does not mean JavaScript runs on multiple threads;
-- it means React can interrupt, pause, discard, and restart rendering work before commit;
-- committed UI remains consistent.
-
-Engineering perspective:
-
-> Concurrent rendering allows React to keep the UI responsive by prioritizing urgent work and interrupting non-urgent rendering. It does not make component code run in parallel threads.
+Concurrent rendering does not mean JavaScript runs on multiple threads. It means React can interrupt, pause, discard, and restart rendering work before commit. Committed UI remains consistent. Concurrent rendering allows React to keep the UI responsive by prioritizing urgent work and interrupting non-urgent rendering. It does not make component code run in parallel threads.
 
 ## State Updates Are Scheduled
 
@@ -250,11 +236,9 @@ function Timer() {
 }
 ```
 
-Bug:
-
 `count` inside the interval is always the value from the first render.
 
-Fix:
+One fix:
 
 ```tsx
 useEffect(() => {
@@ -290,7 +274,11 @@ Using index as key can cause bugs when items are inserted, removed, or reordered
 
 ## Reconciliation Details: Type And Key
 
-React uses component type and key to decide whether to preserve or recreate state.
+React uses component type and key to decide whether to preserve or recreate DOM nodes and component state. During reconciliation, React compares the new element tree against the previous fiber tree using a two-level heuristic:
+
+1. **Type comparison**: If the element type at the same position changes (e.g., `<div>` becomes `<span>`, or `<UserForm>` becomes `<AdminForm>`), React tears down the entire subtree and builds it from scratch, even if the children are identical. Type change means React assumes the old subtree is completely unrelated.
+
+2. **Key comparison**: Within a list, React uses the `key` prop to match children across renders. Keys allow React to identify which items moved, were added, or were removed, rather than relying on position alone.
 
 Same type and same key:
 
@@ -327,7 +315,7 @@ Bad key choice:
 
 If list order changes, React may preserve state on the wrong row.
 
-## Why Derived State Can Be A Bug
+## Derived State and Its Pitfalls
 
 Bad:
 
@@ -348,9 +336,7 @@ Better options:
 - derive directly during render if no editing is needed;
 - use effect carefully only when synchronization is truly needed.
 
-Practical explanation:
-
-> I avoid copying props into state unless I need a separate editable draft. Derived values should usually be computed during render or memoized if expensive.
+Avoid copying props into state unless a separate editable draft is needed. Derived values should usually be computed during render or memoized if expensive.
 
 ## React.memo
 
@@ -397,9 +383,7 @@ const handleSelect = useCallback((id: string) => {
 }, []);
 ```
 
-Common Practical explanation:
-
-> `useMemo` is for expensive derived values. `useCallback` is for stable function references, often when passing callbacks to memoized children or hooks that depend on function identity.
+`useMemo` is for expensive derived values. `useCallback` is for stable function references, often when passing callbacks to memoized children or hooks that depend on function identity.
 
 ## Server State vs Client State
 
@@ -447,35 +431,6 @@ function OrdersPage() {
 }
 ```
 
-### What causes a React component to re-render?
+A component re-renders when its state changes, its parent renders and passes new props, context it consumes changes, or an external store subscription updates. Reconciliation is React's process of comparing the previous UI tree with the new UI tree through type and key heuristics, then committing only the necessary changes to the real DOM. Fiber, React's internal unit-of-work architecture, enables this by splitting rendering work into incremental units, supporting prioritization and concurrent rendering, and cleanly separating the render phase (calculating the next UI) from the commit phase (applying DOM mutations and running effects). Keys help React preserve identity of list items across renders; stable keys prevent incorrect state reuse when items are reordered, inserted, or removed.
 
-> A component re-renders when its state changes, its parent renders and passes new props, context it consumes changes, or an external store subscription updates.
-
-### What is reconciliation?
-
-> Reconciliation is React's process of comparing the previous UI tree with the new UI tree and deciding what changes need to be committed to the real DOM.
-
-### What is React Fiber?
-
-> Fiber is React's internal unit-of-work architecture. It lets React split rendering work, prioritize updates, support concurrent rendering, and separate the render phase from the commit phase.
-
-### Why are keys important?
-
-> Keys help React preserve identity of list items across renders. Stable keys prevent incorrect state reuse when list items are reordered, inserted, or removed.
-
-### How do you optimize React rendering?
-
-> First measure. Then reduce unnecessary state changes, keep state close to where it is used, split components, use stable keys, memoize expensive calculations, use `React.memo` carefully, virtualize large lists, and avoid recreating heavy objects unnecessarily.
-
-## Practice Task
-
-Build a paginated users table with:
-
-- search box;
-- debounced search;
-- React Query;
-- loading state;
-- error state;
-- empty state;
-- stable row keys;
-- memoized expensive filtering only when needed.
+Performance optimization in React follows a principle of measuring before acting: identify unnecessary state changes, keep state close to where it is used, split large components, use stable keys, memoize expensive calculations with `useMemo`, apply `React.memo` selectively after measurement, virtualize large lists, and avoid recreating heavy objects and function references unnecessarily during render.

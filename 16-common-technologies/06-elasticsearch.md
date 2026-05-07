@@ -68,6 +68,8 @@ An inverted index maps:
 term -> documents containing that term
 ```
 
+The mapping from terms to document lists is stored in a **term dictionary** -- a sorted data structure (often a variant of a B-tree or a skip list) that allows fast term lookup. For each term, the index maintains a **postings list**: the set of document IDs where that term appears, along with frequency and position data.
+
 Example documents:
 
 ```json
@@ -92,9 +94,7 @@ Search engines can also store metadata such as:
 - offsets for highlighting;
 - doc values for sorting and aggregations.
 
-Engineering perspective:
-
-> Elasticsearch is fast for text search because it does not scan every document. It uses inverted indexes to jump from search terms to matching documents, then scores and ranks them.
+Elasticsearch is fast for text search because it does not scan every document. It uses inverted indexes to jump from search terms to matching documents, then scores and ranks them.
 
 ## Analyzer Pipeline: Character Filter, Tokenizer, Token Filter
 
@@ -143,9 +143,7 @@ Simple custom analyzer example:
 }
 ```
 
-Important Key point:
-
-> The analyzer used at index time must be compatible with the analyzer used at search time. Wrong analyzer choice causes "the data is there, but search cannot find it" bugs.
+The analyzer used at index time must be compatible with the analyzer used at search time. Wrong analyzer choice causes "the data is there, but search cannot find it" bugs.
 
 ## Mapping: `text` vs `keyword`
 
@@ -191,14 +189,14 @@ Mapping example:
 }
 ```
 
-Why multi-fields matter:
+Multi-fields serve distinct query purposes:
 
 ```text
 name          -> full-text search
 name.keyword  -> exact sort/aggregation
 ```
 
-Common mistake:
+A `term` query on a `text` field often produces unexpected results because the field is tokenized. For example:
 
 ```json
 {
@@ -208,7 +206,7 @@ Common mistake:
 }
 ```
 
-If `name` is `text`, it may be tokenized into lowercase terms. Exact `term` query on analyzed text often surprises people. Use `match` for full text or `.keyword` for exact matching.
+If `name` is `text`, it may be tokenized into lowercase terms, so an exact `term` query will not match. Use `match` for full-text search or `.keyword` for exact matching.
 
 ## Shards And Replicas
 
@@ -237,17 +235,11 @@ But too many shards hurt:
 - slower cluster recovery;
 - small shards waste resources.
 
-Chinese note:
-
-Practical explanation:
-
-> Shards are not free. I choose shard count based on data size, query load, growth, and operational constraints. Too few shards limit scale; too many shards create overhead.
+Shards are not free. Shard count should be chosen based on data size, query load, growth, and operational constraints. Too few shards limit scale; too many shards create overhead.
 
 ## Refresh, Flush, Segment Merge, And Near Real-Time Search
 
 Elasticsearch is near real-time, not instantly consistent.
-
-Chinese note:
 
 Simplified write path:
 
@@ -285,7 +277,7 @@ Common misconception:
 
 Elasticsearch commonly uses BM25 scoring.
 
-You do not need to derive the formula in most full-stack engineering practice, but you should know the intuition.
+The formula does not need to be derived in most full-stack engineering practice, but the intuition is worth understanding.
 
 BM25 considers:
 
@@ -403,7 +395,7 @@ Use:
 - scroll for batch processing;
 - index sorting where useful.
 
-Why deep pagination is expensive:
+Deep pagination is expensive because:
 
 ```text
 from = 10000
@@ -473,9 +465,7 @@ Alias switch example:
 }
 ```
 
-Engineering perspective:
-
-> I do not treat mapping changes casually. I use versioned indexes and aliases so I can rebuild, validate, switch, and roll back without breaking search.
+Mapping changes should not be treated casually. Versioned indexes and aliases allow rebuilding, validation, switching, and rollback without breaking search.
 
 ## Syncing Data
 
@@ -508,7 +498,7 @@ indexer
   -> update Elasticsearch document
 ```
 
-Why not write SQL and Elasticsearch directly in the request without a plan?
+Writing SQL and Elasticsearch directly in the same request without a coordination plan creates several problems:
 
 - SQL write may succeed but indexing may fail;
 - indexing may succeed but SQL transaction may roll back;
@@ -584,13 +574,11 @@ Risks:
 - logs may include query terms with private data;
 - snapshots/backups need access control.
 
-Engineering perspective:
-
-> Search authorization must not rely only on frontend filters. The backend query builder must always enforce tenant and permission filters, and the indexed document should avoid unnecessary sensitive fields.
+Search authorization must not rely only on frontend filters. The backend query builder must always enforce tenant and permission filters, and the indexed document should avoid unnecessary sensitive fields.
 
 ## Troubleshooting Search Problems
 
-Problem: document exists but search cannot find it.
+A document exists but search cannot find it.
 
 Check:
 
@@ -602,7 +590,7 @@ Check:
 - indexing pipeline failed;
 - stale alias points to old index.
 
-Problem: search is slow.
+Search is slow.
 
 Check:
 
@@ -615,7 +603,7 @@ Check:
 - overloaded cluster;
 - segment merge pressure.
 
-Problem: results are irrelevant.
+Results are irrelevant.
 
 Check:
 
@@ -627,17 +615,4 @@ Check:
 - business ranking signals;
 - spelling/fuzzy settings.
 
-## Practice Task
-
-Design product search with:
-
-1. SQL source of truth;
-2. product indexed document;
-3. event-driven index update;
-4. autocomplete;
-5. reindex process;
-6. search result pagination.
-7. tenant filter;
-8. versioned index and alias;
-9. outbox-based indexing;
-10. stale result handling.
+The Elasticsearch design patterns in this chapter -- inverted index mapping analysis, alias-based reindexing, outbox-driven synchronization, and multi-tenant query isolation -- address the full lifecycle of production search index management.

@@ -78,9 +78,7 @@ Clean Architecture changes direction so inner layers do not depend on infrastruc
 
 ## A Complete Order Example
 
-Layered architecture becomes easier to understand when you see how one use case flows through the layers.
-
-Example use case:
+Consider one use case flowing through the layers:
 
 ```text
 POST /api/orders/{orderId}/cancel
@@ -348,7 +346,7 @@ public sealed class CancelOrderServiceTests
 }
 ```
 
-## When A Layer Can Be Skipped
+## Skipping A Layer
 
 Layering should serve clarity, not ceremony.
 
@@ -366,13 +364,4 @@ Controller -> Application Service -> Domain -> Repository/UnitOfWork
 
 Good architecture is proportional to complexity.
 
-## Practice Task
-
-Design an order module with:
-
-1. API controller;
-2. application service;
-3. domain entity;
-4. EF Core repository;
-5. DTO mapping;
-6. tests for domain rules.
+Layered architecture is not measured by how many layers a project has; it is measured by whether the boundary between layers protects the right concerns. A well-structured order module separates HTTP negotiation, use-case orchestration, business rules, and persistence into distinct responsibilities. The decision to introduce or skip a layer depends on complexity, not dogma.

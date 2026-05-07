@@ -22,15 +22,9 @@ seen.Add(1);
 
 Use when checking membership or uniqueness.
 
-## How A Hash Table Works
+## Hash Table Internals
 
-A hash table usually has:
-
-- an array of buckets;
-- a hash function;
-- an equality comparison;
-- collision handling;
-- resizing when it becomes too full.
+A hash table stores entries in an array of buckets, using a hash function to determine placement and an equality comparer to resolve ambiguity.
 
 Mental model:
 
@@ -38,9 +32,22 @@ Mental model:
 key -> GetHashCode() -> bucket index -> compare keys in bucket -> value
 ```
 
-Average operations are `O(1)` when hash codes are well distributed.
+### .NET Implementation Details
 
-Worst case can degrade toward `O(n)` if many keys collide.
+`Dictionary<TKey, TValue>` in .NET uses **separate chaining** for collision resolution. Internally, it maintains:
+
+- an `int[]` called `_buckets` that maps hash codes to entry indices;
+- an `Entry[]` array where each entry stores the hash code, key, value, and the index of the next entry in the same bucket.
+
+When a collision occurs (two keys hash to the same bucket), new entries are linked together forming a chain. During lookup, the dictionary follows the chain, comparing keys with `Equals` until it finds a match or reaches the end.
+
+For small bucket chains, a linear scan is fast. If a bucket accumulates many entries due to poor hash distribution, the chain length grows and performance degrades toward `O(n)`. .NET 7 introduced improvements to convert long chains into array-based storage for faster scanning.
+
+### Resizing
+
+When the load factor (entry count / bucket count) exceeds a threshold, the dictionary allocates a larger bucket array and rehashes all existing entries. This is an `O(n)` operation but happens infrequently, which is why `Add` is amortized `O(1)`.
+
+Average operations are `O(1)` when hash codes are well distributed. Worst case degrades toward `O(n)` if many keys collide into the same bucket.
 
 ## Collision
 
@@ -51,9 +58,9 @@ A collision happens when different keys map to the same bucket.
 "xyz" -> bucket 5
 ```
 
-The dictionary then uses equality checks to find the correct key inside that bucket.
+The dictionary traverses the chain at that bucket, using `Equals` to identify the correct key.
 
-That is why both `GetHashCode` and `Equals` matter.
+That is why both `GetHashCode` and `Equals` must be implemented correctly. A good hash function spreads keys evenly; correct equality semantics ensure the right entry is found within a bucket chain.
 
 ## Custom Equality
 
@@ -205,7 +212,7 @@ public int SubarraySum(int[] nums, int k)
 }
 ```
 
-Why it works:
+How it works:
 
 ```text
 currentPrefix - previousPrefix = k
@@ -272,11 +279,4 @@ Operations are `O(1)` because:
 - dictionary finds nodes quickly;
 - linked list moves/removes known nodes quickly.
 
-## Practice Problems
-
-- Two Sum
-- Valid Anagram
-- Group Anagrams
-- Longest Consecutive Sequence
-- Contains Duplicate
-- Subarray Sum Equals K
+Hash tables underpin a broad class of efficient lookup problems including anagram grouping, duplicate detection, consecutive sequence analysis, and subarray sum counting.

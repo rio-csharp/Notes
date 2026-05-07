@@ -207,27 +207,59 @@ If user is offline:
 
 ## Presence
 
-Redis can store online users:
+Tracking which users are online and which conversations they are in enables features like online status indicators and "user is typing" notifications.
+
+### Redis-Based Presence
+
+Store each user's active SignalR connection IDs in a Redis set. The set membership expires after a timeout (e.g., 60 seconds), and the client sends periodic heartbeats within the timeout to retain membership.
 
 ```text
-user:{userId}:connections -> set of connection IDs
+Key:   presence:user:{userId}:connections
+Value: set of connection IDs
+TTL:   60 seconds (reset by heartbeat)
 ```
 
-Use TTL/heartbeat to avoid stale presence.
+When all connections for a user expire, the user is considered offline. A pub/sub channel (`presence:events`) announces online/offline transitions so other services can react (e.g., hide the "online" badge).
+
+### Heartbeat Mechanism
+
+```csharp
+// Client sends heartbeat every 30 seconds
+public async Task Heartbeat()
+{
+    await _redis.KeyExpireAsync($"presence:user:{userId}:connections", 
+        TimeSpan.FromSeconds(60));
+}
+```
+
+If the client disconnects abruptly (network failure, browser crash), the TTL handles the cleanup: the user appears online for at most 60 seconds after the last heartbeat. An immediate cleanup on disconnect improves accuracy:
+
+```csharp
+public override async Task OnDisconnectedAsync(Exception? exception)
+{
+    await _redis.SetRemoveAsync($"presence:user:{userId}:connections", Context.ConnectionId);
+    // Optionally announce offline if no connections remain
+    await base.OnDisconnectedAsync(exception);
+}
+```
 
 ## Scaling SignalR
 
-Single server is simple.
+Single-server SignalR is simple: all connections and in-memory groups are local. When traffic exceeds a single server, the architecture must route messages to the correct server that holds each connection.
 
-Multiple servers need:
+### Options for Multi-Server SignalR
 
-- sticky sessions, or
-- SignalR backplane, or
-- managed service such as Azure SignalR Service.
+| Approach | Mechanism | Trade-off |
+|---|---|---|
+| **Sticky sessions** | Load balancer routes the same client to the same server | Breaks if a server goes down; not suitable for all load balancers |
+| **SignalR backplane** | Servers subscribe to a shared pub/sub channel (Redis, Azure Service Bus). When a message targets a connection on another server, the backplane forwards it | Adds latency per message; Redis backplane is simple to set up |
+| **Managed SignalR (Azure SignalR Service)** | The service manages connections centrally; app servers are stateless | Vendor lock-in; per-connection cost; reduces operational complexity |
 
-## Practice Task
+For self-hosted deployments, the Redis backplane is the most common approach. It uses Redis pub/sub to broadcast messages to all servers. Each server listens to a Redis channel and forwards messages to its local connections.
 
-Design:
+## Verification
+
+Key aspects to verify:
 
 1. one-to-one chat;
 2. group chat;

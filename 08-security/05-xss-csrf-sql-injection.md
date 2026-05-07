@@ -4,8 +4,6 @@
 
 Some of the most important web security failures occur at input and rendering boundaries: untrusted data becomes executable script, the browser sends authenticated requests the user did not intend, or application input alters backend command meaning. XSS, CSRF, and injection are classic examples because they expose how thin the line can be between data and behavior.
 
-This chapter groups them together because they all depend on boundary confusion.
-
 ## Cross-Site Scripting
 
 Cross-site scripting occurs when attacker-controlled content is interpreted as executable script in the victim's browser.
@@ -32,7 +30,7 @@ CSRF occurs when the browser sends an authenticated request that the user did no
 
 This is why CSRF risk depends strongly on the authentication model. Cookie-based sessions or refresh flows require deliberate CSRF thinking. Token-in-header APIs are less exposed to classic CSRF, but they often carry stronger XSS concerns instead.
 
-The point is not that one model has no risks. It is that different session strategies shift where the primary browser-side danger lies.
+No session model has zero risks. Different strategies shift where the primary browser-side danger lies.
 
 ## CSRF Defenses
 

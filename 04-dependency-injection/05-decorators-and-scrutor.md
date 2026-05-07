@@ -4,7 +4,7 @@
 
 Decorators allow a service to be wrapped with additional behavior without changing the core implementation or the interface seen by callers. In DI-heavy applications, this is one of the cleanest ways to attach cross-cutting concerns such as logging, caching, metrics, retries, tracing, or auditing around an existing service.
 
-This chapter treats decorators as part of service composition rather than as a design-pattern sidebar. The important architectural question is not merely how to wrap one service. It is how to keep business behavior focused while still allowing infrastructure behavior to be layered on through the container.
+Decorators are part of service composition. The architectural question is how to keep business behavior focused while still allowing infrastructure behavior to be layered on through the container.
 
 ## The Core Service And The Wrapped Interface
 
@@ -219,7 +219,7 @@ services.Scan(scan => scan
 
 This can be useful when conventions are simple and well understood. It can also become a source of hidden behavior if registration rules are too broad or surprising. The design trade-off is therefore similar to many DI features: less ceremony can be helpful, but only if it does not make the dependency graph harder to inspect.
 
-In book terms, assembly scanning belongs to the same family of convenience mechanisms as keyed services and delegate factories. It reduces registration noise, but it should not be allowed to hide architectural intent. If a reader cannot tell why a service exists in the graph or which implementation was selected, the convenience has gone too far.
+Assembly scanning belongs to the same family of convenience mechanisms as keyed services and delegate factories. It reduces registration noise, but it should not hide architectural intent. If a reader cannot tell why a service exists in the graph or which implementation was selected, the convenience has gone too far.
 
 ## Decorator Versus Inheritance
 

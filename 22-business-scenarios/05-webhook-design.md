@@ -228,7 +228,7 @@ Workers should be idempotent too. A crash can happen after side effects but befo
 
 ## Designing A Webhook Sender
 
-If your system sends webhooks to customers, store delivery attempts.
+When a system sends webhooks to customers, store delivery attempts.
 
 ```sql
 CREATE TABLE WebhookSubscriptions
@@ -355,8 +355,6 @@ For senders:
 - validate subscriber URLs if possible;
 - protect against SSRF in custom webhook URLs.
 
-Chinese note:
-
 ## SSRF Consideration For Webhook Senders
 
 If customers can configure webhook URLs, they might accidentally or maliciously point to internal addresses.
@@ -399,17 +397,4 @@ _logger.LogInformation(
 
 Avoid logging full payloads when they may contain sensitive data.
 
-## Practice Task
 
-Design both sides:
-
-1. webhook receiver endpoint.
-2. signature verification.
-3. timestamp validation.
-4. event storage.
-5. idempotent worker.
-6. webhook subscription table.
-7. delivery attempts table.
-8. retry with backoff.
-9. dead-letter handling.
-10. monitoring metrics.

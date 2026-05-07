@@ -4,7 +4,7 @@
 
 API versioning exists because contracts outlive server deployments. Some clients cannot upgrade immediately, some are outside the team's operational control, and some depend on response shapes or behavior that would break if changed casually. Versioning is therefore not a badge of maturity by itself. It is a response to real contract longevity.
 
-The deeper goal is not to create versions eagerly. It is to evolve the contract carefully enough that new versions are introduced only when compatibility can no longer be preserved.
+The contract should be evolved carefully enough that new versions are introduced only when compatibility can no longer be preserved.
 
 ## Conditions That Create Versioning Pressure
 
@@ -84,7 +84,7 @@ For example, changing:
 
 may justify a new version because the client must now reason about a materially different representation.
 
-The important point is that version boundaries should correspond to real contract differences, not to arbitrary release numbers.
+Version boundaries should correspond to real contract differences, not to arbitrary release numbers.
 
 ## Deprecation And Sunset
 
@@ -114,7 +114,49 @@ This is one reason versioning is partly a documentation problem and not only a r
 
 ASP.NET Core supports structured versioning approaches through packages such as `Asp.Versioning.Mvc` and `Asp.Versioning.Mvc.ApiExplorer`. Those tools are useful because they keep version selection, routing, and documentation aligned.
 
-The tooling matters, but the architectural lesson matters more: versioning should be explicit, observable, and tied to documentation generation so that each supported contract surface remains understandable.
+A typical configuration registers versioning with a reader strategy, default version, and API explorer integration:
+
+```csharp
+builder.Services.AddApiVersioning(options =>
+{
+    options.DefaultApiVersion = new ApiVersion(1, 0);
+    options.AssumeDefaultVersionWhenUnspecified = true;
+    options.ReportApiVersions = true;
+    options.ApiVersionReader = new UrlSegmentApiVersionReader();
+}).AddApiExplorer(options =>
+{
+    options.GroupNameFormat = "'v'VVV";
+    options.SubstituteApiVersionInUrl = true;
+});
+```
+
+Controllers then declare which versions they support, and individual actions can specify their mapping:
+
+```csharp
+[ApiController]
+[Route("api/v{version:apiVersion}/orders")]
+[ApiVersion("1.0")]
+[ApiVersion("2.0")]
+public sealed class OrdersController : ControllerBase
+{
+    [HttpGet("{id:int}")]
+    public IActionResult GetV1(int id)
+    {
+        // Returns the v1 representation
+        return Ok(new OrderResponseV1(/* ... */));
+    }
+
+    [HttpGet("{id:int}")]
+    [MapToApiVersion("2.0")]
+    public IActionResult GetV2(int id)
+    {
+        // Returns the v2 representation with additional fields
+        return Ok(new OrderResponseV2(/* ... */));
+    }
+}
+```
+
+This approach keeps versioning explicit in routing, discoverable through generated OpenAPI documentation, and separable by controller action. The tooling matters, but the architectural lesson matters more: versioning should be explicit, observable, and tied to documentation generation so that each supported contract surface remains understandable.
 
 ## Design Consequences
 

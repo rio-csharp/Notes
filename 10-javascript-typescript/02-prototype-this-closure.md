@@ -25,7 +25,7 @@ class User {
 }
 ```
 
-Equivalent mental model:
+Under the hood, class syntax desugars to:
 
 ```ts
 function User(name: string) {
@@ -77,7 +77,7 @@ const greet = user.greet;
 greet(); // this may be undefined
 ```
 
-Fix with `bind`:
+Binding preserves the intended receiver:
 
 ```ts
 const safeGreet = user.greet.bind(user);
@@ -196,7 +196,7 @@ useEffect(() => {
 }, []);
 ```
 
-Fix:
+Use the functional updater form instead:
 
 ```tsx
 setCount(c => c + 1);
@@ -218,14 +218,68 @@ function SearchBox({ query }: { query: string }) {
 
 The dependency array matters because the effect closes over values from the render where it was created.
 
-### What is closure?
+### Closure Mechanics in Detail
 
-> A closure is when a function retains access to variables from its lexical scope even after the outer function has returned.
+A closure is created when a function is defined inside another function and retains access to the outer function's variables. The inner function maintains a reference to the outer function's lexical environment through the `[[Environment]]` internal slot, which is set at function creation time and never changes.
 
-### How does `this` work?
+This is not a snapshot -- the closure references the actual variable bindings, not their values at closure-creation time:
 
-> `this` is determined by call site for normal functions. Arrow functions capture `this` from the surrounding lexical scope.
+```ts
+function createLogger(prefix: string) {
+  let counter = 0;
 
-### What is prototype chain?
+  return function log(message: string) {
+    counter++;
+    console.log(`[${prefix}:${counter}] ${message}`);
+  };
+}
 
-> When accessing a property, JavaScript checks the object first, then follows its prototype chain until it finds the property or reaches null.
+const orderLogger = createLogger("Orders");
+const userLogger = createLogger("Users");
+
+orderLogger("Order created"); // [Orders:1] Order created
+orderLogger("Order paid");    // [Orders:2] Order paid
+userLogger("User registered"); // [Users:1] User registered
+```
+
+Each call to `createLogger` creates a separate lexical environment with its own `counter` and `prefix`. The returned functions close over these distinct environments. The counter persists between calls because the closure keeps the environment alive -- the environment is not garbage-collected as long as the closure function is reachable.
+
+The `var` loop closure problem shown earlier (with `setTimeout` logging `3, 3, 3`) occurs because `var` creates a single binding for the loop variable shared across all iterations. By the time the callbacks execute, the loop has finished and `i` equals 3. The `let` solution works because `let` creates a new binding per iteration, and each closure captures its own iteration's binding.
+
+### `this` Binding Rules
+
+The value of `this` inside a non-arrow function is determined by the function's call site, not where it is defined. Five rules cover all cases:
+
+1. **Default binding**: In non-strict mode, a standalone function call sets `this` to the global object (`window` in browsers). In strict mode (enabled by TypeScript compilation), `this` is `undefined`.
+
+2. **Implicit binding**: When a function is called as a method of an object (`obj.method()`), `this` refers to that object.
+
+3. **Explicit binding**: `call`, `apply`, and `bind` set `this` explicitly regardless of how the function was defined.
+
+4. **`new` binding**: When a function is called with `new`, `this` refers to the newly created instance.
+
+5. **Arrow functions**: Arrow functions do not have their own `this`. When `this` is referenced inside an arrow function, it resolves lexically -- it uses the `this` value of the enclosing non-arrow function or global scope. Attempting to rebind `this` in an arrow function via `call`, `apply`, or `bind` has no effect.
+
+The common "lost this" issue with React event handlers (shown earlier) is caused by the implicit-to-default binding transition: passing `user.greet` as a callback and calling it later loses the implicit binding. The arrow function wrapper `() => user.greet()` preserves the intended receiver because the arrow captures `this` (or in this case, `user`) from its lexical scope.
+
+### Prototype Chain Walk
+
+JavaScript's prototype chain is the mechanism behind inheritance, property sharing, and method lookup. Every object has an internal `[[Prototype]]` slot (accessible via `Object.getPrototypeOf()` or the deprecated `__proto__` accessor) that points to another object or `null`.
+
+When you access `obj.property`:
+
+1. JavaScript checks if `obj` has an own property named `property` (via `Object.hasOwn(obj, 'property')`).
+2. If not, it follows the `[[Prototype]]` link to `Object.getPrototypeOf(obj)` and checks there.
+3. This continues up the chain until the property is found or the chain ends at `null`.
+
+```ts
+const base = { version: 1 };
+const derived = Object.create(base);
+derived.name = "child";
+
+console.log(derived.name);    // "child" -- own property
+console.log(derived.version); // 1 -- from prototype
+console.log(derived.toString); // function -- from Object.prototype
+```
+
+The `class` syntax in modern JavaScript is syntactic sugar over this prototype mechanism. When you define a class method, it is added to the class's `prototype` property. Instances created with `new` link to `ClassName.prototype` as their `[[Prototype]]`. This means methods are shared across all instances rather than copied to each instance -- a memory efficiency that predates class syntax by decades.

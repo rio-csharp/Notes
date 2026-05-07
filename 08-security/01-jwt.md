@@ -4,8 +4,6 @@
 
 A token is not security by itself. It is a transport and representation mechanism for authentication or authorization state. JWTs are one common token format, but the real engineering questions lie elsewhere: what the token represents, who issued it, how long it lives, where it is stored, and what the server still has to verify before trusting it.
 
-This chapter begins with JWTs because many modern systems encounter them early, but it treats them as part of a broader session-boundary design rather than as a magic authentication solution.
-
 ## JWT Structure And Meaning
 
 A JWT, or JSON Web Token, is usually a signed token made of three parts:
@@ -39,7 +37,7 @@ The access token is presented on API calls and should usually be short-lived bec
 
 The refresh token exists to obtain a new access token without forcing the user to sign in again. Because it can mint future access, it is often more sensitive than the access token itself and should therefore be stored and protected more carefully.
 
-This split is one of the most important practical security boundaries in modern session design.
+This split is a fundamental security boundary in modern session design.
 
 ## Validation At The API Boundary
 
@@ -52,7 +50,33 @@ An API that accepts bearer tokens must validate more than the token's signature.
 - expected algorithm;
 - required claims or policies.
 
-In ASP.NET Core, this commonly appears through JWT bearer authentication configuration. The code is framework-specific, but the architectural lesson is broader: a token is only meaningful if the receiving API proves that it was issued by the right authority, for the right audience, within the right lifetime, and with claims appropriate to the requested action.
+In ASP.NET Core, this commonly appears through JWT bearer authentication configuration:
+
+```csharp
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.Authority = "https://auth.example.com";
+        options.Audience = "api://orders-service";
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidIssuer = "https://auth.example.com",
+            ValidateAudience = true,
+            ValidAudience = "api://orders-service",
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.FromMinutes(1),
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKeyResolver = (token, securityToken, kid, parameters) =>
+            {
+                // Fetch signing keys from the authority's well-known endpoint
+                return FetchSigningKeysAsync(kid).GetAwaiter().GetResult();
+            }
+        };
+    });
+```
+
+The configuration is framework-specific, but the architectural lesson is broader: a token is only meaningful if the receiving API proves that it was issued by the right authority, for the right audience, within the right lifetime, and with claims appropriate to the requested action.
 
 ## Statelessness And Revocation Limits
 
@@ -91,7 +115,7 @@ Tokens often carry claims used later by authorization policy:
 
 This is convenient because it allows the API to make many authorization decisions without reloading user state on every request. The cost is staleness. If role or permission data changes frequently, token-carried claims may lag behind the current source of truth until the token expires or is refreshed.
 
-This is why token design and authorization design must be considered together rather than as separate chapters in practice.
+Token design and authorization design must be considered together rather than in isolation.
 
 ## Design Consequences
 

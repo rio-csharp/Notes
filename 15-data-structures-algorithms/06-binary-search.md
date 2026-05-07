@@ -202,8 +202,6 @@ public int SearchInsert(int[] nums, int target)
 
 ## Binary Search On Answer
 
-Problem:
-
 Find minimum speed that can finish work within `h` hours.
 
 ```csharp
@@ -346,12 +344,4 @@ Monotonic property:
 If capacity works, any larger capacity also works.
 ```
 
-## Practice Problems
-
-- Binary Search
-- Search Insert Position
-- First Bad Version
-- Find First and Last Position
-- Search in Rotated Sorted Array
-- Koko Eating Bananas
-- Capacity To Ship Packages Within D Days
+Binary search extends well beyond sorted array lookup to include boundary search, rotated arrays, and optimization over monotonic answer spaces such as shipping capacity and scheduling.

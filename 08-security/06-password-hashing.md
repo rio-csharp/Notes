@@ -4,8 +4,6 @@
 
 Passwords should not be stored in plaintext, and they should not be stored in reversible encrypted form merely because the system can decrypt them later. A password store exists to verify future guesses, not to recover the original secret. That is why password hashing is a distinct security problem rather than a generic cryptography problem.
 
-This chapter focuses on password handling as a lifecycle: storage, verification, failure handling, and reset.
-
 ## Hashing Versus Encryption
 
 Encryption is reversible with the right key. Password hashing is designed to be one-way. Passwords should therefore be hashed with a deliberately slow password-hashing algorithm rather than encrypted for later recovery.
@@ -56,7 +54,7 @@ Password reset is effectively a credential-recovery flow and should be treated w
 - never sends a new password directly by email;
 - invalidates the token after successful use.
 
-This is a good example of security design extending beyond storage primitives into user-facing workflows.
+Security design extends beyond storage primitives into user-facing workflows: a secure reset process issues a short-lived, single-use token, stores only a hash of that token, and avoids revealing account existence more than necessary.
 
 ## Audit And Sensitive Logging
 

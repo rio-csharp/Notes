@@ -407,15 +407,4 @@ _logger.LogInformation(
     payment.Id);
 ```
 
-## Practice Task
 
-Design:
-
-1. payment status model.
-2. webhook event table.
-3. signature verification.
-4. timestamp replay protection.
-5. idempotent callback handler.
-6. `PaymentCaptured` outbox event.
-7. reconciliation background job.
-8. safe logging rules.

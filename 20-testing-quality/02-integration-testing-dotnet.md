@@ -101,7 +101,7 @@ public sealed class CustomWebApplicationFactory
 
 This example uses SQLite in-memory. For SQL Server-specific behavior, prefer Testcontainers.
 
-## Why Avoid EF Core InMemory Provider For Relational Tests?
+## EF Core InMemory Provider Limitations
 
 EF Core InMemory is not a relational database.
 
@@ -422,16 +422,4 @@ High-value integration tests:
 - query filtering and pagination;
 - idempotency behavior.
 
-## Practice Task
 
-Create integration tests for:
-
-1. create order success.
-2. create order validation failure.
-3. get order not found.
-4. approve order unauthorized.
-5. approve order forbidden.
-6. concurrency conflict.
-7. database persistence.
-8. response JSON contract.
-9. email notification fake.

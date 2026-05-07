@@ -4,7 +4,7 @@
 
 EF Core relationships connect object-model navigation properties to relational foreign keys and constraints. That mapping is conceptually simple, but the engineering consequences are not. Relationship configuration influences schema shape, delete behavior, aggregate loading, query size, and the difference between a clean read model and an accidental object graph explosion.
 
-This chapter therefore treats relationships as both a modeling concern and a query concern. The schema definition is only the beginning. The real design work lies in deciding which relationships are required, how they should be deleted, and when related data should be loaded at all.
+Relationships are both a modeling concern and a query concern. The schema definition is only the beginning. The real design work lies in deciding which relationships are required, how they should be deleted, and when related data should be loaded at all.
 
 ## Foreign Keys And Navigation Properties
 
@@ -24,6 +24,15 @@ public sealed class Order
 This distinction matters because navigations are not the relationship itself. They are an application-facing representation of it. The database enforces the real referential rule through foreign keys and constraints, while EF Core uses navigations to make that rule easier to work with in code.
 
 One practical consequence follows immediately: the existence of a navigation property does not mean the related entity is loaded. Loading is a separate decision.
+
+## Convention-Based Relationship Discovery
+
+EF Core infers relationships through conventions without requiring explicit configuration for simple cases. If an entity contains a navigation property and a matching foreign key property, EF Core recognizes the relationship automatically:
+
+- `CustomerId` paired with a `Customer` navigation in `Order` is detected as a one-to-many relationship.
+- A `List<Order>` on `Customer` paired with `CustomerId` on `Order` is detected as the inverse navigation.
+
+Conventions are convenient, but they have limits. They assume standard naming patterns (`<NavigationName>Id`, `<PrincipalType>Id`), and they may infer cascade delete or optionality choices that do not match business requirements. This is why many production codebases use explicit fluent configuration for all nontrivial relationships, keeping conventions only as a starting scaffold.
 
 ## One-To-Many
 
@@ -196,7 +205,33 @@ var orders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
+`Include` translates the navigation into a SQL `JOIN`. For a one-to-many relationship, this produces a query roughly equivalent to:
+
+```sql
+SELECT o.*, c.*
+FROM Orders o
+LEFT JOIN Customers c ON o.CustomerId = c.Id
+```
+
+When multiple `Include` calls or nested `ThenInclude` chains are used, the generated SQL may contain multiple JOINs, potentially creating a wide result set with duplicated parent data.
+
 This can be appropriate when the application truly needs related entities as entities. It is less appropriate when the output is a read model that only needs a few related columns, because projection is often more efficient and more explicit.
+
+## Split Queries For Large Graphs
+
+When eager loading involves multiple related collections, the cartesian explosion of row duplication can become significant. For example, loading customers with their orders and order items as entities:
+
+```csharp
+var customers = await _dbContext.Customers
+    .Include(c => c.Orders)
+    .ThenInclude(o => o.Items)
+    .AsSplitQuery()
+    .ToListAsync(ct);
+```
+
+`AsSplitQuery` tells EF Core to issue multiple queries instead of one. The first query loads customers, the second loads orders for those customers, and the third loads items for those orders. EF Core then reconciles the results using relationship fix-up in memory.
+
+The trade-off is more round trips but less redundant data transfer and potentially simpler execution plans. Split queries are not a universal improvement; they should be evaluated based on actual query shape and data volume.
 
 ## Explicit Loading
 

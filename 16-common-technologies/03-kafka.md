@@ -42,8 +42,6 @@ Benefits:
 - scalability;
 - ordering within a partition.
 
-Important:
-
 Kafka guarantees order within a partition, not across the whole topic.
 
 ### Producer
@@ -56,9 +54,11 @@ Reads messages from Kafka.
 
 ### Consumer Group
 
-Consumers in the same group share work.
+Consumers in the same group coordinate to share partition processing. Kafka assigns each partition to exactly one consumer within the group at any given time. If a topic has 6 partitions and a consumer group has 3 consumers, each consumer may process 2 partitions.
 
-If a topic has 6 partitions and a consumer group has 3 consumers, each consumer may process 2 partitions.
+The assignment is managed through a **group coordinator** broker. When consumers start, stop, or fail, the coordinator triggers a rebalance that redistributes partitions using a configurable partition assignor strategy (such as range or round-robin).
+
+Parallelism within a consumer group is bounded by the partition count. If there are 4 consumers for a topic with 2 partitions, 2 consumers will remain idle.
 
 ### Offset
 
@@ -97,11 +97,9 @@ Common timeline:
 
 This is not an unusual Kafka bug. It is a normal risk in at-least-once delivery.
 
-Engineering perspective:
+In business systems, designing for at-least-once delivery with idempotent consumers is the standard approach.
 
-> I assume Kafka messages can be delivered more than once. I commit offsets only after successful processing, and I make consumers idempotent using event IDs, processed-message tables, and unique business constraints.
-
-Consumption can fail for different reasons:
+The first step when handling consumption failures is to classify the failure. Retrying everything forever can block a partition and make consumer lag worse.
 
 | Failure Type | Example | Typical Response |
 |---|---|---|
@@ -114,9 +112,7 @@ Consumption can fail for different reasons:
 | Rebalance issue | partitions constantly reassigned | tune processing, heartbeat/session, shutdown |
 | Offset commit failure | duplicates after restart | idempotency and commit retry |
 
-Key point:
-
-> The first step is to classify the failure. Retrying everything forever can block a partition and make consumer lag worse.
+Consumption can fail for different reasons:
 
 ## Offset Commit Strategy
 
@@ -264,9 +260,7 @@ Most common in business systems.
 
 Kafka supports exactly-once semantics in specific Kafka-to-Kafka workflows, but end-to-end exactly-once with databases and external systems is still hard.
 
-Engineering perspective:
-
-> In business systems, I usually design for at-least-once delivery and make consumers idempotent.
+In business systems, designing for at-least-once delivery with idempotent consumers is the standard approach.
 
 ## Producer Example With Confluent.Kafka
 
@@ -410,14 +404,7 @@ public async Task HandleAsync(OrderCreatedEvent evt, CancellationToken ct)
 
 ## Outbox Pattern
 
-Problem:
-
-```text
-Save order to database
-Publish event to Kafka
-```
-
-If database save succeeds but Kafka publish fails, the system is inconsistent.
+When the database save succeeds but Kafka publish fails, the system is inconsistent.
 
 Outbox solution:
 
@@ -459,17 +446,6 @@ RabbitMQ:
 - lower-latency task distribution;
 - easier for many business queue scenarios.
 
-Engineering perspective:
+Kafka is chosen when durable event streams, replay, high throughput, and event-driven integration are needed. RabbitMQ or Azure Service Bus are a better fit for command-style queues, routing, delayed messages, and simpler business workflow messaging.
 
-> I choose Kafka when I need durable event streams, replay, high throughput, and event-driven integration. I choose RabbitMQ or Azure Service Bus when I need command-style queues, routing, delayed messages, and simpler business workflow messaging.
-
-## Practice Task
-
-Build:
-
-1. `orders.created` producer;
-2. consumer that creates invoices;
-3. processed message table for idempotency;
-4. retry topic;
-5. dead-letter topic;
-6. consumer lag monitoring plan.
+The patterns described in this chapter -- idempotent consumers, retry and dead-letter topics, the outbox pattern, and consumer lag monitoring -- form the foundation of reliable Kafka-based event processing in production systems.

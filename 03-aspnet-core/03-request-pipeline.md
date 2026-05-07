@@ -31,7 +31,9 @@ app.MapControllers();
 app.Run();
 ```
 
-That code does not process a request immediately. It builds a request delegate graph that will later run for each incoming request. Conceptually, the pipeline behaves like nested delegates:
+That code does not process a request immediately. It builds a request delegate graph that will later run for each incoming request. Each call to `app.Use()` or `app.Run()` appends a `RequestDelegate` to a linked chain. At build time, `app.Build()` composes those delegates into a single `RequestDelegate` that executes them in registration order, wrapping each inner delegate in the outer one.
+
+The resulting pipeline behaves conceptually like nested delegates:
 
 ```text
 MiddlewareA(
@@ -40,11 +42,11 @@ MiddlewareA(
       Endpoint)))
 ```
 
-This explains why each middleware can run code both before and after the next component.
+The outer delegate receives the `HttpContext` first, performs pre-processing, invokes the inner delegate, and performs post-processing after the inner delegate returns. This wrapping structure is why each middleware can run code both before and after the next component, and why the order of registration determines execution order.
 
 ## The Request And Response Flow
 
-The easiest way to picture the pipeline is as a forward request path and a returning response path.
+The pipeline can be pictured as a forward request path and a returning response path.
 
 ```text
 Request

@@ -289,27 +289,10 @@ function OrderSearchBox({ onSearch }: { onSearch: (value: string) => void }) {
 }
 ```
 
-Use controlled state when immediate UI behavior depends on every keystroke. Use form libraries when forms grow larger.
+Use controlled state when immediate UI behavior depends on every keystroke — such as live search suggestions or inline validation. Use form libraries such as React Hook Form when forms grow beyond a few fields to avoid re-render overhead on every keystroke.
 
-### Controlled vs uncontrolled forms?
+Controlled forms keep values in React state and re-render the component on every input change. Uncontrolled forms keep values in the DOM and access them through refs or form libraries, avoiding re-renders during input. Controlled forms are explicit and predictable but can cause unnecessary re-renders in large forms if not managed carefully. Uncontrolled approaches can perform better for large forms because React does not re-render on every keystroke, but they require a different mental model for validation and submission.
 
-> Controlled forms keep values in React state. Uncontrolled forms keep values in DOM and access them through refs or form libraries. Controlled forms are explicit but can re-render more; uncontrolled approaches can perform better for large forms.
+Client validation improves user experience by catching errors before a network round trip. Server validation is required for security and correctness — client validation is purely a convenience layer and must not be relied upon as a security measure.
 
-### Client validation vs server validation?
-
-> Client validation improves UX. Server validation is required for security and correctness.
-
-### Why use React Hook Form?
-
-> It reduces unnecessary re-renders, works well with uncontrolled inputs, and provides convenient validation and form state management.
-
-## Practice Task
-
-Build create-order form with:
-
-1. React Hook Form;
-2. Zod validation;
-3. server error mapping;
-4. loading state;
-5. success redirect;
-6. accessible labels.
+React Hook Form reduces unnecessary re-renders by defaulting to uncontrolled inputs. It registers each input with a ref and only triggers re-renders at the form level when validation occurs or submission state changes. Combined with a schema library such as Zod, it provides declarative validation rules, field-level error messages, and integration with dynamic field arrays through `useFieldArray`.

@@ -275,7 +275,7 @@ Worst case: O(n)
 
 Worst case can happen with severe hash collisions, but modern .NET dictionaries are engineered to make common cases fast.
 
-Important factors:
+The actual performance depends on several factors:
 
 - hash code quality;
 - equality comparer;
@@ -339,12 +339,4 @@ An O(n) API loop that performs one database query per item may be much worse tha
 
 That is the classic N+1 query problem.
 
-## Practice Tasks
-
-- two sum;
-- valid parentheses;
-- merge intervals;
-- binary search;
-- longest substring without repeating characters;
-- maximum subarray;
-- tree traversal.
+These patterns appear throughout the algorithms discussed in subsequent chapters, including two-sum, parentheses matching, interval merging, binary search, substring search, subarray analysis, and tree traversal.

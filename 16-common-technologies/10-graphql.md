@@ -4,11 +4,9 @@
 
 GraphQL is an API query language where clients request exactly the data they need.
 
-## Why GraphQL Exists
+## The Problem GraphQL Solves
 
 REST endpoints often return fixed response shapes.
-
-Problem:
 
 ```text
 Mobile app needs: order id, status
@@ -324,12 +322,4 @@ REST:
 - simpler operational visibility;
 - easier for public APIs and browser/network tooling.
 
-## Practice Task
-
-Design:
-
-1. order GraphQL schema;
-2. order resolver;
-3. DataLoader for customers;
-4. authorization check;
-5. query complexity limit.
+The GraphQL patterns covered -- schema-driven query design, DataLoader-based batching, resolver authorization, and query cost controls -- enable building flexible yet safe client-facing APIs.

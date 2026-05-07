@@ -61,16 +61,14 @@ Common patterns:
 
 ### Outbox
 
-Problem:
+When a database write succeeds but a subsequent event publish fails, the system becomes inconsistent.
 
 ```text
 Save order to database.
 Publish OrderCreated event.
 ```
 
-If DB succeeds and publish fails, the system is inconsistent.
-
-Outbox solution:
+The outbox approach writes both the business data and the outbox message in a single database transaction:
 
 ```text
 Same DB transaction:
@@ -117,9 +115,7 @@ release inventory
 cancel order
 ```
 
-Engineering perspective:
-
-> In distributed systems, I avoid assuming one ACID transaction across services. I use outbox for reliable publish, inbox/idempotency for duplicate handling, and saga/compensation for multi-step workflows.
+In distributed systems, avoid assuming one ACID transaction across services. Use outbox for reliable publish, inbox/idempotency for duplicate handling, and saga/compensation for multi-step workflows.
 
 ## Cache Consistency In System Design
 
@@ -139,9 +135,7 @@ Trade-off:
 - stronger freshness increases complexity;
 - simple TTL accepts temporary stale reads.
 
-Example answer:
-
-> For product details, slight staleness is acceptable, so cache-aside plus TTL and invalidation is fine. For account balance or payment status, I avoid relying on stale cache and read from the source of truth.
+For product details, slight staleness is acceptable, so cache-aside plus TTL and invalidation is fine. For account balance or payment status, avoid relying on stale cache and read from the source of truth.
 
 ## Message Ordering And Consistency
 
@@ -170,11 +164,7 @@ Example:
 }
 ```
 
-Consumer rule:
-
-```text
-Apply event only if event.version > current.version.
-```
+When consuming versioned events, apply an event only if its version is newer than the current version.
 
 ## Idempotency
 
@@ -271,12 +261,25 @@ Benefits:
 - prevents cascading failure;
 - gives dependency time to recover.
 
-Simple mental model:
+A circuit breaker operates in three states:
 
-```text
-Closed: calls are allowed.
-Open: calls are blocked temporarily.
-Half-open: a small number of trial calls are allowed.
+- **Closed:** Requests flow through normally. The breaker tracks failures; when failures exceed a threshold within a time window, it transitions to Open.
+- **Open:** Requests are rejected immediately without calling the downstream service. A timer runs; after a configured duration, the breaker transitions to Half-Open.
+- **Half-Open:** A limited number of trial requests are allowed. If they succeed, the breaker returns to Closed. If any fail, it returns to Open and resets the cooldown.
+
+In .NET, the Polly library provides circuit breaker policies. Starting with .NET 8, `Microsoft.Extensions.Http.Resilience` offers preconfigured resilience pipelines that include circuit breaking, retries with jitter, and timeout enforcement:
+
+```csharp
+builder.Services.AddHttpClient<IPaymentClient, PaymentClient>(client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["Payment:BaseUrl"]!);
+})
+.AddStandardResilienceHandler(options =>
+{
+    options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
+    options.CircuitBreaker.FailureRatio = 0.5;
+    options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(10);
+});
 ```
 
 Circuit breakers are useful for repeated downstream failure, but they should not hide serious business failures. They are an availability tool, not a correctness tool.
@@ -402,13 +405,58 @@ public sealed class CorrelationIdHandler : DelegatingHandler
 }
 ```
 
-## Practice Task
+## Consensus
 
-Design resilient communication between:
+Consensus is the problem of getting multiple nodes to agree on a single value or sequence of values despite failures. It underlies leader election, distributed locking, and replicated state machines.
 
-1. Order service;
-2. Payment service;
-3. Inventory service;
-4. Notification service.
+The Raft protocol decomposes consensus into leader election, log replication, and safety. A cluster elects a leader that accepts log entries and replicates them to followers. Once a majority acknowledges an entry, it is committed. Raft is designed to be easier to understand than Paxos while providing equivalent guarantees.
 
-Include timeouts, retries, idempotency, events, and monitoring.
+In the .NET ecosystem, consensus is typically consumed through infrastructure rather than implemented directly. etcd and ZooKeeper expose consensus-backed primitives (distributed locks, configuration watches, leader election) that .NET services can call via client libraries.
+
+## Leader Election
+
+When only one instance of a service should perform work at a time — a scheduled job, a partition consumer, an outbox publisher — leader election prevents duplicate execution.
+
+Simple approaches use database-level locking:
+
+```sql
+-- A single row acts as the leader lock
+UPDATE LeaderLock SET OwnerId = @instanceId, LockedUntil = @expiry
+WHERE LockedUntil < @now;
+```
+
+If the UPDATE affects one row, this instance is the leader. The lease must be renewed periodically; if an instance crashes, its lease expires and another instance claims leadership.
+
+Infrastructure-based approaches use etcd or Azure Blob leases. For Kubernetes workloads, a `Lease` resource from the coordination API provides leader election without external dependencies:
+
+```yaml
+apiVersion: coordination.k8s.io/v1
+kind: Lease
+metadata:
+  name: outbox-publisher-leader
+spec:
+  holderIdentity: pod-abc123
+  leaseDurationSeconds: 15
+```
+
+The Kubernetes client library for .NET (`KubernetesClient`) can acquire and renew leases.
+
+## Distributed Locking
+
+When multiple services need exclusive access to a shared resource, a distributed lock ensures only one holder at a time. Common backends include Redis (via RedLock or `IDistributedLock` with `StackExchange.Redis`) and Azure Blob Storage leases.
+
+```csharp
+await using var handle = await distributedLock.TryAcquireAsync(
+    "resource:order-123",
+    TimeSpan.FromSeconds(30),
+    cancellationToken);
+
+if (handle is not null)
+{
+    // exclusive access
+}
+```
+
+Distributed locks should always include a timeout to prevent deadlock if the holder crashes. They are best-effort in truly adversarial network conditions; for correctness-critical exclusivity, use a database unique constraint or a consensus-backed lock.
+
+Distributed systems demand explicit handling of failure, latency, and consistency at every level. Timeouts, retries with jitter, circuit breakers, and bulkheads protect services from cascading failures. Idempotency, outbox and inbox patterns, and sagas maintain data integrity across service boundaries. Correlation IDs tie together requests across services for debugging and observability. These patterns form the foundation of resilient distributed communication, and their absence is the most common cause of hard-to-diagnose production incidents in distributed architectures.

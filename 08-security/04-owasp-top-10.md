@@ -4,8 +4,6 @@
 
 Security engineering improves when teams stop treating vulnerabilities as disconnected trivia and start seeing them as recurring failure patterns. Lists such as the OWASP Top 10 are useful not because every engineer must memorize category names, but because they teach the kinds of mistakes that repeatedly appear in production systems.
 
-This chapter treats those risks as design habits and engineering failures rather than as compliance labels.
-
 ## Broken Access Control
 
 Broken access control is one of the most common and damaging failures in business applications. A user is authenticated, but the system fails to verify whether that user may access this tenant, this order, this account, or this operation.

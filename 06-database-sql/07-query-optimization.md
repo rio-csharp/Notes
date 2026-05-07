@@ -2,16 +2,14 @@
 
 ## Core Idea
 
-Query optimization is the process of reducing the work the database must perform to produce the required result. That work is shaped by three things above all: result size, access path, and cardinality estimates. Tuning therefore begins not with tricks, but with evidence.
-
-This chapter focuses on reading queries operationally: what the optimizer likely has to do, how execution plans expose that work, and which changes usually matter most.
+Query optimization is the process of reducing the work the database must perform to produce the required result. That work is shaped by three things above all: result size, access path, and cardinality estimates. Tuning therefore begins not with tricks, but with evidence. Reading queries operationally means understanding what the optimizer must do, how execution plans expose that work, and which changes usually matter most.
 
 ## Start With Evidence
 
 A strong tuning workflow is usually:
 
 1. identify the slow query;
-2. inspect the actual execution plan;
+2. inspect the actual execution plan (in SQL Server, use `SET STATISTICS XML ON` or enable "Include Actual Execution Plan" in the client tool; in PostgreSQL, use `EXPLAIN ANALYZE`);
 3. compare estimated and actual row counts;
 4. check whether the chosen access path makes sense;
 5. identify excessive scans, sorts, lookups, or memory-heavy operators;
@@ -101,7 +99,31 @@ Possible responses include:
 - separate query paths for materially different patterns;
 - targeted recompilation in limited cases.
 
-Blind hinting is rarely the best first answer.
+When a query is known to have highly uneven distribution and no single plan is good for all parameter values, `OPTION (RECOMPILE)` can force the optimizer to produce a fresh plan for each execution based on the current parameter values:
+
+```sql
+SELECT Id, Status, Total
+FROM Orders
+WHERE Status = @Status
+OPTION (RECOMPILE);
+```
+
+The cost is additional CPU time for plan compilation on every execution. `RECOMPILE` is therefore appropriate for queries that execute infrequently or whose compilation cost is small relative to the execution cost of a bad cached plan.
+
+Blind hinting is rarely the best first answer. Index design and query shape should be evaluated before reaching for plan-affecting hints.
+
+## Statistics And Plan Quality
+
+The query optimizer relies on statistics -- histograms and density information about column value distribution -- to estimate row counts. If statistics are stale, estimates diverge from reality, and the optimizer may choose poor access paths.
+
+Statistics are updated automatically by the database when a threshold of rows changes (roughly 20 percent of table rows plus a base row count, depending on the engine and version). For large tables, this threshold may not be reached frequently enough to keep plans optimal. Manual updates may be necessary:
+
+```sql
+UPDATE STATISTICS Orders IX_Orders_Status_CreatedAt;
+UPDATE STATISTICS Orders;
+```
+
+The broader lesson is that query performance is not only about query text and indexes. It also depends on whether the optimizer has accurate information about the data it is working with. Stale statistics can make a perfectly reasonable query produce an unreasonable plan.
 
 ## Connection Pooling As Query-Side Pressure
 

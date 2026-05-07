@@ -4,7 +4,7 @@
 
 ASP.NET Core configuration is the mechanism by which an application receives operational settings from its environment. The Options pattern turns those settings into typed dependencies that can be validated, documented, and injected consistently.
 
-This chapter matters because configuration is not only a startup concern. It is part of the contract between code and deployment. Weak configuration design leads to stringly typed settings, late runtime failures, hidden environment differences, and secrets leaking into the wrong places. Strong configuration design makes operational intent explicit.
+Configuration is not only a startup concern. It is part of the contract between code and deployment. Weak configuration design leads to stringly typed settings, late runtime failures, hidden environment differences, and secrets leaking into the wrong places. Strong configuration design makes operational intent explicit.
 
 ## Configuration As A Composed Source Of Truth
 
@@ -88,7 +88,19 @@ builder.Services
 
 This makes the dependency explicit and typed. It also creates one obvious place where the expected configuration shape is documented in code.
 
-## Why Typed Options Improve Design
+For simpler cases, .NET 6 introduced `BindConfiguration`, which combines `Bind` and `Configure` in one call:
+
+```csharp
+builder.Services
+    .AddOptions<PaymentOptions>()
+    .BindConfiguration(PaymentOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+```
+
+This approach is equivalent to the explicit `Bind` + `Configure` pattern shown above but reduces boilerplate when no custom configuration transformation is needed.
+
+## Typed Options And Design Improvement
 
 Typed options are not simply a convenience wrapper around configuration keys. They improve design in several ways.
 

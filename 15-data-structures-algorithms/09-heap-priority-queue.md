@@ -25,7 +25,7 @@ var item = pq.Dequeue(); // "high"
 
 ## Binary Heap Mental Model
 
-A binary heap is usually stored in an array.
+A binary heap is a complete binary tree stored in an array. The .NET `PriorityQueue<TElement, TPriority>` (introduced in .NET 6) uses a binary min-heap internally.
 
 For index `i`:
 
@@ -40,6 +40,14 @@ Min-heap property:
 ```text
 parent priority <= child priority
 ```
+
+### How Insertion Works
+
+When a new element is enqueued, it is appended to the end of the array (maintaining the complete tree shape) and then "bubbled up" by swapping with its parent until the heap property is restored. This takes `O(log n)` comparisons in the worst case.
+
+### How Removal Works
+
+When the minimum element is dequeued, the last element in the array is moved to the root position and "sifted down" by swapping with the smaller child until the heap property is restored. This also takes `O(log n)` time.
 
 Operations:
 
@@ -222,10 +230,4 @@ lower.Count >= upper.Count
 all values in lower <= all values in upper
 ```
 
-## Practice Problems
-
-- Kth Largest Element
-- Top K Frequent Elements
-- Merge K Sorted Lists
-- Find Median From Data Stream
-- Task Scheduler
+Priority queues enable efficient solutions for ranking, merging sorted streams, median tracking, and task scheduling problems.

@@ -21,19 +21,18 @@ Client state:
 - local form input;
 - sidebar collapsed.
 
-## Why Not Put Everything In Redux?
+## Server State vs. Client State
 
-Redux can store server data, but it does not automatically solve:
+Redux can store server data, but it was designed as a general-purpose client state container. Server state has different requirements that Redux does not automatically address:
 
-- caching;
-- stale data;
-- request deduplication;
-- retries;
-- background refetch;
-- pagination;
-- mutation invalidation.
+- caching and cache invalidation;
+- stale-data detection and background refetch;
+- request deduplication when the same data is requested by multiple components;
+- automatic retries after transient failures;
+- pagination and cursor-based infinite loading;
+- mutation-driven cache updates.
 
-React Query is designed for server state.
+React Query is purpose-built for these server-state concerns. Using Redux to manually replicate this behavior often results in substantial boilerplate and subtle bugs around cache consistency.
 
 ## Basic Setup
 
@@ -168,17 +167,13 @@ async function fetchOrders(
 }
 ```
 
-Why it matters:
-
-> If filters change quickly, obsolete requests can be cancelled instead of racing with newer requests.
+If filters change quickly, obsolete requests can be cancelled instead of racing with newer requests.
 
 ## staleTime vs gcTime
 
-`staleTime`:
+`staleTime` controls how long data is considered fresh after fetching. While data is fresh, React Query does not trigger automatic refetches on remount, window refocus, or polling intervals.
 
-- fresh data does not refetch automatically.
-
-`gcTime`:
+`gcTime` (formerly `cacheTime`) controls how long inactive cache data is kept in memory after the last observer unsubscribes. After the gcTime elapses, the cache entry is garbage collected.
 
 Example:
 
@@ -328,25 +323,12 @@ if (query.error instanceof ApiError && query.error.status === 401) {
 }
 ```
 
-### What problem does React Query solve?
+## How The Cache Works
 
-> React Query manages server state: fetching, caching, stale data, background refetch, retries, pagination, mutations, and cache invalidation.
+React Query stores query results in an in-memory cache indexed by serialized query keys. Each cache entry tracks the data, the time it was fetched, the `staleTime` duration, and the `gcTime` (formerly `cacheTime`) duration. A query is "fresh" until its `staleTime` elapses; fresh queries do not refetch automatically when remounted. After data becomes stale, React Query may refetch in the background when a component remounts, the window regains focus, or a refetch interval ticks. Once a query has no active observers (no component is using it), its data remains in the cache for the `gcTime` duration before being garbage collected. This prevents unnecessary network requests when the user navigates away and back within the gcTime window.
 
-### React Query vs Redux?
+Query keys are the primary cache identifier. The key array is serialized to a stable hash; two queries with the same key share one cache entry. This is why all parameters that affect the result must be part of the key — omitting a filter from the key means two queries with different filters would incorrectly share cached data.
 
-> React Query is specialized for server state. Redux is a general client state container. Many apps use React Query for API data and a smaller store for client-only state.
+React Query is specialized for server state. Redux is a general client state container. Many production applications use React Query for API data and a smaller client-side store for UI-only state such as modals, sidebar visibility, and form drafts.
 
-### What is cache invalidation?
-
-> It means marking cached data as stale or removing it after a mutation so the UI can refetch correct data.
-
-## Practice Task
-
-Build an orders page with:
-
-1. paginated query;
-2. search query;
-3. create order mutation;
-4. invalidate orders after create;
-5. optimistic status update;
-6. typed API error handling.
+Cache invalidation is the process of marking cached data as stale or removing it after a mutation so that components refetch the latest data from the server. The standard pattern is to call `queryClient.invalidateQueries({ queryKey: [...] })` after a successful mutation, which marks matching cache entries as stale and triggers a refetch if any component is currently observing them.

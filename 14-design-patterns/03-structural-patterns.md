@@ -374,21 +374,12 @@ function MenuTree({ nodes }: { nodes: MenuNode[] }) {
 }
 ```
 
-## Common Misconceptions
+These patterns are frequently conflated:
 
-- Adapter and facade are the same.
-- Decorator requires inheritance.
-- Proxy is only for remote calls.
-- Facade should contain all business logic.
-- Composite is only useful for UI.
+- Adapter and Facade solve different problems: Adapter converts interfaces, Facade simplifies subsystems.
+- Decorator does not require inheritance; it works through interface implementation and composition.
+- Proxy is not only for remote calls; it applies to authorization, caching, lazy loading, and rate limiting.
+- A Facade should not absorb all business logic; it simplifies orchestration, not domain rules.
+- Composite is useful beyond UI &mdash; it applies to file systems, organization hierarchies, and permission trees.
 
-## Practical Checklist
-
-```text
-Do we need to hide third-party API details?
-Are we adding behavior around an existing service?
-Is a subsystem too complex for callers?
-Do we need to control access to an object?
-Are we representing a tree structure?
-Does the wrapper add clarity or just another layer?
-```
+When choosing structural patterns, ask whether third-party API details need to be hidden, whether behavior is being added around an existing service, whether a subsystem is too complex for callers, whether access to an object needs to be controlled, whether a tree structure is being represented, and whether the wrapper adds clarity or just another layer.

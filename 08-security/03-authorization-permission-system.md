@@ -4,8 +4,6 @@
 
 Authentication identifies the caller. Authorization decides what that caller may do. Systems often fail not because authentication is absent, but because authorization is too coarse, too static, or too disconnected from the actual resource being accessed.
 
-This chapter focuses on authorization as a data model and decision model rather than as a single `[Authorize]` attribute.
-
 ## Authentication Versus Authorization
 
 The distinction is simple but operationally essential.
@@ -62,11 +60,98 @@ Fine-grained permission strings such as `orders.approve` or `payments.refund` ca
 
 This is useful because it gives the system a more explicit authorization language than role names alone. Roles can then become one way of assigning permissions rather than the only abstraction the system understands.
 
+### Policy Registration And Enforcement
+
+In ASP.NET Core, permission-based authorization is typically expressed through policies that map permissions to claims or requirements. Policies are registered during startup and then applied declaratively on controller actions or endpoints:
+
+```csharp
+// Program.cs — register policies backed by permission claims
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("Orders.Approve", policy =>
+        policy.RequireClaim("permission", "orders.approve"));
+    options.AddPolicy("Payments.Refund", policy =>
+        policy.RequireClaim("permission", "payments.refund"));
+    options.AddPolicy("Orders.Create", policy =>
+        policy.RequireClaim("permission", "orders.create"));
+});
+```
+
+A controller action applies the relevant policy through the `[Authorize]` attribute:
+
+```csharp
+[ApiController]
+[Route("api/orders")]
+public sealed class OrdersController : ControllerBase
+{
+    [HttpPost("{id:int}/approve")]
+    [Authorize(Policy = "Orders.Approve")]
+    public async Task<IActionResult> Approve(int id, CancellationToken ct)
+    {
+        // The policy check guarantees the caller holds orders.approve
+        var result = await _orderService.ApproveAsync(id, ct);
+        return result ? Ok() : NotFound();
+    }
+}
+```
+
+### Resource-Level Authorization
+
+When authorization depends on properties of the specific resource being accessed, policy attributes on the controller are insufficient. The system must evaluate the resource at runtime. ASP.NET Core supports this through `IAuthorizationService` and custom `AuthorizationHandler<TRequirement, TResource>`:
+
+```csharp
+// Requirement type
+public sealed record OrderOwnerRequirement : IAuthorizationRequirement;
+
+// Handler that evaluates ownership
+public sealed class OrderOwnerHandler
+    : AuthorizationHandler<OrderOwnerRequirement, Order>
+{
+    protected override Task HandleRequirementAsync(
+        AuthorizationHandlerContext context,
+        OrderOwnerRequirement requirement,
+        Order resource)
+    {
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (resource.OwnerId == userId)
+        {
+            context.Succeed(requirement);
+        }
+        return Task.CompletedTask;
+    }
+}
+```
+
+The handler is registered in DI and invoked from within the action:
+
+```csharp
+builder.Services.AddScoped<IAuthorizationHandler, OrderOwnerHandler>();
+```
+
+```csharp
+[HttpDelete("{id:int}")]
+public async Task<IActionResult> Cancel(int id, CancellationToken ct)
+{
+    var order = await _orderService.GetByIdAsync(id, ct);
+    if (order is null) return NotFound();
+
+    var authResult = await _authorizationService
+        .AuthorizeAsync(User, order, "OrderOwnerPolicy");
+
+    if (!authResult.Succeeded) return Forbid();
+
+    await _orderService.CancelAsync(order, ct);
+    return NoContent();
+}
+```
+
+This pattern matters because many real authorization decisions are not about whether the caller is an admin in the abstract. They are about whether this specific user may act on this exact resource in this particular state.
+
 ## Frontend Checks And Their Limits
 
 Frontend permission checks are useful for user experience. They can hide buttons, simplify flows, and reduce failed requests. They are not security boundaries.
 
-This is one of the most important practical lessons in web security. Any authorization decision that matters must be enforceable on the backend where the protected resource or state transition actually exists.
+Any authorization decision that matters must be enforceable on the backend where the protected resource or state transition actually exists.
 
 ## Permission Freshness And Caching
 

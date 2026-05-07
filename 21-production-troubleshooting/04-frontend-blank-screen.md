@@ -41,7 +41,7 @@ Also check:
 - auth state;
 - frontend error tracking.
 
-## Common Causes
+## Frequent Blank Screen Scenarios
 
 Common blank screen causes:
 
@@ -50,7 +50,7 @@ Common blank screen causes:
 - chunk load error after deployment;
 - CDN serving old `index.html`;
 - old service worker serving old assets;
-- incompatible browser syntax;
+- incompatible browser syntax (optional chaining, nullish coalescing in older browsers);
 - failed root API call;
 - auth redirect loop;
 - Content Security Policy blocking scripts;
@@ -102,9 +102,7 @@ export const appConfig: AppConfig = {
 
 This fails loudly with a useful message instead of producing strange URLs.
 
-Important:
-
-> Frontend environment variables are bundled into JavaScript at build time. They are not secrets.
+Frontend environment variables are bundled into JavaScript at build time. They are not secrets.
 
 ## React Error Boundary
 
@@ -271,7 +269,7 @@ Symptoms:
 - URL changes rapidly;
 - backend may show many auth requests.
 
-Common causes:
+Typical sources:
 
 - wrong redirect URI;
 - cookie `SameSite` or `Secure` issue;
@@ -506,24 +504,4 @@ Depending on cause:
 - add startup error UI;
 - add error boundary.
 
-## Practice Task
 
-Given this report:
-
-```text
-Users see a blank page after the latest frontend deployment.
-Hard refresh fixes it for some users.
-Console shows "Failed to fetch dynamically imported module".
-Network tab shows 404 for /assets/OrdersPage.oldhash.js.
-```
-
-Write:
-
-```text
-Most likely cause:
-Evidence:
-Immediate mitigation:
-Cache header fix:
-Deployment process improvement:
-Code-level recovery:
-```

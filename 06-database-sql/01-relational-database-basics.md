@@ -4,7 +4,7 @@
 
 A relational database stores data in tables, but its real value is not table storage by itself. Its value lies in how keys, constraints, and declarative queries allow data to remain consistent while multiple applications and users read and modify it over time. A relational system is therefore not just a persistence container. It is an integrity system.
 
-This opening chapter establishes the relational model at the level needed for the rest of the database section. The focus is not on memorizing terminology. It is on understanding why primary keys, foreign keys, uniqueness rules, defaults, and checks matter even when an application already contains validation logic.
+Understanding why primary keys, foreign keys, uniqueness rules, defaults, and checks matter even when an application already contains validation logic is essential for everything that follows.
 
 ## Tables, Rows, And Columns
 
@@ -34,6 +34,21 @@ CREATE TABLE Customers
 ```
 
 This sounds elementary, but key choice has consequences. The key becomes part of how other tables reference the row, how indexes are built, how updates are targeted, and how application code reasons about identity. A primary key is therefore both a relational constraint and a design decision.
+
+The `IDENTITY` property in SQL Server auto-generates sequential values for the key column. An important operational detail is that identity values can have gaps. If an insert fails and is rolled back, the consumed identity value is not reused. This means rows may not have perfectly contiguous identity values, which is expected behavior rather than a sign of data loss.
+
+For more flexible key generation, databases also support sequences as an alternative to identity columns:
+
+```sql
+CREATE SEQUENCE OrderSequence
+    START WITH 1
+    INCREMENT BY 1;
+
+INSERT INTO Orders (Id, CustomerId, Status, Total)
+VALUES (NEXT VALUE FOR OrderSequence, 1, 'Draft', 0.00);
+```
+
+Sequences are independent of tables, can be shared across multiple tables, and offer more control over caching and increment behavior.
 
 ## Foreign Keys
 

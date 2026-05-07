@@ -292,24 +292,90 @@ const statusLabels = {
 
 If a status is missing, TypeScript reports it.
 
-### interface vs type?
+### Advanced Pattern: Branded Types
 
-> Both can describe object shapes. `interface` can be extended and declaration-merged. `type` can represent unions, intersections, primitives, tuples, and conditional types. In application code, either can be fine; consistency matters.
+TypeScript's structural typing can be too permissive when two types with the same shape represent different conceptual domains. Branded (or nominal) types add a phantom property that distinguishes them:
 
-### What is type narrowing?
+```ts
+type Brand<T, B> = T & { __brand: B };
 
-> Type narrowing is TypeScript reducing a broader type to a more specific type based on runtime checks, such as `typeof`, `in`, equality checks, or discriminated unions.
+type OrderId = Brand<number, "OrderId">;
+type UserId = Brand<number, "UserId">;
 
-### What is a generic?
+function getOrder(id: OrderId): Order {
+  // ...
+}
 
-> A generic is a type parameter that allows reusable type-safe functions or components without losing specific type information.
+const userId = 42 as UserId;
+const orderId = 42 as OrderId;
 
-## Practice Task
+getOrder(orderId); // OK
+getOrder(userId);   // Type error -- UserId is not assignable to OrderId
+```
 
-Create:
+Branded types are a compile-time-only construct. The `__brand` property is never actually assigned at runtime -- it exists only in the type system. This pattern is useful for preventing accidental mixing of different identifier types in large codebases.
 
-- `ApiResponse<T>`;
-- `PagedResult<T>`;
-- typed `fetchJson<T>`;
-- discriminated union for form submit state;
-- generic table column type.
+### Exhaustiveness Checking with never
+
+The `never` type represents a value that should never occur. When combined with a `switch` statement over a discriminated union, `never` provides compile-time exhaustiveness checking:
+
+```ts
+type ApiState<T> =
+  | { status: "loading" }
+  | { status: "success"; data: T }
+  | { status: "error"; message: string };
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled case: ${JSON.stringify(value)}`);
+}
+
+function renderState<T>(state: ApiState<T>): string {
+  switch (state.status) {
+    case "loading": return "Loading...";
+    case "success": return `Data: ${state.data}`;
+    case "error":   return `Error: ${state.message}`;
+    default: return assertNever(state);
+  }
+}
+```
+
+If a new status value is added to `ApiState` (e.g., `"idle"`), TypeScript reports a type error at the `assertNever` call because the function now receives a value of type `ApiState<unknown>` instead of `never`. This forces the developer to handle the new case explicitly -- a compile-time guarantee that all branches are covered.
+
+### Generic Constraints and Conditional Types
+
+Generics become most powerful when combined with constraints (using `extends`) and conditional types. A constraint limits which types can be used as the type argument:
+
+```ts
+function getProperty<T, K extends keyof T>(obj: T, key: K): T[K] {
+  return obj[key];
+}
+
+const order: Order = { id: 1, total: 100, status: "Paid" };
+getProperty(order, "id");     // OK -- returns number
+getProperty(order, "status"); // OK -- returns "Draft" | "Paid" | "Cancelled"
+getProperty(order, "xyz");    // Error -- "xyz" is not keyof Order
+```
+
+Conditional types use `extends` to select between two types based on a condition:
+
+```ts
+type IsString<T> = T extends string ? "yes" : "no";
+
+type A = IsString<"hello">; // "yes"
+type B = IsString<number>;  // "no"
+
+// Filter types from a union
+type ExtractString<T> = T extends string ? T : never;
+type StringsOnly = ExtractString<string | number | boolean | null>; // string
+```
+
+The `infer` keyword (shown in the `UnwrapPromise` example) allows conditional types to capture and expose a type from within another type. This is how the built-in `ReturnType<T>` and `Parameters<T>` utility types work internally:
+
+```ts
+type MyReturnType<T> = T extends (...args: unknown[]) => infer R ? R : never;
+
+type Fn = (x: number) => string;
+type Result = MyReturnType<Fn>; // string
+```
+
+Conditional types with `infer` are typically used in library code and advanced utility types rather than day-to-day application code, but understanding them clarifies how TypeScript's type system can perform type-level computation.

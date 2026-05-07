@@ -132,7 +132,7 @@ This example shows an order detail page using semantic HTML.
 </html>
 ```
 
-Important details:
+In this page structure:
 
 - `header`, `nav`, `main`, `article`, `section`, and `footer` describe page structure;
 - `aria-label` names navigation regions when needed;
@@ -230,24 +230,49 @@ More accessible table:
 
 Use `caption` when the table needs a clear title. Use `scope` so screen readers can connect cells to headers.
 
-### What is semantic HTML?
+### The Browser's Handling of Semantic Elements
 
-> Semantic HTML uses elements according to their meaning, such as `button` for actions and `nav` for navigation. It improves accessibility, SEO, and maintainability.
+When the browser parses semantic HTML, it builds an accessibility tree in parallel with the DOM. This accessibility tree is what screen readers and other assistive technologies use to navigate the page. A `<button>` element, for instance, automatically communicates its role (`button`), its accessible name (derived from its text content), its state (enabled or disabled), and its keyboard interaction pattern (activated with Enter or Space). A `<div>` styled to look like a button communicates none of this without ARIA attributes.
 
-### Button vs anchor?
+The same principle applies to navigation landmarks. A `<nav>` element creates a navigation landmark in the accessibility tree, allowing screen reader users to jump directly to navigation regions. An unordered list (`<ul>`) inside the nav tells assistive technologies how many navigation items exist and their relative positions.
 
-> Anchor is for navigation to another resource. Button is for actions on the current page.
+Search engines similarly benefit: a `<nav>` wrapping navigation links tells Google which links belong to site navigation rather than content, affecting how crawl budget is allocated. Heading hierarchy (`<h1>` through `<h6>`) creates a document outline that search engines use to understand content structure.
 
-### Why set image width and height?
+### Anchor vs Button: Keyboard Behavior Differences
 
-> It helps the browser reserve layout space and reduce layout shift.
+An anchor element (`<a href="...">`) is designed for navigation to another resource. A `<button>` element is designed for actions on the current page. Their keyboard behavior reflects this distinction:
 
-## Practice Task
+- An anchor with an `href` can be opened with Enter, but not with Space in most browsers.
+- A `<button>` activates with both Enter and Space.
+- Screen readers announce `<a>` as "link" and `<button>` as "button," giving users different expectations.
+- A link without an `href` (e.g., `<a>` with only an `onclick`) is not keyboard-focusable and is not recognized as a link by assistive technologies.
+- A `<button type="submit">` inside a form triggers form submission on Enter keypress anywhere in the form. A `<button type="button">` does not.
 
-Create an order detail HTML page with:
+Choosing the wrong element therefore breaks keyboard behavior, confuses screen readers, and can cause unexpected form submissions. Using the correct element provides all the correct behaviors for free.
 
-1. semantic layout;
-2. accessible buttons;
-3. order items table;
-4. form labels;
-5. meaningful image alt text.
+### Image Dimensions and Cumulative Layout Shift
+
+Setting explicit `width` and `height` attributes on images allows the browser to calculate the image's aspect ratio before the image resource loads. This reserves the correct amount of vertical space during layout, preventing the page content from jumping downward when the image eventually arrives -- a phenomenon known as Cumulative Layout Shift (CLS).
+
+Without dimensions:
+
+```html
+<img src="/hero.jpg" alt="Warehouse shelves" />
+```
+
+The browser does not know the image's intrinsic size until it finishes downloading and decoding the image file. Until then, the image occupies zero height. When it loads, all content below it shifts downward, causing CLS.
+
+With dimensions:
+
+```html
+<img
+  src="/hero.jpg"
+  alt="Warehouse shelves"
+  width="1200"
+  height="600"
+/>
+```
+
+The browser derives an aspect ratio from the width and height attributes (1200:600 = 2:1) and allocates space accordingly. Even if CSS overrides the rendered width, the aspect ratio from the HTML attributes continues to apply via the `aspect-ratio` CSS property that the browser sets implicitly from these attributes.
+
+This technique is not limited to images. Embedded videos, iframes, and advertising slots benefit from the same approach: providing explicit dimensions lets the browser reserve space and avoid layout shifts during page load.

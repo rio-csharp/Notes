@@ -396,14 +396,4 @@ High-value frontend tests:
 - disabled/enabled states;
 - optimistic update rollback.
 
-## Practice Task
 
-Write component tests for an `OrdersPage`:
-
-1. loading state.
-2. successful data rendering.
-3. empty state.
-4. server error state.
-5. approve button enabled only for submitted orders.
-6. approve success message.
-7. approve failure message.

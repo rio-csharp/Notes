@@ -4,7 +4,7 @@
 
 Hangfire and Quartz.NET are libraries for background jobs and scheduling in .NET.
 
-## When Background Jobs Are Useful
+## Background Job Scenarios
 
 Move work to a background job when:
 
@@ -32,7 +32,7 @@ Examples:
 | Hangfire | fire-and-forget, delayed, recurring jobs | yes | yes | good |
 | Quartz.NET | advanced scheduling, calendars, clustering | optional | no default dashboard | excellent |
 
-`BackgroundService` is simple but you must build persistence, retries, and monitoring yourself.
+`BackgroundService` is simple but persistence, retries, and monitoring must be built separately.
 
 ## Hangfire Setup
 
@@ -121,7 +121,7 @@ Use stable recurring job IDs. Changing the ID creates a new recurring job instea
 
 ## Hangfire Retries
 
-Hangfire retries failed jobs by default. You can control retry attempts:
+Hangfire retries failed jobs by default. Retry attempts can be controlled:
 
 ```csharp
 [AutomaticRetry(Attempts = 3)]
@@ -135,9 +135,7 @@ Retries are useful for transient failures, but the job must be idempotent.
 
 ## Idempotent Job Example
 
-Problem:
-
-Report generation job may run twice.
+Report generation jobs may execute more than once.
 
 Use a unique business key:
 
@@ -310,13 +308,4 @@ Track:
 - stuck processing jobs;
 - dead-letter/final failure count.
 
-## Practice Task
-
-Design:
-
-1. email job;
-2. report generation job;
-3. recurring cleanup;
-4. retry policy;
-5. idempotency key;
-6. job monitoring.
+The background job patterns covered here -- fire-and-forget execution, scheduled recurrence, idempotent handlers, row-level claiming for batch processing, and progress checkpointing -- serve the majority of production scheduling needs.

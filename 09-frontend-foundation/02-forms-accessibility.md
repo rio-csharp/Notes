@@ -108,11 +108,7 @@ Do not remove focus outline without replacing it.
 
 ## ARIA
 
-ARIA can help when native HTML is not enough.
-
-But first rule:
-
-> Use native HTML elements whenever possible.
+ARIA can help when native HTML is not enough. Prefer native HTML elements whenever possible. Use ARIA only when the semantics cannot be expressed with HTML alone.
 
 Bad:
 
@@ -222,32 +218,38 @@ Production modals should also trap focus inside the dialog while open.
 </form>
 ```
 
-Why this works well:
+This form demonstrates several accessibility practices: every input has a label, related radio buttons are grouped by `fieldset`, help text is connected with `aria-describedby`, native controls provide keyboard behavior, and the submit action uses a `<button>` element.
 
-- every input has a label;
-- related radio buttons are grouped by `fieldset`;
-- help text is connected with `aria-describedby`;
-- native controls provide keyboard behavior;
-- submit uses a real button.
+### How Labels Connect to Inputs
 
-### Why is label important?
+When a `<label>` element is associated with an input via the `for` attribute (matching the input's `id`), or when the input is nested inside the `<label>`, the browser creates an accessibility relationship between them. Screen readers announce the label text when the input receives focus. The label also acts as an expanded click target: clicking the label focuses or activates the associated input, which is especially useful for small controls such as checkboxes and radio buttons.
 
-> Labels help users understand inputs and allow screen readers to announce the field correctly. They also improve click target behavior.
+The `for`/`id` association is more robust than nesting because it works even when the label and input are not adjacent in the DOM. However, nesting is simpler and eliminates the risk of mismatched `id` values.
 
-### What is ARIA?
+Placeholders are not substitutes for labels. A placeholder disappears when the user starts typing, leaving the user without a visible field reference. Placeholders also often fail contrast requirements and are not reliably exposed to assistive technologies.
 
-> ARIA provides attributes to describe roles, states, and relationships for assistive technologies. It should complement semantic HTML, not replace it.
+### ARIA: When Native HTML Is Not Enough
 
-### How do you make a modal accessible?
+The ARIA (Accessible Rich Internet Applications) specification provides attributes to describe roles, states, and properties when native HTML semantics are insufficient. Three principles govern ARIA usage:
 
-> Manage focus, provide title/description, trap focus while open, close with Escape, and restore focus after closing.
+1. **Do not use ARIA if a native element exists.** A `<button>` already provides `role="button"`, keyboard activation, and focus management. Replacing it with `<div role="button" tabindex="0">` duplicates native behavior with more fragility and less reliability.
 
-## Practice Task
+2. **Do not override native semantics.** Adding `role="heading"` to a `<button>` tells assistive technologies it is a heading, not a button -- even though it still looks and behaves like a button visually.
 
-Build a create-order form with:
+3. **Incorrect ARIA is worse than no ARIA.** An erroneous `role`, missing required ARIA states, or inconsistent relationships (e.g., `aria-describedby` pointing to a non-existent ID) can confuse assistive technologies more than leaving the element unlabeled.
 
-1. labels;
-2. validation errors;
-3. keyboard navigation;
-4. accessible submit button;
-5. accessible modal confirmation.
+The `aria-describedby` attribute, shown in the validation examples above, connects an input to descriptive text without changing the visual presentation. `aria-invalid` communicates validation state to screen readers even when custom styling is applied. These attributes complement semantic HTML by adding relationships that HTML alone cannot express.
+
+### Accessible Modal Implementation Details
+
+An accessible modal dialog requires managing several interaction points that are often overlooked:
+
+**Focus trapping:** While the modal is open, Tab and Shift+Tab must cycle through focusable elements inside the modal only. If focus leaves the modal, a screen reader user cannot navigate back without reloading the page. This is typically implemented by intercepting the `keydown` event on the modal container and redirecting Tab to the first or last focusable element.
+
+**Focus restoration:** When the modal closes, focus must return to the element that triggered it -- usually a button. Without this, the user's point of regard jumps unpredictably, and screen reader users lose their context.
+
+**Closing behavior:** The modal should close on Escape keypress, on clicking a close button (with a visible label or `aria-label`), and optionally on clicking the backdrop overlay. Closing must not leave focus in an undefined state.
+
+**Accessible name:** The modal must have a title. With `aria-labelledby`, the title element's text becomes the modal's accessible name. With `aria-label`, the label text is used instead. Both approaches ensure screen readers announce the modal purpose when it opens.
+
+The example earlier in this section demonstrates these patterns. A production implementation should also handle dynamic content injection, prevent background scroll while the modal is open, and test with actual screen reader software.
