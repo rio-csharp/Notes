@@ -170,7 +170,7 @@ For background jobs, do not depend on `HttpContext`.
 
 ## EF Core Global Query Filter
 
-(For a deeper discussion of DbContext lifetime, change tracking, and query translation, see Chapter 5, "DbContext And The Change Tracker" and "Query Translation And Read Models".)
+(For a deeper discussion of DbContext lifetime, change tracking, and query translation, see Chapter 6, "DbContext And The Change Tracker" and "Query Translation And Read Models".)
 
 Tenant-owned entities:
 
