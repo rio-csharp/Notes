@@ -405,12 +405,22 @@ async function buildPdf() {
   try {
     const page = await browser.newPage();
     await page.goto(`file:///${normalizeSlashes(pdfHtmlFile)}`, { waitUntil: "networkidle" });
-    await page.pdf({
-      path: outputPdf,
-      format: "A4",
+
+    // Use CDP Page.printToPDF with generateDocumentOutline so Chromium produces
+    // proper PDF bookmarks from h1/h2/h3 headings. Playwright's page.pdf()
+    // wrapper does not expose this parameter.
+    const client = await page.context().newCDPSession(page);
+    const { data } = await client.send("Page.printToPDF", {
+      paperWidth: 210 / 25.4 * 96,   // A4 width  in px at 96 DPI
+      paperHeight: 297 / 25.4 * 96,  // A4 height in px at 96 DPI
       printBackground: true,
-      margin: { top: "12mm", right: "10mm", bottom: "12mm", left: "10mm" },
+      marginTop: 0.472 * 96,    // 12mm
+      marginRight: 0.394 * 96,  // 10mm
+      marginBottom: 0.472 * 96, // 12mm
+      marginLeft: 0.394 * 96,   // 10mm
+      generateDocumentOutline: true,
     });
+    await writeFile(outputPdf, Buffer.from(data, "base64"));
   } finally {
     await browser.close();
   }

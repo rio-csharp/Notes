@@ -66,6 +66,13 @@ jobs:
             dist/notes.epub
             dist/notes.pdf
             dist/notes.html
+          # Force-push tag so GitHub auto-generated source archives match HEAD.
+          append_body: false
+
+      - name: Update latest tag to HEAD
+        run: |
+          git tag -f latest
+          git push -f origin latest
 
       - name: Summarize build
         run: |
