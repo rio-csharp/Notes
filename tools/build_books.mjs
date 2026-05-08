@@ -411,13 +411,13 @@ async function buildPdf() {
     // wrapper does not expose this parameter.
     const client = await page.context().newCDPSession(page);
     const { data } = await client.send("Page.printToPDF", {
-      paperWidth: 210 / 25.4 * 96,   // A4 width  in px at 96 DPI
-      paperHeight: 297 / 25.4 * 96,  // A4 height in px at 96 DPI
+      paperWidth: 8.27,    // A4 width  in inches
+      paperHeight: 11.69,  // A4 height in inches
       printBackground: true,
-      marginTop: 0.472 * 96,    // 12mm
-      marginRight: 0.394 * 96,  // 10mm
-      marginBottom: 0.472 * 96, // 12mm
-      marginLeft: 0.394 * 96,   // 10mm
+      marginTop: 0.472,    // 12mm in inches
+      marginRight: 0.394,  // 10mm in inches
+      marginBottom: 0.472, // 12mm in inches
+      marginLeft: 0.394,   // 10mm in inches
       generateDocumentOutline: true,
     });
     await writeFile(outputPdf, Buffer.from(data, "base64"));
