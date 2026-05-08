@@ -521,6 +521,31 @@ CREATE TABLE ExportJobs
 
 Large exports should use streaming and permission checks.
 
+## Real-Time Updates
+
+For admin dashboards that need live updates (background job progress, new user registrations, system alerts), SignalR provides efficient server-to-client push without polling:
+
+```csharp
+public class AdminHub : Hub
+{
+    public async Task JoinAdminGroup()
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, "admins");
+    }
+}
+```
+
+The server pushes updates via `IHubContext<AdminHub>` from background workers when job status changes. Real-time updates should be permission-checked, not assumed to be safe because the client is on the admin network.
+
+## Security And Rate Limiting
+
+Admin endpoints operate on sensitive data. Apply additional protections:
+
+- rate limiting on admin endpoints to prevent abuse or accidental load from misconfigured exports;
+- IP allow-listing or VPN requirements for production admin access;
+- short session timeouts for admin sessions;
+- mandatory multi-factor authentication for admin users (see Chapter 8, "Authentication").
+
 ## Performance Considerations
 
 - server-side pagination;

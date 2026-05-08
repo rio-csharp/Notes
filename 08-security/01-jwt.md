@@ -14,7 +14,7 @@ header.payload.signature
 
 The header identifies metadata such as token type and signing algorithm. The payload contains claims. The signature allows a receiver to verify that the token was issued by a trusted authority and was not modified.
 
-The most important practical correction is that a typical JWT is encoded, not encrypted. Anyone holding the token can often read its payload. Sensitive secrets therefore do not belong inside the payload merely because the token is signed.
+The most important practical correction is that a typical JWT is encoded, not encrypted. Anyone holding the token can read its payload. Sensitive secrets therefore do not belong inside the payload merely because the token is signed. When the payload itself contains sensitive data that must be hidden from intermediate parties, the JWT can be encrypted using a scheme such as AES-GCM rather than merely signed. This produces a JWE (JSON Web Encryption) token rather than a JWT, but it adds considerable complexity and is rarely needed when TLS is correctly enforced in transit. Most systems should protect sensitive data by keeping it out of the token rather than by encrypting the token.
 
 ## Claims And Their Meaning
 
@@ -74,13 +74,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 ```
 
-The configuration is framework-specific, but the architectural lesson is broader: a token is only meaningful if the receiving API proves that it was issued by the right authority, for the right audience, within the right lifetime, and with claims appropriate to the requested action. The ASP.NET Core authentication chapter covers the broader authentication pipeline, scheme selection, and policy-based authorization in more detail.
+The configuration is framework-specific, but the architectural lesson is broader: a token is only meaningful if the receiving API proves that it was issued by the right authority, for the right audience, within the right lifetime, and with claims appropriate to the requested action.
+
+One JWT-specific attack deserves explicit mention: algorithm confusion. An attacker can modify the JWT header's `alg` field to `none` (or change an `RS256` token to `HS256` using the public key as the HMAC secret). If the validation library accepts the algorithm from the header without verifying it against an expected value, the token passes signature verification despite being forged. The defense is to explicitly pin the expected algorithm in validation configuration rather than deriving it from the token header. In ASP.NET Core, setting `options.TokenValidationParameters.ValidAlgorithms` or relying on the authority-provided signing keys prevents this class of attack.
+
+The ASP.NET Core authentication chapter covers the broader authentication pipeline, scheme selection, and policy-based authorization in more detail.
 
 ## Statelessness And Revocation Limits
 
 JWTs are often described as stateless, which is useful but incomplete. A self-contained access token reduces the need for a per-request session lookup. It does not remove the system's need to handle logout, revocation, permission changes, suspicious reuse, or forced sign-out after compromise.
 
 That is why pure short-lived stateless access tokens are often paired with server-managed refresh tokens, token version checks, or other revocation mechanisms. Statelessness reduces some infrastructure coupling. It does not eliminate session management concerns.
+
+Token fingerprinting is one revocation-enabling technique that preserves some statelessness. When the token is issued, the server generates a random value, stores its SHA-256 hash inside the token as a custom claim, and sets the same value as a hardened (HttpOnly, Secure, SameSite) cookie. On each request, the API verifies that the fingerprint in the token matches the fingerprint in the cookie. An attacker who steals only the token but not the cookie cannot replay it, and the server can invalidate sessions by clearing the cookie or updating the expected fingerprint. This approach trades some statelessness for significant replay protection without requiring a server-side token denylist for every request.
 
 ## Refresh Token Storage And Rotation
 
@@ -117,4 +123,4 @@ Token design and authorization design must be considered together rather than in
 
 ## Design Consequences
 
-JWTs are most useful when treated as one part of a broader session design. Signed claims are helpful, but they do not replace careful validation, short-lived access, durable refresh-token handling, or sound authorization boundaries. Once a team understands that, JWTs become a practical tool rather than an overtrusted abstraction.
+JWTs are most useful when treated as one part of a broader session design. Signed claims are helpful, but they do not replace careful validation (including algorithm pinning), short-lived access, durable refresh-token handling, or sound authorization boundaries. Once a team understands that, JWTs become a practical tool rather than an overtrusted abstraction.

@@ -179,21 +179,26 @@ public async Task<IActionResult> RedirectAsync(string code, CancellationToken ct
 
 ## Analytics
 
-Do not block redirect path on analytics writes.
+Do not block the redirect path on analytics writes. The redirect response must be fast (ideally single-digit milliseconds); waiting for a database write or an external analytics API call would defeat the purpose of the redirect cache.
 
 Better:
 
 ```text
-Redirect API -> Queue/Kafka -> Analytics Worker
+Redirect API -> Message Queue / Kafka -> Analytics Worker -> Analytics Database
 ```
+
+The redirect handler publishes a click event to a queue and returns immediately. The analytics worker consumes events asynchronously, batches them, and writes to the analytics database. For high-traffic short URLs, event batching reduces write pressure significantly (e.g., flush 1,000 events at once rather than 1,000 individual inserts).
 
 Track:
 
 - timestamp;
 - user agent;
-- IP region;
+- IP region (geo-IP lookup, done in the worker);
 - referrer;
-- short code.
+- short code;
+- device type (mobile, desktop, tablet).
+
+If real-time analytics counts are needed (e.g., showing "clicked 5,342 times" on the dashboard), maintain an incrementing counter in Redis and flush it periodically to the database. This avoids expensive `COUNT(*)` queries on large analytics tables.
 
 ## Abuse Prevention
 

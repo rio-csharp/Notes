@@ -155,9 +155,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -313,13 +313,50 @@ For Docker image builds, layer caching can be configured using GitHub Actions ca
 
 ```yaml
 - name: Build and push
-  uses: docker/build-push-action@v6
+  uses: docker/build-push-action@v7
   with:
     cache-from: type=gha
     cache-to: type=gha,mode=max
 ```
 
 This stores build cache in the GitHub Actions cache service, making subsequent builds faster even across different workflow runs.
+
+### Matrix Builds
+
+When the application needs to run across multiple runtime versions or operating systems, matrix builds avoid duplicating job definitions.
+
+```yaml
+strategy:
+  matrix:
+    os: [ubuntu-latest, windows-latest]
+    dotnet-version: ["9.0.x", "10.0.x"]
+  fail-fast: false
+
+runs-on: ${{ matrix.os }}
+
+steps:
+  - uses: actions/checkout@v6
+  - uses: actions/setup-dotnet@v5
+    with:
+      dotnet-version: ${{ matrix.dotnet-version }}
+  - run: dotnet test
+```
+
+`fail-fast: false` is useful for matrix builds where one configuration should continue even if another fails, helping identify which combinations have issues.
+
+## Deployment Concurrency
+
+When multiple merges happen close together, concurrent deployments can conflict with each other. GitHub Actions supports concurrency groups to serialize or cancel redundant runs:
+
+```yaml
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+- **Same branch**: If a new push happens while a deployment is running, the in-progress run is cancelled in favor of the latest.
+- **Different branches**: Each branch gets its own queue because the group key contains the branch ref.
+- **Production safety**: Use `cancel-in-progress: false` for production deployments so in-progress deployments always finish.
 
 ## Pipeline Security
 
@@ -588,6 +625,35 @@ GitHub Actions job
 ```
 
 This reduces the risk of leaked permanent credentials.
+
+Concrete Azure example with OIDC:
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: orders-api
+          package: ./artifacts/api
+```
+
+The `id-token: write` permission is required for OIDC token requests. The Azure federated credential is configured at the application registration level to trust the specific GitHub repository, branch, and environment.
 
 ## Common Pipeline Failures
 

@@ -18,7 +18,7 @@ For example, a platform built for internal sales and operations teams has differ
 
 ### Architecture Decisions
 
-Architecture decisions are the most frequently lost form of project knowledge. A case note should record the key decisions made during the project, the options that were considered, and the reasons for the chosen approach. This does not require a full Architecture Decision Record for every choice, but the decisions that were expensive to make or that have long-lasting consequences deserve documentation.
+Architecture decisions are the most frequently lost form of project knowledge. A case note should record the key decisions made during the project, the options that were considered, and the reasons for the chosen approach. This does not require a full Architecture Decision Record for every choice (see Chapter 23, "Architecture Decision Records"), but the decisions that were expensive to make or that have long-lasting consequences deserve documentation.
 
 For instance, choosing a modular monolith over microservices early in a project is a decision that shapes the entire development trajectory. Recording why that choice was made, what alternatives were considered, and under what conditions the team would revisit the decision saves future engineers from re-litigating the same debate.
 

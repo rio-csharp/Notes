@@ -209,11 +209,11 @@ File confirmed (Status = Uploaded)
 
 For files exceeding typical API payload limits (e.g., 100 MB+):
 
-- multipart upload (parallel parts, each independently retryable);
-- resumable upload (track offset, resume from failure point);
-- chunked streaming on the upload confirmation path;
-- progress tracking via WebSocket or polling;
-- background processing that starts after the final part is confirmed.
+- **Multipart upload** (S3's `CreateMultipartUpload`, Azure Blob's `StageBlock`/`CommitBlockList`): the file is split into parts uploaded in parallel, each independently retryable. A failed part can be re-uploaded without restarting the entire file. After all parts are uploaded, a completion request assembles the final object. The maximum part count is typically 10,000, so the minimum part size is total-size / 10,000.
+- **Resumable upload** (TUS protocol): track byte offset, resume from the last confirmed byte on failure. Useful for very large files over unreliable connections where the client runs for hours.
+- **Chunked streaming** on the upload confirmation path: the API streams parts as they arrive without buffering the entire file.
+- **Progress tracking** via WebSocket or polling: the upload endpoint emits progress updates so the UI can display a progress bar. For multipart uploads, each completed part advances the progress counter.
+- **Background processing** that starts after the final part is confirmed: the confirmation event triggers the virus scan, thumbnail generation, or format conversion pipeline.
 
 ## Upload Request Flow
 

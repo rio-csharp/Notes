@@ -48,6 +48,19 @@ dotnet publish -c Release  # produce deployment artifacts
 
 The SDK's presence determines what a machine can do. A development workstation or CI agent needs the SDK to build and publish. A production server, when using framework-dependent deployment, needs only the runtime. This separation is the foundation of the deployment models discussed later in this chapter.
 
+SDK versions install side-by-side, and by default the `dotnet` CLI uses the latest installed SDK regardless of the project's target framework. To pin a specific SDK version across a team or CI environment, place a `global.json` file in the repository root:
+
+```json
+{
+  "sdk": {
+    "version": "8.0.100",
+    "rollForward": "latestFeature"
+  }
+}
+```
+
+The CLI searches upward from the working directory for the first `global.json` and uses the SDK version it specifies. The `rollForward` property inside `global.json` controls SDK version matching independently of the runtime roll-forward policy.
+
 ### BCL
 
 The Base Class Library is the API contract. It defines the types, methods, and namespaces that application code programs against: collections, file I/O, networking, JSON serialization, reflection, threading primitives, cryptography, and diagnostics.
@@ -114,7 +127,15 @@ dotnet MyApp.dll
   managed entry point (Main / Program.cs) begins execution
 ```
 
-The host resolution chain is not a single-pass lookup. `hostfxr` first checks `runtimeconfig.json` for the `frameworks` section and the `runtimeOptions.framework.name`/`version` properties. For framework-dependent applications, it searches well-known install locations — the `DOTNET_ROOT` environment variable, the `dotnet` install directory, and (on Windows) the registry — for a compatible runtime version. Roll-forward policies (specified via `rollForward` in `runtimeconfig.json`) control whether the host accepts a newer patch, minor, or major version when the exact requested version is absent. A `rollForward: LatestMajor` setting accepts .NET 9 when .NET 8 is requested; `rollForward: Disable` (the default for self-contained) requires an exact match. Common startup failures — `It was not possible to find any compatible framework version` — are hostfxr errors that occur before CoreCLR initializes, and they are resolved by adjusting runtime installation, container base images, or roll-forward policy, not by changing application code.
+The host resolution chain is not a single-pass lookup. `hostfxr` first checks `runtimeconfig.json` for the `frameworks` section and the `runtimeOptions.framework.name`/`version` properties. For framework-dependent applications, it searches well-known install locations — the `DOTNET_ROOT` environment variable, the `dotnet` install directory, and (on Windows) the registry — for a compatible runtime version. Roll-forward policies (specified via `rollForward` in `runtimeconfig.json`) control whether the host accepts a newer patch, minor, or major version when the exact requested version is absent. The default policy is `Minor`: if the requested minor version is installed, the highest patch within that minor is used; if the requested minor is absent, the host rolls forward to the next higher minor version. Other policies include `LatestPatch` (no minor roll-forward), `LatestMinor` (highest available minor, even if the requested one is present), `Major` (roll forward to next higher major if requested major is absent), `LatestMajor` (highest available major), and `Disable` (exact match only — recommended only for testing). For self-contained deployments, roll-forward is not a runtime concern because the runtime version is locked at publish time. Common startup failures — `It was not possible to find any compatible framework version` — are hostfxr errors that occur before CoreCLR initializes, and they are resolved by adjusting runtime installation, container base images, or roll-forward policy, not by changing application code.
+
+Beyond framework selection, the .NET runtime exposes configuration knobs through three mechanisms, with a defined precedence order (higher overrides lower):
+
+1. **runtimeconfig.json** — per-application settings in the `configProperties` section. A `runtimeconfig.template.json` file in the project directory is merged into the output `runtimeconfig.json` at build time, providing a source-controlled configuration source that survives rebuilds.
+2. **MSBuild properties** — set in the project file (e.g., `<ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>`) or via the `RuntimeHostConfigurationOption` item. These take precedence over `runtimeconfig.json` settings.
+3. **Environment variables** — prefixed with `DOTNET_` (e.g., `DOTNET_GCRetainVM=1`). Starting in .NET 9, environment variables take precedence over both MSBuild properties and `runtimeconfig.json`. In earlier versions, `runtimeconfig.json` had the highest precedence.
+
+This three-tier system means the same GC, threading, or diagnostics behavior can be set globally on a machine via environment variables, baked into the project file for all consumers, or adjusted per-deployment via the JSON configuration file.
 
 ## Build Time And Run Time
 
@@ -145,7 +166,7 @@ dotnet MyApp.dll
 
 The .NET platform has gone through three major eras, and the naming still causes confusion.
 
-**.NET Framework** (2002–2019) is the original Windows-only implementation. It shipped as part of Windows itself (installed in the Global Assembly Cache) and was tightly coupled to the operating system. Its APIs — including ASP.NET Web Forms, WCF, and Windows Forms — are Windows-specific by design. Microsoft ceased active feature development on .NET Framework after version 4.8, though it remains supported on Windows for existing enterprise applications.
+**.NET Framework** (2002–2019) is the original Windows-only implementation. It shipped as part of Windows itself (installed in the Global Assembly Cache) and was tightly coupled to the operating system. Its APIs — including ASP.NET Web Forms, WCF, and Windows Forms — are Windows-specific by design. Microsoft ceased active feature development on .NET Framework after version 4.8.1, though it remains supported on Windows for existing enterprise applications.
 
 **.NET Core** (2016–2020) was a ground-up rewrite designed for cross-platform execution, higher performance, and modular deployment. It introduced side-by-side runtime installation (no GAC dependency), a redesigned ASP.NET stack (ASP.NET Core), and a significantly faster execution pipeline. .NET Core 3.1 was the last release under the "Core" branding.
 
@@ -163,6 +184,8 @@ The engineering differences between these generations are substantial:
 | **Active development** | Security patches only | Full feature development |
 
 Modern .NET is the target for all new development. .NET Framework survives in enterprises with large Windows-only codebases that have not been migrated. The rest of this book assumes modern .NET unless .NET Framework is explicitly discussed.
+
+**.NET Standard** was an intermediate compatibility layer that defined a shared API surface across .NET implementations. A library targeting .NET Standard 2.0 could run on both .NET Framework 4.6.1+ and modern .NET. With the unification under .NET 5 and later, .NET Standard has become less relevant for new work — modern .NET itself is the API standard. .NET Standard 2.1 is still useful when a library must target both modern .NET and .NET Framework, but for libraries that only target modern .NET, targeting `net8.0` (or later) directly is the recommended approach.
 
 ## Target Framework
 
@@ -188,9 +211,11 @@ Library projects sometimes target multiple frameworks to support consumers on di
 
 Multi-targeting causes the build to produce a separate assembly for each TFM, with conditional compilation (`#if NET8_0`, `#if NET9_0`) available for framework-specific code paths. Application projects typically target a single framework, since they deploy to a known runtime environment.
 
+**OS-specific TFMs** extend the base TFM with a platform suffix: `net8.0-windows`, `net8.0-android`, `net8.0-ios`. These make operating-system-specific APIs available — Windows Forms and WPF require `net8.0-windows`, while mobile bindings require the corresponding Android or iOS TFM. Cross-platform libraries and ASP.NET Core applications target the base TFM (`net8.0`) without a platform suffix. OS-specific TFMs can also include an optional OS version (for example, `net8.0-ios17.2`) to select a specific API surface at compile time without controlling the minimum runtime OS version — that is set separately via `SupportedOSPlatformVersion`.
+
 ## Deployment Models
 
-.NET supports three deployment modes, each with different trade-offs in size, predictability, and operational complexity.
+.NET supports several deployment modes, each with different trade-offs in size, predictability, and operational complexity.
 
 ### Framework-dependent Deployment
 
@@ -210,13 +235,13 @@ dotnet publish -c Release -r linux-x64 --self-contained true
 
 ### Single-file Deployment
 
-The entire application and its dependencies are packaged into a single executable. This simplifies distribution and handling — useful for CLI tools, simple services, and deployment environments where managing multiple files is inconvenient. Single-file publishing is typically combined with self-contained mode, and it requires a runtime identifier because the output is platform-specific.
+The entire application and its dependencies are packaged into a single executable. This simplifies distribution and handling — useful for CLI tools, simple services, and deployment environments where managing multiple files is inconvenient. Single-file publishing can be combined with either framework-dependent or self-contained mode, though it is most common with self-contained. In either case, it requires a runtime identifier because the single-file bundle is platform-specific.
 
 ```bash
 dotnet publish -c Release -r linux-x64 -p:PublishSingleFile=true --self-contained true
 ```
 
-The same behaviors can be captured in the project file as publishing defaults:
+The project file can capture these as publishing defaults:
 
 ```xml
 <PropertyGroup>
@@ -226,7 +251,31 @@ The same behaviors can be captured in the project file as publishing defaults:
 </PropertyGroup>
 ```
 
-Self-contained and single-file publishing require a runtime identifier (`win-x64`, `linux-x64`, `osx-arm64`) because the output includes platform-specific runtime binaries. This is a common point of confusion: framework-dependent publish output is platform-neutral IL assemblies, while self-contained output is inherently platform-specific.
+At startup, single-file applications extract bundled dependencies to a temporary directory. This extraction affects cold-start latency and can reduce visibility for diagnostic tools that expect individual assembly files on disk.
+
+Self-contained and single-file publishing require a runtime identifier (`win-x64`, `linux-x64`, `osx-arm64`) because the output includes platform-specific runtime binaries. This is a common point of confusion: framework-dependent publish output (without single-file) is platform-neutral IL assemblies, while self-contained and single-file output is inherently platform-specific.
+
+### Native AOT Deployment
+
+Native AOT compiles the application directly to native machine code at publish time, eliminating JIT compilation at runtime. The output is a self-contained native executable — no .NET runtime installation is required on the target machine. This produces faster startup, lower memory usage, and smaller deployment size than a traditional self-contained deployment that bundles the full runtime and JIT.
+
+```bash
+dotnet publish -c Release -r linux-x64 -p:PublishAot=true
+```
+
+The trade-offs are substantial. Build times are longer because the compiler performs whole-program analysis and cross-module optimization. Not all .NET libraries are compatible — reflection-heavy code, assembly loading, and dynamic type creation require source-generated alternatives or explicit configuration. The debugging experience differs from standard .NET applications since the compiled output is native code.
+
+Native AOT is particularly suited to workloads where cold-start latency and memory footprint dominate: serverless functions, CLI tools, and microservices with aggressive scale-to-zero requirements. It is less suited to applications that depend on runtime code generation, unconstrained reflection, or dynamically loaded plugins.
+
+### ReadyToRun Deployment
+
+ReadyToRun (R2R) is a form of ahead-of-time compilation that pre-compiles IL to native code at publish time while still including the original IL as a fallback. At runtime, the JIT can skip re-compiling methods that already have native versions, reducing startup and first-request latency. Unlike Native AOT, ReadyToRun preserves full JIT and reflection compatibility.
+
+```bash
+dotnet publish -c Release -r linux-x64 -p:PublishReadyToRun=true
+```
+
+ReadyToRun increases assembly size (both IL and native code are stored) and build time, but the startup improvement is measurable for most applications. It can be combined with both framework-dependent and self-contained deployment modes.
 
 ### Deployment Trade-offs
 
@@ -236,7 +285,9 @@ Beyond file size, deployment mode affects patching strategy, diagnostics, and st
 |---|---|---|---|
 | Framework-dependent | Machine-installed shared runtime | Small artifacts, centralized patching | Runtime must be present and compatible |
 | Self-contained | Bundled with application | Predictable runtime, no machine prerequisites | Larger artifacts, manual re-publish for patches |
-| Single-file | Bundled as one executable | Simple distribution | Extraction behavior, less transparent diagnostics |
+| Single-file | Bundled as one executable | Simple distribution | Extraction overhead at startup, less transparent diagnostics |
+| Native AOT | Compiled to native code | Fastest startup, lowest memory, no runtime dependency | Limited reflection, longer builds, platform-specific |
+| ReadyToRun | Pre-compiled IL + native code | Faster startup, full JIT compatibility | Larger assemblies, longer builds |
 
 Framework-dependent applications benefit from centrally patched runtimes — a security update to the shared runtime protects all applications without re-publishing. Self-contained applications must be republished to update the bundled runtime. Single-file applications extract to a temporary directory at startup, which affects cold-start performance and diagnostic tooling visibility.
 

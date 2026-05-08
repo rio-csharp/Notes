@@ -123,13 +123,19 @@ Write the export file incrementally as rows are read from the database. This kee
 
 Streaming avoids holding the whole export in memory, but the database still serves all the data. For very large exports, the query itself can be a bottleneck -- use keyset pagination in the worker to break the query into chunks.
 
+For CSV exports, `StreamWriter` over a `FileStream` or `MemoryStream` works well. For Excel exports (`.xlsx`), use a streaming library like `ClosedXML` or `EPPlus` that supports writing rows without loading the entire workbook into memory. For PDF exports, use a paginated approach where each page is rendered and flushed individually.
+
 ### Pagination / Batching
 
-Instead of one massive query, the worker fetches rows in pages (e.g., 10,000 rows at a time) using keyset pagination. Each page is written to the output file, then the next page is fetched. This keeps each individual query fast and prevents the database from holding a large result set in memory.
+Instead of one massive query, the worker fetches rows in pages (e.g., 10,000 rows at a time) using keyset pagination. Each page is written to the output file, then the next page is fetched. This keeps each individual query fast and prevents the database from holding a large result set in memory. The page size should be tuned based on row width: wider rows (many columns, large text fields) need smaller page sizes to keep per-query memory predictable.
 
 ### Read Replicas
 
-Route export queries to a read replica to avoid impacting the primary database's transaction throughput. Since exports tolerate slightly stale data (seconds of lag are acceptable), a replica is a natural fit.
+Route export queries to a read replica to avoid impacting the primary database's transaction throughput. Since exports tolerate slightly stale data (seconds of lag are acceptable), a replica is a natural fit. Configure a dedicated connection string for export operations that points to the replica.
+
+### Write Buffering
+
+For exports writing to object storage (S3, Azure Blob), buffer writes to reduce the number of API calls. Instead of uploading one small chunk at a time, accumulate a buffer of rows (e.g., 1 MB or 10,000 rows) and flush it as a single block upload. Most object storage SDKs support block-level operations that allow composing the final file from multiple uploaded blocks.
 
 ### Pre-aggregated / Materialized Tables
 

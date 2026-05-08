@@ -57,9 +57,11 @@ This matters because systems often mix human and service flows conceptually. A b
 
 Several controls protect the browser-facing parts of the flow.
 
-Strict redirect URI validation prevents tokens or codes from being sent to attacker-controlled destinations. `state` helps protect against request forgery in the authorization response. `nonce` helps bind an OpenID Connect ID token to the original authentication request.
+Strict redirect URI validation prevents tokens or codes from being sent to attacker-controlled destinations. `state` helps protect against request forgery in the authorization response by binding the callback to the original request; without it, an attacker could inject an authorization response before the legitimate one arrives. `nonce` helps bind an OpenID Connect ID token to the original authentication request, preventing replay across separate login attempts.
 
 These details are easy to dismiss as protocol ceremony. In reality, they are core defenses around one of the most attacker-visible boundaries in the system.
+
+One additional operational detail matters for OpenID Connect deployments. When a client uses OpenID Connect discovery (via the `Authority` property in ASP.NET Core), it fetches the provider's metadata document from `{Authority}/.well-known/openid-configuration`. This document contains signing keys, endpoint URLs, and supported claims. Providers rotate signing keys on a regular schedule; the default middleware handles key rotation transparently by re-fetching the discovery document when key resolution fails. Custom key resolution strategies that bypass discovery may miss rotation events and silently accept tokens signed with stale or compromised keys.
 
 ## Trust Boundaries At The API
 
@@ -148,6 +150,8 @@ Refresh-token rotation and reuse detection are common hardening techniques that 
 How a browser application stores or avoids storing tokens is a major security choice. Local storage is convenient but exposed to XSS. In-memory storage reduces persistence but complicates refresh behavior. Backend-for-frontend patterns move tokens server-side and leave the browser holding only a same-site session cookie.
 
 There is no universally perfect answer, but current industry consensus (RFC 9700, OAuth 2.1) strongly recommends the BFF pattern for production SPAs. By moving all token handling server-side, BFF eliminates the most critical attack vectors around token theft and session hijacking from browser JavaScript. The correct choice depends on threat model, deployment model, and operational complexity tolerance, but for applications handling personal or sensitive data, BFF should be the default starting point. What matters most is that token storage is treated as an architectural security decision rather than as a frontend convenience detail.
+
+A related consideration is SameSite cookie behavior in OAuth flows. The authorization server's redirect back to the client application after login is a cross-site navigation: the identity provider POSTs or redirects the user back to the client's callback endpoint. If the client's session cookie uses `SameSite=Strict`, the browser may not send it during this redirect, breaking the login flow. For OIDC callback endpoints, `SameSite=Lax` (the modern browser default) or `SameSite=None` with `Secure` may be necessary. This is not a relaxation to apply broadly -- only the specific callback route needs it, and the trade-off should be understood rather than defaulted blindly.
 
 ## Design Consequences
 

@@ -243,6 +243,43 @@ var orders = await _dbContext.Orders
 
 Filter and project in SQL, not after loading everything into memory.
 
+### Split Queries for Multiple Collections
+
+When loading a main entity with multiple related collections using `Include`, EF Core generates a single query with joins. If two collections are joined in the same query, each row from the first collection is repeated for every row in the second collection -- a Cartesian explosion. This multiplies the data transferred from the database and can overwhelm the application.
+
+Use `AsSplitQuery` to generate one query per collection instead:
+
+```csharp
+var orders = await _dbContext.Orders
+    .AsNoTracking()
+    .Include(x => x.Items)
+    .Include(x => x.Payments)
+    .AsSplitQuery()
+    .Where(x => x.Status == OrderStatus.Paid)
+    .ToListAsync(ct);
+```
+
+Split queries avoid data duplication at the cost of additional database round-trips. Evaluate the trade-off based on the expected row counts.
+
+### Compiled Queries
+
+For queries executed frequently in hot paths, EF Core supports compiled queries that skip LINQ expression compilation on every invocation:
+
+```csharp
+private static readonly Func<AppDbContext, int, Task<OrderDto?>> GetOrderById =
+    EF.CompileAsyncQuery((AppDbContext ctx, int id) =>
+        ctx.Orders
+            .AsNoTracking()
+            .Where(o => o.Id == id)
+            .Select(o => new OrderDto(o.Id, o.OrderNumber, o.TotalAmount))
+            .FirstOrDefault());
+
+// Usage:
+var order = await GetOrderById(_dbContext, orderId);
+```
+
+Compiled queries reduce CPU overhead in the EF Core runtime but add code complexity. Measure the impact before adopting them broadly.
+
 ## N+1 Query
 
 Risky:
@@ -312,7 +349,7 @@ ORDER BY CreatedAt DESC, Id DESC;
 
 ## Lock Contention
 
-Lock contention occurs when concurrent transactions compete for the same data resources. SQL Server uses lock managers with multiple granularity levels: row (key), page, and table. The database engine automatically escalates row locks to page or table locks when a single transaction accumulates more than 5,000 locks on the same object or when memory pressure from lock structures is detected. Lock escalation can convert many fine-grained locks into a single blocking bottleneck.
+Lock contention occurs when concurrent transactions compete for the same data resources. SQL Server uses lock managers with multiple granularity levels: row (key), page, and table. The database engine automatically escalates row locks to page or table locks when a single transaction accumulates more than 5,000 locks on the same index or table, or when memory pressure from lock structures is detected (lock memory exceeds 40% of the buffer pool). Once escalated, the single table-level lock blocks all concurrent access to that table, even operations targeting rows outside the original transaction's scope. This can convert many fine-grained row locks into a single blocking bottleneck that stalls all concurrent work on the table.
 
 ### Lock Types
 
@@ -428,7 +465,7 @@ await using var dbContext = await _dbContextFactory.CreateDbContextAsync(ct);
 
 SQL Server maintains statistics as multi-column histograms on index key columns and optionally on non-indexed columns. A histogram divides the data range into up to 200 steps, storing the number of rows and the density of distinct values within each step. When a query references a column with a filter predicate, the optimizer looks up the predicate value in the histogram to estimate selectivity.
 
-Statistics become stale when data is modified (inserts, updates, deletes) beyond a threshold. SQL Server automatically updates statistics when approximately 20% of rows in a table with more than 500 rows have changed, but for large tables this threshold may not trigger frequently enough. Queries compiled against stale statistics produce inaccurate row estimates, leading to suboptimal plans.
+Statistics become stale when data is modified (inserts, updates, deletes) beyond a threshold. SQL Server automatically updates statistics when approximately 20% of rows in a table with more than 500 rows have changed, but for large tables this threshold may not trigger frequently enough because the 20% is calculated against the total row count at the time the statistics were last updated. A table with 10 million rows requires 2 million modifications before triggering an automatic update. Queries compiled against stale statistics produce inaccurate row estimates, leading to suboptimal plans. For volatile large tables, consider more frequent manual statistics updates or using `PERSIST_SAMPLE_PERCENT = 100` for more accurate sampling.
 
 ### Parameter Sniffing
 
@@ -489,6 +526,34 @@ Read replicas help only when:
 - replication lag is acceptable for the read path;
 - the application routes reads to replicas safely (via connection string configuration or middleware);
 - consistency expectations between read and write paths are clearly defined and communicated.
+
+### Read/Write Connection Routing
+
+Routing reads to replicas requires application-level logic. A common approach uses two connection strings -- one for writes (pointing to the primary) and one for reads (pointing to the replica or a listener). The application selects the appropriate connection based on the operation type.
+
+```csharp
+public class OrderRepository
+{
+    private readonly string _writeConnectionString;
+    private readonly string _readConnectionString;
+
+    // Write operations use primary
+    public async Task<Order> CreateOrderAsync(Order order)
+    {
+        await using var conn = new SqlConnection(_writeConnectionString);
+        // ...
+    }
+
+    // Read operations use replica
+    public async Task<Order?> GetOrderAsync(int id)
+    {
+        await using var conn = new SqlConnection(_readConnectionString);
+        // ...
+    }
+}
+```
+
+Azure SQL Database provides the `ApplicationIntent=ReadOnly` connection string option, which automatically routes read-only connections to an available replica when read scale-out is enabled. This avoids maintaining two separate connection strings in application code.
 
 ## Practical Query Tuning Checklist
 

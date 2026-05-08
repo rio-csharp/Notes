@@ -118,6 +118,24 @@ Render phase should be pure:
 - no `localStorage` writes;
 - no DOM mutations.
 
+### Strict Mode Double-Invocation
+
+In development, React deliberately calls component functions and state initializers twice when Strict Mode is enabled. This is not a bug -- it is a mechanism to surface impure behavior. If a component produces different output on the second call (because it mutated an external variable or generated non-deterministic values), the discrepancy reveals a purity violation that could cause inconsistent UI in production. The double-invocation applies to the render phase only; effects and event handlers are not duplicated.
+
+### Suspense and the Rendering Cycle
+
+Suspense integrates into the render phase by allowing a component to signal that it is not ready to render. When a component suspends (via `lazy()`, `use()`, or a Suspense-enabled data source), React discards the in-progress render for that subtree and shows the nearest `<Suspense>` fallback instead. Once the data resolves, React retries the render.
+
+The interaction with concurrent rendering is important: state updates wrapped in `startTransition` or using `useDeferredValue` will not reveal Suspense fallbacks for already-visible content. Instead, React keeps the old UI visible and renders the new content in the background. This prevents jarring loading spinners when the user navigates within the application.
+
+Suspense fallbacks are committed synchronously -- when a component suspends, React commits the fallback to the DOM, runs layout effects for it, and then waits. After the data resolves, React commits the real content and removes the fallback. Layout effects in the suspended content are cleaned up and re-fired.
+
+### React Compiler and Render Optimization
+
+The React Compiler (stable in React 19) automatically memoizes components, values, and functions at build time. It understands the rules of React and wraps code in `useMemo`, `useCallback`, and `React.memo` where appropriate, without manual annotations. This means many optimization patterns described later in this section (memoization, stable references, `React.memo`) are handled automatically for code compiled with the React Compiler.
+
+The compiler does not change the rendering model itself -- components still render, reconcile, and commit in the same cycle. What changes is which re-renders are skipped: the compiler ensures that only components whose props or state actually changed re-execute, reducing unnecessary work. For new projects, adopting the compiler early means starting with good rendering performance by default. For existing projects, the compiler can be enabled incrementally on a per-file basis.
+
 Commit phase is where DOM changes happen.
 
 Effects run after commit:

@@ -147,7 +147,7 @@ The `[ApiController]` attribute adds behavior that is particularly useful for HT
 It commonly provides:
 
 - automatic model validation responses;
-- binding-source inference;
+- binding-source inference for action parameters (e.g., `[FromBody]` is inferred for complex types without explicit attributes);
 - more consistent API conventions.
 
 ```csharp
@@ -175,6 +175,8 @@ public sealed class OrdersController : ControllerBase
 ```
 
 With `[ApiController]`, invalid model state typically produces a `400 Bad Request` response before the action runs. That reduces boilerplate, but it does not remove the need for architectural judgment. Automatic validation is a convenience at the HTTP boundary, not a replacement for deeper application or domain invariants.
+
+One binding behavior deserves explicit attention: when a parameter is decorated with `[FromBody]`, all binding source attributes on its properties are ignored. The input formatter reads the body as a single stream and does not inspect property-level `[FromQuery]` or `[FromRoute]` annotations. A `[FromBody]` model cannot mix body and query binding — the body is consumed entirely by the input formatter. If an endpoint needs values from both the body and the URL, split them into separate parameters rather than annotating properties inside the body model.
 
 ## Thin Controllers And Thin Endpoint Handlers
 
@@ -402,6 +404,27 @@ app.MapGroup("/api/orders")
 ```
 
 This is one of the places where Minimal APIs develop their own local structure rather than simply imitating controllers. Middleware remains the right choice for broad HTTP concerns. Endpoint filters are useful when the concern is specific to a particular Minimal API surface.
+
+### Built-in Validation For Minimal APIs (.NET 10)
+
+Starting in .NET 10, Minimal APIs include built-in validation support via `AddValidation()`. Rather than relying on `[ApiController]`'s automatic model-state validation (which is controller-only) or writing manual validation in every handler, this registers a validation filter that applies across the endpoint surface:
+
+```csharp
+builder.Services.AddValidation();
+
+var app = builder.Build();
+
+app.MapPost("/orders", (CreateOrderRequest request) =>
+{
+    // If request fails validation, the filter short-circuits
+    // with a 400 + ValidationProblemDetails before this handler runs.
+    return Results.Created($"/orders/{Guid.NewGuid()}", request);
+});
+
+app.Run();
+```
+
+The `AddValidation()` call discovers validators registered in the DI container (FluentValidation, data annotations, custom `IValidator<T>` implementations) and wires them into an endpoint filter. Handlers receive only pre-validated input. For projects that do not use controllers, this brings validation parity without adopting the full MVC pipeline.
 
 ## Returning DTOs Instead Of Persistence Models
 

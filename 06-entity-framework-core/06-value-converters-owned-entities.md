@@ -42,6 +42,20 @@ public sealed record Email
 
 Once the model becomes richer, EF Core needs explicit mapping guidance.
 
+## Built-In Converters
+
+EF Core ships with many built-in value converters for common patterns. Enum to string, bool to numeric, DateTime to ticks, and many others are handled automatically when the property type and target column type differ. For example:
+
+```csharp
+modelBuilder.Entity<Order>()
+    .Property(o => o.Status)
+    .HasConversion<string>();
+```
+
+This single line is sufficient. EF Core selects the appropriate built-in `EnumToStringConverter` internally without requiring explicit conversion lambdas. The full set of built-in converters covers bool-to-string, bool-to-number, enum-to-number, enum-to-string, DateTime-to-ticks, DateTime-to-binary, numeric-to-string, string-to-Guid, URI-to-string, IPAddress-to-string, and many more.
+
+Built-in converters are stateless and can be shared across multiple properties. They are the preferred approach when a standard mapping exists -- custom lambdas should be reserved for domain-specific types that lack a predefined conversion.
+
 ## Value Converters
 
 A value converter maps one CLR property type to one persisted database representation.
@@ -58,6 +72,21 @@ modelBuilder.Entity<Order>()
 This often improves readability in the database and reduces coupling to enum numeric ordering. The trade-off is larger storage, potentially larger indexes, and the operational risk that renaming enum members requires a corresponding data migration.
 
 Value converters are therefore not just mapping helpers. They are persistence design decisions.
+
+## Pre-Convention Configuration
+
+When a value type appears on many properties across the model, configuring the converter on each property individually becomes repetitive. EF Core supports pre-convention configuration through `ConfigureConventions`:
+
+```csharp
+protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+{
+    configurationBuilder
+        .Properties<Email>()
+        .HaveConversion<EmailValueConverter>();
+}
+```
+
+This applies the converter to every property of type `Email` in the model without explicit per-property configuration. Pre-convention configuration is especially valuable for domain types used across many entities, such as strongly typed IDs or value objects.
 
 ## Single-Value Domain Types
 
@@ -218,6 +247,30 @@ An owned type is a stronger fit when:
 - the type has no separate identity but should remain structurally visible.
 
 That distinction keeps the model honest. A converter should not be used to hide structured data that the application needs to query relationally in rich ways. In those cases, flattening everything into one serialized column may simplify mapping but weaken queryability and indexing.
+
+## JSON Columns As An Alternative
+
+For complex value objects with multiple properties, EF Core (starting with version 7) supports JSON column mapping, which is often a cleaner alternative to value converters for composite data:
+
+```csharp
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+{
+    modelBuilder.Entity<Order>()
+        .OwnsOne(o => o.ShippingAddress, address =>
+        {
+            address.ToJson();
+        });
+}
+```
+
+This stores the entire `Address` object as a single JSON column in the `Orders` table. Unlike a value converter that serializes to a string, JSON column mapping allows the database to query into individual properties of the JSON document using provider-specific JSON path expressions, and EF Core can translate certain LINQ predicates into JSON queries.
+
+JSON columns are most useful when:
+- the complex type is genuinely nested within the owning entity;
+- the application needs to query or filter on individual properties of the embedded document;
+- schema flexibility is more important than column-level constraints.
+
+The trade-off is that JSON columns are not easily indexed for arbitrary property access, and they shift some of the schema responsibility from DDL to application-level interpretation.
 
 ## Queryability And Operational Trade-Offs
 

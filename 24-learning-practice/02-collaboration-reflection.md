@@ -59,3 +59,11 @@ Engineering teams that reflect together improve together. A regular practice of 
 For individual engineers, reflection means asking honest questions about their own work. Were the requirements clear enough before coding started? Were technical disagreements resolved in a way that improved the design? Was communication during the incident effective? What would be done differently next time?
 
 Answering these questions honestly, without defensiveness, is what separates engineers who grow from those who plateau.
+
+## Deliberate Practice in Engineering
+
+Reflection identifies areas for improvement, but improvement requires deliberate practice: structured activity aimed at raising performance in a specific dimension. Deliberate practice differs from routine work in three ways. First, it targets a specific skill rather than completing a task. An engineer who writes a dozen API endpoints is not deliberately practicing API design unless they are consciously evaluating each contract against a standard and adjusting the next one. Second, it requires immediate feedback, whether from code review results, production monitoring, or a peer review. Third, it operates at the edge of current ability, working on skills that are not yet comfortable.
+
+In practice, deliberate practice for an engineer might mean: spending a week writing integration tests that cover every error path, not just happy paths, to build a mental model of failure modes; or refactoring a legacy module while keeping tests green, to strengthen the ability to work within constraints. The key is that the activity is chosen for its developmental effect, not for its output.
+
+Teams can support deliberate practice by carving out time for skill-building work outside the delivery pipeline: internal training projects, structured pair programming rotations, and post-project reviews that focus on what was learned rather than what was delivered. These activities compound over time, turning routine engineering experience into genuine expertise.

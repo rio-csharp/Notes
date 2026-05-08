@@ -270,3 +270,59 @@ function OrdersPage() {
 The example demonstrates several patterns that recur throughout React development: components divided by responsibility, props for passing data from parent to child, local state for managing loading and error states, stable keys for list rendering, accessible table markup, and a cleanup guard in the effect to prevent setting state after unmount.
 
 Components are the fundamental building blocks of a React application. They receive props as input and return React elements describing what should appear on screen. Props flow unidirectionally from parent to child and must be treated as read-only, while state is owned locally by each component and drives re-rendering when it changes. For lists, providing stable keys lets React preserve component identity across re-renders, which avoids unnecessary DOM operations and maintains correct component state.
+
+## React 19: The `use()` Hook
+
+React 19 introduces the `use()` hook, which can consume Promises and Context values. Unlike other hooks, `use()` can be called inside loops and conditional statements, and it integrates with Suspense for streaming data:
+
+```tsx
+import { use } from "react";
+
+function Message({ messagePromise }: { messagePromise: Promise<string> }) {
+  const content = use(messagePromise);
+  return <p>{content}</p>;
+}
+```
+
+When `use()` receives a Promise, the component suspends -- React shows the nearest `<Suspense>` fallback until the Promise resolves. Errors propagate to the nearest Error Boundary. This pattern enables Server Components to stream data to Client Components without blocking the initial render.
+
+`use()` also works as a replacement for `useContext` and supports conditional context reads:
+
+```tsx
+function Button({ theme }: { theme?: Theme }) {
+  if (theme) {
+    const resolvedTheme = use(ThemeContext);
+    return <button className={resolvedTheme}>Click</button>;
+  }
+  return <button>Click</button>;
+}
+```
+
+## React 19: Actions and the `action` Prop
+
+React 19 introduces built-in support for Actions -- functions passed to the `action` prop on `<form>` elements. When a function is used as the action, the form submission is automatically wrapped in a Transition, keeping the UI responsive during submission:
+
+```tsx
+function SearchBox() {
+  async function handleSearch(formData: FormData) {
+    const query = formData.get("query");
+    const results = await searchApi(query);
+    // state updates after await are also wrapped
+  }
+
+  return (
+    <form action={handleSearch}>
+      <input name="query" />
+      <button type="submit">Search</button>
+    </form>
+  );
+}
+```
+
+After the action function completes, React automatically resets uncontrolled form fields. The form's HTTP method is forced to `POST` when a function is passed to `action`. For form state management, the `useActionState` hook (see Chapter 11, Section 02) provides pending status and error handling without manual state tracking.
+
+## React 19: The React Compiler
+
+React 19 ships with the React Compiler (formerly known as React Forget), which automatically handles memoization at build time. The compiler understands component code and automatically wraps values and functions in `useMemo`, `useCallback`, and `React.memo` where appropriate. This eliminates the need for manual memoization in most cases.
+
+The React Compiler supports incremental adoption -- teams can enable it per file or per function using opt-in directives. While the compiler reduces the need for manual optimization, understanding the concepts of memoization (explained in Chapter 11, Section 03) remains important for debugging edge cases and writing compiler-friendly code.

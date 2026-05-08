@@ -144,7 +144,9 @@ OrderShipped.Push.Title
 OrderShipped.Push.Body
 ```
 
-Version templates to avoid breaking old notifications.
+Version templates to avoid breaking old notifications. Each template version is stored immutably: when a template is updated, a new version is created and new notifications reference the latest version by default, while already-sent notifications retain their original rendered content.
+
+For email rendering, templates typically support a template language (Handlebars, Liquid, Razor) for dynamic content insertion. The rendering step should happen inside the worker, not the API handler, because template rendering can be CPU-intensive and may fail, which requires retry logic.
 
 ## User Preferences
 

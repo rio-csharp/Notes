@@ -72,10 +72,10 @@ To find completions for a prefix:
 
 A trie is excellent for in-memory local prefix lookup, but distributed, large-scale deployment introduces challenges:
 
-- **Memory**: a trie of common English words with frequency data can consume hundreds of megabytes. If the trie is rebuilt periodically from search logs, each rebuild creates a new trie before swapping out the old one, doubling peak memory.
-- **Ranking by popularity**: the trie stores per-node frequencies, but if the popular queries change, the trie must be rebuilt. Real-time frequency updates require atomic increment operations on shared nodes, which is impractical in a distributed setting.
-- **Multi-language tokenization**: languages without clear word boundaries (Chinese, Japanese) require segmentation before trie indexing, adding complexity.
-- **Sharding**: distributing the trie across machines requires splitting the key space (e.g., by first-character prefix), but this creates hot partitions for popular prefixes like "a" or "s".
+- **Memory**: a trie of common English words with frequency data can consume hundreds of megabytes. If the trie is rebuilt periodically from search logs, each rebuild creates a new trie before swapping out the old one, doubling peak memory. Using a compressed trie (radix tree) reduces the node count by merging single-child nodes.
+- **Ranking by popularity**: the trie stores per-node frequencies, but if the popular queries change, the trie must be rebuilt. Real-time frequency updates require atomic increment operations on shared nodes, which is impractical in a distributed setting. A common workaround is to maintain a separate trending-queries cache (Redis sorted set) that is merged into the trie during rebuild cycles.
+- **Multi-language tokenization**: languages without clear word boundaries (Chinese, Japanese, Thai) require segmentation before trie indexing, adding complexity. ICU-based tokenizers or dedicated NLP libraries handle segmentation, but the trie must store tokens, not raw characters.
+- **Sharding**: distributing the trie across machines requires splitting the key space (e.g., by first-character prefix), but this creates hot partitions for popular prefixes like "a" or "s". Consistent hashing with virtual nodes can spread the load more evenly.
 
 Because of these constraints, production autocomplete systems often combine multiple approaches: a trie for the hot prefix cache, Elasticsearch for the full suggestion corpus, and Redis sorted sets for trending queries.
 

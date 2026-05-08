@@ -384,6 +384,28 @@ For the LCP image, avoid lazy loading:
 />
 ```
 
+## Resource Hints
+
+Resource hints tell the browser about critical resources before they are discovered in the HTML. They reduce latency for connections and downloads:
+
+| Hint | When to use |
+|------|-------------|
+| `<link rel="preconnect">` | Connect to a third-party origin (CDN, API server, font host) before the browser encounters the resource. |
+| `<link rel="dns-prefetch">` | Fallback for `preconnect` in older browsers -- performs DNS lookup without TCP/TLS handshake. |
+| `<link rel="preload">` | Load a critical resource (font, hero image, key script) early. Use sparingly -- only for above-the-fold resources. |
+| `<link rel="prefetch">` | Hint at resources needed for the next navigation. Low priority, best-effort. |
+| `<link rel="modulepreload">` | Preload an ES module and its dependencies. Useful for key JavaScript modules that will be needed soon. |
+
+Example for a critical font and API connection:
+
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+<link rel="preconnect" href="https://api.example.com" crossorigin />
+<link rel="preload" href="/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin />
+```
+
+Overusing `preload` can waste bandwidth. Reserve it for resources that are discoverable late but critical for first paint. `preconnect` is cheap and beneficial for every third-party origin the page communicates with.
+
 ## Font Optimization
 
 Fonts can block or delay text rendering.
@@ -417,6 +439,20 @@ Preload example:
   crossorigin
 />
 ```
+
+## React Compiler and Automatic Optimization
+
+The React Compiler (stable in React 19) automates memoization at build time. It understands React's rules and automatically applies `useMemo`, `useCallback`, and `React.memo` where appropriate. For code compiled with the React Compiler, the manual optimization patterns described below (memoization, context stabilization, `React.memo`) are handled automatically.
+
+The compiler does not eliminate the need for architectural optimization -- state placement, context splitting, and virtualization remain developer responsibilities. But it removes the class of bugs caused by missing or incorrect manual memoization. For projects using the compiler, start with compiler optimization and only add manual memoization when profiling identifies a specific bottleneck.
+
+## Streaming SSR and Performance
+
+React 19's streaming SSR (stable since React 18) improves perceived performance by sending HTML in chunks. Instead of waiting for the entire page to render on the server, the server streams ready content as it becomes available. The browser can render the first chunks while waiting for slower data.
+
+Streaming SSR improves LCP and TTFB by delivering the page shell (navigation, headers, main layout) immediately while data-heavy sections stream in behind Suspense boundaries. Combined with selective hydration, the client can make interactive parts of the page usable before the entire page has streamed.
+
+For maximum benefit, identify the LCP element and ensure it is not behind a Suspense boundary that delays its delivery. Place Suspense boundaries around content that loads slower than the main page shell, such as secondary panels, comments sections, or recommendation widgets.
 
 ## React Rendering Optimization
 

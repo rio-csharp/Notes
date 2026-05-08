@@ -66,7 +66,21 @@ Dependency metrics:
 
 ## Trace-Based Investigation
 
-A trace should show where time is spent:
+A trace should show where time is spent. Use `dotnet-trace` to collect traces from a running process:
+
+```powershell
+dotnet-trace collect --process-id 1234 --duration 00:00:30 --output trace.nettrace
+```
+
+When troubleshooting slow database queries, include the `database` profile to capture ADO.NET and Entity Framework commands:
+
+```powershell
+dotnet-trace collect --process-id 1234 --profile database --output db-trace.nettrace
+```
+
+The trace can be viewed in Visual Studio (Windows), PerfView, or converted to Speedscope format for browser-based analysis.
+
+Example trace shape:
 
 ```text
 GET /api/orders?page=1              6.8s
@@ -362,7 +376,7 @@ public async Task<IActionResult> Get(CancellationToken ct)
 
 Avoid `.Result`, `.Wait()`, and blocking sleeps in request paths.
 
-**Why this causes starvation:** When `await` is used, the method returns its thread pool thread to the pool while the async operation is in flight, allowing that thread to serve other requests. When `.Result` or `.Wait()` is used, the calling thread is blocked. If the async operation needs to resume on the thread pool (which is the default behavior for `Task` continuations in ASP.NET Core's `SynchronizationContext`), it cannot proceed because all available threads are blocked. The thread pool must then inject additional threads to handle the backlog, but thread injection is slow (roughly one new thread per second). During this window, requests queue up and latency spikes.
+**Why this causes starvation:** When `await` is used, the method returns its thread pool thread to the pool while the async operation is in flight, allowing that thread to serve other requests. When `.Result` or `.Wait()` is used, the calling thread is blocked. The blocked thread cannot be used to process the async operation's continuation when the operation completes, so the thread pool must inject a new thread. Thread injection occurs at a controlled rate (the hill-climbing algorithm, approximately one to two threads per second). During this window, requests queue up and latency spikes. (ASP.NET Core does not use a custom `SynchronizationContext`; continuations run on the default thread pool, making the starvation mechanism identical: blocked threads cannot serve new work.)
 
 ## External Dependency Slowdown
 

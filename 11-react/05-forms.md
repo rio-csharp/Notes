@@ -33,6 +33,93 @@ function NameForm() {
 }
 ```
 
+## React Actions (React 19)
+
+React 19 introduces the `action` prop on `<form>` elements. When a function is passed, it runs in a Transition, keeping the UI responsive. After completion, uncontrolled form fields are automatically reset:
+
+```tsx
+function CreateOrderForm() {
+  async function handleSubmit(formData: FormData) {
+    const customerId = formData.get("customerId");
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      body: JSON.stringify({ customerId })
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to create order");
+    }
+
+    // form is automatically reset
+  }
+
+  return (
+    <form action={handleSubmit}>
+      <label htmlFor="customerId">Customer ID</label>
+      <input id="customerId" name="customerId" type="number" />
+      <button type="submit">Create</button>
+    </form>
+  );
+}
+```
+
+Combined with `useActionState`, the form gets pending state and error handling built in:
+
+```tsx
+import { useActionState } from "react";
+
+type FormState = { error?: string } | null;
+
+async function createOrder(prevState: FormState, formData: FormData): Promise<FormState> {
+  const customerId = formData.get("customerId");
+
+  try {
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      body: JSON.stringify({ customerId })
+    });
+
+    if (!response.ok) {
+      return { error: "Order creation failed." };
+    }
+
+    return {}; // success
+  } catch {
+    return { error: "Network error." };
+  }
+}
+
+function CreateOrderPage() {
+  const [state, formAction, isPending] = useActionState(createOrder, null);
+
+  return (
+    <form action={formAction}>
+      <label htmlFor="customerId">Customer ID</label>
+      <input id="customerId" name="customerId" type="number" />
+      <button type="submit" disabled={isPending}>
+        {isPending ? "Creating..." : "Create order"}
+      </button>
+      {state?.error && <p role="alert">{state.error}</p>}
+    </form>
+  );
+}
+```
+
+For reusable submit buttons, `useFormStatus` from `react-dom` reads the pending state of the enclosing `<form>` without threading props:
+
+```tsx
+import { useFormStatus } from "react-dom";
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button type="submit" disabled={pending}>
+      {pending ? "Saving..." : "Save"}
+    </button>
+  );
+}
+```
+
 ## React Hook Form
 
 ```tsx

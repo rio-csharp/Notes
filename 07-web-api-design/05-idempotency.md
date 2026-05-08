@@ -179,6 +179,58 @@ The same principles apply:
 - rely on durable uniqueness rather than in-memory assumptions;
 - keep the side effect and the "processed" record aligned as closely as possible.
 
+## Distributed Idempotency
+
+When the application runs across multiple instances, the idempotency storage must be shared and race-safe across nodes. A unique constraint on a shared database remains the most reliable mechanism. For higher throughput, Redis with a conditional SET command provides lower latency:
+
+```csharp
+public async Task<IdempotencyResult> ExecuteIdempotentAsync(
+    string key,
+    string requestHash,
+    Func<Task<IdempotencyResult>> operation,
+    TimeSpan ttl)
+{
+    var redis = _multiplexer.GetDatabase();
+    var acquired = await redis.StringSetAsync(
+        $"idem:{key}", requestHash, ttl, When.NotExists);
+
+    if (!acquired)
+    {
+        var stored = await redis.StringGetAsync($"idem:{key}");
+        var result = await redis.StringGetAsync($"idem:{key}:result");
+        if (stored == requestHash && result.HasValue)
+        {
+            return DeserializeResult(result!);
+        }
+
+        throw new IdempotencyKeyConflictException(
+            "Idempotency key is already in use with a different request.");
+    }
+
+    var outcome = await operation();
+    await redis.StringSetAsync(
+        $"idem:{key}:result", SerializeResult(outcome), ttl);
+    return outcome;
+}
+```
+
+The trade-off with a Redis-based approach is that the idempotency guarantee depends on the Redis instance's durability. A restart can lose cached records, allowing duplicate processing. The relational database approach with a unique constraint provides stronger guarantees because the constraint survives restarts.
+
+For PostgreSQL, the `ON CONFLICT DO NOTHING` clause provides an atomic race-safe insert pattern:
+
+```csharp
+await _db.Database.ExecuteSqlAsync($$"""
+    INSERT INTO idempotency_records (key, request_hash, created_at)
+    VALUES ({key}, {requestHash}, NOW())
+    ON CONFLICT (key) DO NOTHING
+    """, ct);
+
+var inserted = await _db.IdempotencyRecords
+    .FirstOrDefaultAsync(r => r.Key == key, ct);
+```
+
+This avoids the two-round-trip check-then-insert pattern entirely.
+
 ## Expiration And Operational Limits
 
 Idempotency records should not remain forever without policy. They need retention rules, cleanup strategy, and clear scope.
@@ -189,6 +241,20 @@ Questions that matter include:
 - whether idempotency scope is global or tenant-local;
 - how large stored replay payloads may become;
 - what happens when records expire and the client retries later.
+
+A common pattern is a sliding expiration of 24 hours, after which the idempotency record is either deleted or archived. If a client retries with an expired key, the system has two reasonable choices: reject the request as too old, or process it as a fresh operation. The choice depends on whether the operation's side effects are idempotent at the business level or only at the API level.
+
+A background cleanup job keeps the idempotency table from growing without bound:
+
+```csharp
+public async Task CleanupExpiredRecordsAsync(CancellationToken ct)
+{
+    var cutoff = DateTimeOffset.UtcNow.AddDays(-1);
+    await _db.IdempotencyRecords
+        .Where(r => r.CreatedAt < cutoff)
+        .ExecuteDeleteAsync(ct);
+}
+```
 
 These are operational design choices as much as API design choices.
 

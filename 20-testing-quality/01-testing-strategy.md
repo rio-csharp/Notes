@@ -303,6 +303,51 @@ Prioritize tests for:
 
 Low-risk areas can use fewer tests.
 
+## Property-Based Testing
+
+Property-based testing verifies that code satisfies invariants across a wide range of inputs, rather than asserting specific example cases. Instead of writing one test per input, you describe a property that should always hold and let the framework generate inputs.
+
+```csharp
+[Property]
+public void CalculateTotal_Should_Be_Positive_For_Any_Quantity(
+    decimal price, int quantity)
+{
+    var total = new PriceCalculator().CalculateSubtotal(price, quantity);
+
+    Assert.True(total >= 0);
+    Assert.True(total <= price * quantity); // no surcharge
+}
+```
+
+Libraries such as FsCheck and CsCheck integrate with xUnit and provide shrinking -- when a property fails, they simplify the input to the smallest case that reproduces the failure.
+
+Property-based testing is most valuable for:
+
+- mathematical and financial calculations;
+- parsing and formatting round-trips;
+- data structure invariants;
+- validation rules with combinatorial inputs.
+
+It does not replace example-based tests. Example tests document expected behavior clearly. Property tests complement them by finding edge cases the author did not anticipate.
+
+## Mutation Testing
+
+Mutation testing evaluates test quality by introducing small faults (mutations) into production code and checking whether tests catch them. A mutation that survives means the tests did not detect the change, indicating a gap in coverage.
+
+Tools like Stryker.NET apply mutations such as:
+
+- negating conditional expressions;
+- removing method calls;
+- replacing numeric constants;
+- inverting boolean returns.
+
+```powershell
+dotnet tool install -g dotnet-stryker
+stryker run --project src/Api/Api.csproj --test-project tests/Api.UnitTests
+```
+
+A high mutation score (above 80 percent) provides stronger confidence than line coverage alone, because it verifies that tests actually assert the right things rather than merely executing code.
+
 ## Example Test Matrix
 
 For an order system:

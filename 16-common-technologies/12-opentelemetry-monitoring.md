@@ -295,6 +295,10 @@ Order payment failure rate > baseline
 
 Avoid alerting on noisy symptoms without action. Too many noisy alerts cause alert fatigue.
 
+### SLO-Based Alerting
+
+For mature systems, define **Service Level Objectives (SLOs)** -- target reliability thresholds such as "99.9% of requests complete in under 500 ms over a 30-day rolling window." Alert on **burn rate**: how fast the error budget is being consumed. If the burn rate exceeds the threshold (for example, consuming 5% of the monthly budget in a single hour), page the engineer. This approach filters out transient blips and focuses attention on sustained degradation that threatens the SLO.
+
 ## Dashboard Design
 
 For one API, a useful dashboard includes:

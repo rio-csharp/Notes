@@ -76,6 +76,28 @@ public sealed class PaymentOptions
 }
 ```
 
+Starting with .NET 7, the configuration binder supports binding to types with a single public parameterized constructor, enabling truly immutable options types without `init`-only properties:
+
+```csharp
+public sealed class PaymentOptions
+{
+    public const string SectionName = "Payment";
+
+    public string BaseUrl { get; }
+    public int TimeoutSeconds { get; }
+    public string ApiKey { get; }
+
+    public PaymentOptions(string baseUrl, int timeoutSeconds, string apiKey)
+    {
+        BaseUrl = baseUrl;
+        TimeoutSeconds = timeoutSeconds;
+        ApiKey = apiKey;
+    }
+}
+```
+
+The binder maps configuration keys to constructor parameters by name (case-insensitive). Only types with a single public parameterized constructor are supported — if multiple constructors exist, the binder cannot choose and binding fails.
+
 ```csharp
 builder.Services
     .AddOptions<PaymentOptions>()
@@ -278,6 +300,45 @@ public sealed class PaymentRouter
 ```
 
 Named options are useful when several providers, tenants, or external clients share the same settings structure but not the same values. They preserve type safety without forcing artificial option classes for every variant.
+
+## Keyed Dependency Injection (.NET 8)
+
+The standard DI container resolves a single implementation per service type. When multiple implementations of the same interface exist, keyed services (.NET 8+) select the correct one by a key — typically a string or enum:
+
+```csharp
+builder.Services.AddKeyedScoped<IPaymentClient, StripePaymentClient>("stripe");
+builder.Services.AddKeyedScoped<IPaymentClient, PayPalPaymentClient>("paypal");
+```
+
+Consumers request a specific key:
+
+```csharp
+public sealed class PaymentRouter
+{
+    private readonly IServiceProvider _provider;
+
+    public PaymentRouter(IServiceProvider provider)
+    {
+        _provider = provider;
+    }
+
+    public IPaymentClient GetClient(string provider)
+    {
+        return _provider.GetRequiredKeyedService<IPaymentClient>(provider);
+    }
+}
+```
+
+Minimal API handlers inject keyed services via `[FromKeyedServices]`:
+
+```csharp
+app.MapGet("/pay/{provider}", (
+    [FromKeyedServices("stripe")] IPaymentClient stripe,
+    [FromKeyedServices("paypal")] IPaymentClient paypal,
+    string provider) => provider == "stripe" ? stripe.Pay() : paypal.Pay());
+```
+
+Keyed services are most useful when the set of implementations varies at registration time — payment providers, notification channels, storage backends, or tenant-specific configurations. They eliminate the need for factory classes or `IEnumerable<T>` resolution with manual filtering. For scenarios where the key is static (fixed at compile time), `[FromKeyedServices]` is simpler. For dynamic key selection at runtime, `IServiceProvider` resolution is the appropriate path.
 
 ## Secrets And Operational Boundaries
 

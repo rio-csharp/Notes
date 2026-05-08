@@ -213,18 +213,23 @@ Refunds need their own idempotency key.
 Scheduled job:
 
 ```text
-1. Query local payments updated recently.
-2. Query provider status.
-3. Compare.
-4. Fix local status or alert.
+1. Query local payments in an intermediate state (Pending, Authorized) updated within a sliding window (e.g., last 24 hours).
+2. For each payment, query the provider's API for the current status using the stored `ProviderPaymentId`.
+3. Compare the provider status with the local status.
+4. If the provider reports a final state (Captured, Failed, Refunded) that differs from the local state, update the local state.
+5. If a mismatch persists across multiple reconciliation cycles, alert the operations team.
 ```
 
 Reconciliation is necessary because:
 
-- callbacks can fail;
-- provider can delay events;
-- local processing can fail;
-- network issues happen.
+- webhook callbacks can fail or be delayed;
+- the provider may not send events for all state transitions;
+- local processing can fail after the provider confirmed success;
+- network issues can cause missed webhook deliveries.
+
+Scheduling frequency depends on the payment volume and the risk of unreconciled payments. For high-volume systems, reconciliation every 5-15 minutes is typical. For lower volumes, hourly may suffice.
+
+A reconciliation worker must paginate carefully through local records and respect the provider's rate limits. Querying the provider API for thousands of individual payments in rapid succession can be mistaken for an abuse attempt and result in throttling.
 
 ## Audit Log
 

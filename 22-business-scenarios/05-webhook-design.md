@@ -310,6 +310,8 @@ public async Task SendAsync(WebhookDelivery delivery, string secret, Cancellatio
 }
 ```
 
+The sender's `_httpClient` should be injected via `IHttpClientFactory` to manage connection pooling and prevent socket exhaustion under high delivery volume.
+
 ## Retry Strategy
 
 Retries should use backoff and jitter. (For a broader discussion of retry patterns, circuit breakers, and resilience engineering in .NET, see Chapter 17, "Backend Performance".)
@@ -333,6 +335,73 @@ Retry on:
 - `5xx`.
 
 Usually do not retry forever. Move to failed/dead-letter state after maximum attempts.
+
+## Secret Rotation
+
+Webhook secrets should be rotatable without downtime. Support overlapping rotation windows where both the old and new secrets are accepted for a configurable period:
+
+```csharp
+public sealed class WebhookSecretStore
+{
+    private readonly List<WebhookSecret> _secrets;
+
+    public WebhookSecretMatch? MatchSignature(string body, string timestamp, string signature)
+    {
+        foreach (var secret in _secrets)
+        {
+            if (!secret.IsActive) continue;
+            var expected = Signer.CreateSignature(body, timestamp, secret.Value);
+            if (CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(expected),
+                    Encoding.UTF8.GetBytes(signature)))
+            {
+                return new WebhookSecretMatch(secret.Id);
+            }
+        }
+        return null;
+    }
+}
+```
+
+This allows adding a new secret minutes or days before removing the old one, preventing a signature mismatch during the transition.
+
+## Payload Versioning
+
+Webhook providers sometimes change their payload schema. Version the expected payload in the stored subscription and validate it before deserialization:
+
+```text
+Event payload includes a "version" or "schema" field.
+Receiver checks the version against the stored subscription.
+Unsupported versions are stored but flagged for manual review.
+```
+
+## Sender HttpClient Management
+
+The sender should use `IHttpClientFactory` to manage the HTTP client lifecycle and avoid socket exhaustion from creating new `HttpClient` instances per delivery:
+
+```csharp
+builder.Services.AddHttpClient<WebhookSender>(client =>
+{
+    client.DefaultRequestHeaders.Add("User-Agent", "MyApp-Webhook/1.0");
+}).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    // Limit connections to avoid overwhelming the target
+    MaxConnectionsPerServer = 10,
+    // Abort slow deliveries quickly
+    ConnectTimeout = TimeSpan.FromSeconds(10),
+});
+```
+
+## Health Monitoring
+
+Track webhook health metrics:
+
+- oldest unprocessed event age for each subscription;
+- delivery success rate per subscription;
+- dead-letter count trending;
+- average delivery latency.
+
+Alert when a subscription's success rate drops below a threshold or when the oldest unprocessed event exceeds a SLA-defined duration.
 
 ## Security Rules
 

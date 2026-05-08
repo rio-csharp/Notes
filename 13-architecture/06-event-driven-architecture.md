@@ -221,15 +221,23 @@ public sealed class OutboxPublisherWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var publisher = scope.ServiceProvider.GetRequiredService<IEventPublisher>();
+        var deadLetterQueue = scope.ServiceProvider.GetRequiredService<IDeadLetterQueue>();
 
         var messages = await dbContext.OutboxMessages
-            .Where(x => x.ProcessedAt == null && x.RetryCount < 10)
+            .Where(x => x.ProcessedAt == null)
             .OrderBy(x => x.OccurredAt)
             .Take(50)
             .ToListAsync(ct);
 
         foreach (var message in messages)
         {
+            if (message.RetryCount >= 10)
+            {
+                await deadLetterQueue.PublishAsync(message, ct);
+                message.MarkDeadLettered(DateTimeOffset.UtcNow);
+                continue;
+            }
+
             try
             {
                 await publisher.PublishAsync(message.Type, message.Content, ct);
@@ -384,15 +392,7 @@ Without a registry, schema changes are harder to track: a producer may add a fie
 
 Messages that cannot be processed after retry exhaustion must not be silently dropped. A dead-letter queue (DLQ) captures them for inspection and recovery.
 
-The outbox publisher already limits retries (`RetryCount < 10`). When a message exhausts retries, the publisher should move it to a dead-letter destination rather than leaving it in the outbox table indefinitely:
-
-```csharp
-if (message.RetryCount >= 10)
-{
-    await deadLetterQueue.PublishAsync(message, ct);
-    message.MarkDeadLettered(DateTimeOffset.UtcNow);
-}
-```
+The `PublishBatchAsync` method above includes dead-letter logic: when a message's `RetryCount` reaches 10, the publisher moves it to a dead-letter destination rather than leaving it in the outbox table indefinitely. The query no longer filters by retry count, so exhausted messages are fetched, dead-lettered, and marked rather than skipped silently.
 
 DLQ messages should be surfaced through monitoring so operators can investigate and replay after fixing the root cause. A DLQ without alerting becomes a silent data loss mechanism.
 

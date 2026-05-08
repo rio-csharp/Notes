@@ -20,6 +20,44 @@ Collection selection starts from the dominant access pattern.
 
 Collection choice is a statement about dominant operations. The best collection for appending is not always the best collection for repeated membership checks. The best collection for preserving order may be the wrong one for enforcing uniqueness.
 
+## Index And Range
+
+C# 8 introduced the `Index` and `Range` types with corresponding operators for concise access to positions and slices:
+
+```csharp
+int[] numbers = [10, 20, 30, 40, 50];
+
+int last = numbers[^1];          // 50 — Index from end
+int secondLast = numbers[^2];    // 40
+int[] middle = numbers[1..3];    // [20, 30] — Range (end exclusive)
+int[] firstThree = numbers[..3]; // [10, 20, 30] — from start
+int[] fromSecond = numbers[1..]; // [20, 30, 40, 50] — to end
+int[] all = numbers[..];         // [10, 20, 30, 40, 50] — full copy
+```
+
+The `^` operator constructs a `System.Index`. The `..` operator constructs a `System.Range`. Both are supported by any type with an indexer that accepts `Index` or a `Slice` method that accepts `Range` — arrays, `List<T>`, `Span<T>`, `ReadOnlySpan<T>`, and `string`.
+
+For custom collection types, adding indexer and slice support for `Index` and `Range` is straightforward:
+
+```csharp
+public T this[Index index] => _items[index.GetOffset(_items.Length)];
+
+public T[] this[Range range]
+{
+    get
+    {
+        var (offset, length) = range.GetOffsetAndLength(_items.Length);
+        return _items[offset..(offset + length)];
+    }
+}
+```
+
+The main operational note is that `Range` on `List<T>` and arrays allocates a new collection — it copies elements, not views them. For allocation-free slicing, use `Span<T>` or `ReadOnlySpan<T>`:
+
+```csharp
+ReadOnlySpan<int> slice = numbers.AsSpan()[1..3]; // no allocation
+```
+
 ## Arrays And Lists
 
 Arrays and `List<T>` are often confused because both support indexed access, but they represent different design intentions.
@@ -341,6 +379,25 @@ Console.WriteLine(undo.Pop()); // typed B
 ```
 
 These types are clearer than trying to simulate the same behavior with a list. They also align better with the underlying operations. Removing from the front of a plain list repeatedly is typically expensive because it shifts elements. Queue and stack abstractions exist partly to avoid those accidental algorithmic costs.
+
+### PriorityQueue<TElement, TPriority> (.NET 6)
+
+`PriorityQueue<TElement, TPriority>` dequeues elements in priority order rather than insertion order. It is backed by a min-heap, so enqueue and dequeue are both O(log n):
+
+```csharp
+var jobs = new PriorityQueue<OrderJob, int>();
+
+jobs.Enqueue(new OrderJob("send-email"), priority: 2);
+jobs.Enqueue(new OrderJob("process-payment"), priority: 1); // higher priority (lower number)
+
+var next = jobs.Dequeue(); // process-payment — dequeued first
+```
+
+The priority type must implement `IComparable<T>` or be supplied with a custom comparer. Lower priority values are dequeued first (min-heap semantics). When multiple elements share the same priority, dequeue order among them is not guaranteed.
+
+`PriorityQueue` fits scheduling scenarios: job dispatchers, event processors, network request prioritization, and any workflow where items carry different urgency. It is not a sorted collection — enumeration does not produce sorted order, and `Peek` only reveals the minimum. For sorted enumeration, `SortedSet<T>` or `SortedDictionary<TKey, TValue>` are the appropriate types.
+
+`SortedSet<T>` maintains elements in sorted order via a self-balancing red-black tree. `Add`, `Remove`, and `Contains` are O(log n). It is useful when the collection must remain sorted across insertions and removals, and when range queries (`GetViewBetween`) are needed.
 
 ## Collection Interfaces And API Boundaries
 

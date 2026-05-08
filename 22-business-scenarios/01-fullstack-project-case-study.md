@@ -191,7 +191,7 @@ Upload document:
 POST /api/orders/123/files/upload-requests
 ```
 
-(For API contract design, pagination, sorting, filtering, and idempotency, see Chapter 7, "REST API Design", "API Contracts And DTOs", and "Idempotency".)
+API versioning is recommended when clients outside the same deployment team consume the API. URL-based versioning (`/api/v1/orders`) or header-based versioning (`Accept: application/vnd.example.v1+json`) can be used. Versioning should be designed early; retrofitting versioning onto an unversioned API is disruptive. (For API contract design, pagination, sorting, filtering, and idempotency, see Chapter 7, "REST API Design", "API Contracts And DTOs", and "Idempotency".)
 
 ## 6. Backend Implementation Highlights
 
@@ -422,9 +422,11 @@ Used for:
 ## 13. Future Improvements
 
 - add more integration tests;
-- add OpenTelemetry tracing;
+- extend OpenTelemetry tracing coverage to all background workers and external dependencies;
 - add feature flags;
-- improve audit log search;
+- improve audit log search with full-text indexing;
 - add keyset pagination for deep pages;
 - add reconciliation for external integrations;
-- add dashboard for worker retries and dead-letter messages.
+- add dashboard for worker retries and dead-letter messages;
+- add API versioning to support evolving client contracts safely;
+- add health checks and readiness probes for Kubernetes deployment.

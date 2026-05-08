@@ -130,6 +130,21 @@ Indexes improve many reads, but every additional index also imposes write cost:
 
 This is why index design should be workload-driven. A database is not improved simply by adding more indexes. It is improved when the indexes support the right read paths without overwhelming the write path.
 
+## Columnstore Indexes — Analytics And Reporting
+
+Rowstore indexes (clustered and nonclustered, the B+ tree structures discussed throughout this chapter) are optimized for OLTP: point lookups, small-range scans, and frequent writes. Columnstore indexes organize data by column rather than by row, compressing each column independently and enabling batch-mode processing. They are optimized for analytics: scanning millions of rows, aggregating over a few columns, and building reports.
+
+```sql
+CREATE CLUSTERED COLUMNSTORE INDEX CCI_Orders
+ON Orders;
+```
+
+Columnstore indexes achieve high compression (often 5–10x) because values within a column tend to be similar. A billion-row table with a `Status` column containing only five distinct values compresses dramatically. Queries that aggregate over narrow column subsets process only the relevant column segments, skipping the rest — the database reads far less data from disk.
+
+The trade-off is write performance. Columnstore is not designed for singleton INSERT/UPDATE/DELETE at OLTP rates. A common pattern is to maintain a rowstore table for transactional writes and periodically rebuild or switch to a columnstore table for reporting. SQL Server also supports nonclustered columnstore indexes on rowstore tables, allowing both OLTP and analytics workloads on the same underlying data.
+
+Columnstore is not a replacement for rowstore. It is the right tool when the dominant workload is scanning large volumes of data with aggregation, filtering on a few columns, and read performance far outweighs write frequency.
+
 ## Index Maintenance And Fragmentation
 
 Over time, as rows are inserted, updated, and deleted, index pages become fragmented. Logical fragmentation means the logical order of pages does not match the physical order on disk. Internal fragmentation means pages have unused space. Both can degrade scan performance.

@@ -63,6 +63,53 @@ public partial class Program
 }
 ```
 
+### Client Options
+
+`CreateClient` accepts `WebApplicationFactoryClientOptions` to control the test HttpClient behavior:
+
+```csharp
+var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+{
+    AllowAutoRedirect = false,
+    BaseAddress = new Uri("https://localhost"),
+});
+```
+
+Key options:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `AllowAutoRedirect` | `true` | Whether HttpClient follows redirects automatically |
+| `BaseAddress` | `http://localhost` | Base URI for all requests |
+| `HandleCookies` | `true` | Whether cookies are managed automatically |
+| `MaxAutomaticRedirections` | `7` | Maximum redirects to follow |
+
+Disabling automatic redirects is useful when testing authentication flows where the test needs to verify the redirect status code and Location header rather than the final page.
+
+### Per-Test Customization
+
+For tests that need different configuration from the shared factory, use `WithWebHostBuilder`:
+
+```csharp
+[Fact]
+public async Task GetOrders_With_Custom_Config()
+{
+    var client = _factory.WithWebHostBuilder(builder =>
+    {
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddSingleton<IOrderRepository, InMemoryOrderRepository>();
+        });
+    }).CreateClient();
+
+    var response = await client.GetAsync("/api/orders");
+
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+}
+```
+
+`ConfigureTestServices` runs after the app's normal `ConfigureServices`, making it the right place for test overrides. It does not replace the original registrations; it adds new ones that take precedence due to DI last-registration-wins semantics. For services that must be removed first, use `ConfigureServices` on the builder instead.
+
 ## Custom Factory
 
 A custom factory lets tests replace configuration, database, authentication, and external services.
@@ -83,7 +130,8 @@ public sealed class CustomWebApplicationFactory
         builder.ConfigureServices(services =>
         {
             var dbContextDescriptor = services.SingleOrDefault(
-                d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
+                d => d.ServiceType ==
+                    typeof(IDbContextOptionsConfiguration<AppDbContext>));
 
             if (dbContextDescriptor is not null)
             {
@@ -168,7 +216,7 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
         builder.ConfigureServices(services =>
         {
-            services.RemoveAll<DbContextOptions<AppDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<AppDbContext>>();
 
             services.AddDbContext<AppDbContext>(options =>
             {

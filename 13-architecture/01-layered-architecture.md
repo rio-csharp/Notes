@@ -74,7 +74,7 @@ Simple layered architecture often has:
 API -> Application -> Infrastructure/Data
 ```
 
-Clean Architecture changes direction so inner layers do not depend on infrastructure.
+Clean Architecture and Onion Architecture invert this direction so inner layers do not depend on infrastructure. The mechanism is the Dependency Inversion Principle: the application and domain layers define abstractions (ports), and infrastructure depends on those abstractions rather than the other way around. This is covered in detail in Chapter 13.02 (Clean Architecture) and Chapter 13.03 (Onion and Hexagonal Architecture).
 
 ## A Complete Order Example
 

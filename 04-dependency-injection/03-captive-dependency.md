@@ -246,6 +246,14 @@ var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 await dbContext.Database.MigrateAsync();
 ```
 
+When scoped services implement `IAsyncDisposable`, use `CreateAsyncScope()` (.NET 6+) instead of `CreateScope()`. The synchronous `CreateScope()` calls `Dispose()` on the scope — it does not call `DisposeAsync()`, even if scoped services within it implement `IAsyncDisposable`. `CreateAsyncScope()` ensures async disposal:
+
+```csharp
+await using var scope = app.Services.CreateAsyncScope();
+var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+await dbContext.Database.MigrateAsync();
+```
+
 This keeps scope ownership visible and aligns resolution with intended disposal.
 
 ## Validation Limits And Detection

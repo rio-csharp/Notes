@@ -321,6 +321,10 @@ public static int GetRetryCount(IBasicProperties properties)
 
 Avoid infinite requeue loops. Requeueing immediately can create a hot failure loop that consumes CPU and hides the real problem.
 
+### Retry With RabbitMQ Delayed Message Plugin
+
+Another approach is the [RabbitMQ Delayed Message Plugin](https://github.com/rabbitmq/rabbitmq-delayed-message), which adds a `x-delayed-type` exchange type. Instead of creating multiple retry queues with TTL, the plugin stores messages internally and releases them after the configured delay. This simplifies the topology but introduces a single point of internal storage that should be monitored for memory pressure.
+
 ## Idempotent Consumer
 
 ```sql

@@ -123,6 +123,14 @@ services.TryAddScoped<IOrderService, OrderService>();
 
 `TryAdd` registers the service only if no registration for the same service type already exists. This is useful in library code where the consumer should be able to override the default implementation, or when convention-based scanning may encounter duplicate matches.
 
+`TryAddEnumerable` extends this to `IEnumerable<T>` resolution: it registers an additional implementation only if no existing registration has both the same service type and the same implementation type. This prevents duplicate entries in composite resolution while still allowing multiple distinct implementations of the same interface:
+
+```csharp
+services.TryAddEnumerable(ServiceDescriptor.Scoped<INotificationSender, EmailSender>());
+services.TryAddEnumerable(ServiceDescriptor.Scoped<INotificationSender, SmsSender>());
+// A second call to TryAddEnumerable for EmailSender is a no-op.
+```
+
 ## Building The Service Provider
 
 At startup, ASP.NET Core builds an `IServiceProvider` from the collected registrations.
@@ -134,6 +142,18 @@ IServiceCollection
 ```
 
 The provider is the runtime object responsible for resolution. When a service is requested, the provider consults the registrations, determines how to construct the graph, applies lifetime rules, and either creates or reuses instances as required.
+
+Resolution has two forms with different failure behavior. `GetRequiredService<T>()` throws `InvalidOperationException` when the service is not registered — the correct choice when the dependency is mandatory. `GetService<T>()` returns `null` for unregistered reference types — useful for optional dependencies where the caller handles the absent case:
+
+```csharp
+var logger = provider.GetService<ILogger<OrderService>>();
+if (logger is not null)
+{
+    logger.LogInformation("Optional logging path.");
+}
+```
+
+`GetRequiredService<T>` is the dominant form in constructor injection because the container resolves constructor parameters through it. A constructor parameter that cannot be resolved fails at graph construction time, not at first use.
 
 For example:
 

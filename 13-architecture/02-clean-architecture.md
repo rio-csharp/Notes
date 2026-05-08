@@ -304,6 +304,9 @@ public sealed record EmailMessage(
 Infrastructure implements it.
 
 ```csharp
+using MailKit.Net.Smtp;
+using MimeKit;
+
 public sealed class SmtpEmailSender : IEmailSender
 {
     private readonly SmtpOptions _options;
@@ -313,18 +316,43 @@ public sealed class SmtpEmailSender : IEmailSender
         _options = options.Value;
     }
 
-    public Task SendAsync(EmailMessage message, CancellationToken ct)
+    public async Task SendAsync(EmailMessage message, CancellationToken ct)
     {
-        using var client = new SmtpClient(_options.Host, _options.Port);
+        using var client = new SmtpClient();
+        await client.ConnectAsync(
+            _options.Host, _options.Port,
+            MailKit.Security.SecureSocketOptions.StartTlsWhenAvailable, ct);
+        await client.AuthenticateAsync(
+            _options.Username, _options.Password, ct);
 
-        return client.SendMailAsync(
-            new MailMessage(_options.From, message.To, message.Subject, message.Body),
-            ct);
+        var mimeMessage = new MimeMessage();
+        mimeMessage.From.Add(new MailboxAddress(_options.From));
+        mimeMessage.To.Add(new MailboxAddress(message.To));
+        mimeMessage.Subject = message.Subject;
+        mimeMessage.Body = new TextPart("plain") { Text = message.Body };
+
+        await client.SendAsync(mimeMessage, ct);
+        await client.DisconnectAsync(true, ct);
     }
 }
 ```
 
+The .NET `SmtpClient` class is deprecated and does not support modern protocols (TLS 1.2+, OAuth2). The recommended alternative is `MailKit` (NuGet: `MailKit`), as shown here. The dependency inversion principle remains unchanged: the application layer still depends only on `IEmailSender`.
+
 API composes the implementation:
+
+The MailKit-based sender requires SMTP credentials. Configuration is bound from `appsettings.json`:
+
+```json
+{
+  "Smtp": {
+    "Host": "smtp.example.com",
+    "Port": 587,
+    "Username": "service@example.com",
+    "Password": ""
+  }
+}
+```
 
 ```csharp
 builder.Services.Configure<SmtpOptions>(
@@ -332,6 +360,8 @@ builder.Services.Configure<SmtpOptions>(
 
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 ```
+
+The `SmtpOptions` class is a simple options POCO with `Host`, `Port`, `Username`, and `Password` properties. The composition root wires everything together; the application layer never sees these details.
 
 The application layer depends on `IEmailSender`, not SMTP.
 

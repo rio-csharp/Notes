@@ -218,7 +218,7 @@ Production modals should also trap focus inside the dialog while open.
 </form>
 ```
 
-This form demonstrates several accessibility practices: every input has a label, related radio buttons are grouped by `fieldset`, help text is connected with `aria-describedby`, native controls provide keyboard behavior, and the submit action uses a `<button>` element.
+This form demonstrates several accessibility practices: every input has a label, related radio buttons are grouped by `fieldset`, help text is connected with `aria-describedby`, native controls provide keyboard behavior, and the submit action uses a `<button>` element. The `novalidate` attribute on the form disables the browser's built-in validation UI, which would conflict with the custom accessible validation pattern using `aria-invalid` and `aria-describedby` shown earlier.
 
 ### How Labels Connect to Inputs
 

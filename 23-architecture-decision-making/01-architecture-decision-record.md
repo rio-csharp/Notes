@@ -57,6 +57,40 @@ Draft the context
 
 An ADR should not be treated as permanent law. It captures the best decision under known constraints.
 
+## Storing ADRs
+
+ADRs belong in the code repository, alongside the code they describe. Storing them in the repository keeps them versioned, reviewable through the same pull request process as code changes, and discoverable by engineers working in the codebase. The conventional location is `docs/adr/` or `doc/arch/adr/` at the project root.
+
+Keeping ADRs in the repository rather than in a wiki or document store prevents them from becoming orphaned knowledge. When an engineer checks out a repository, all the architectural context for that version of the code is immediately available. The ADRs move with the code through branching, tagging, and history traversal.
+
+## Linking ADRs
+
+ADRs relate to each other. A new decision may supersede an older one, or a decision may depend on another decision's context. These relationships should be explicit.
+
+The most common link types are:
+
+- **Supersedes**: ADR-004 (short-lived JWT) supersedes ADR-002 (long-lived opaque tokens). The new ADR mentions "Supersedes: ADR-002" in its status section, and ADR-002's status changes to "Superseded by ADR-004".
+- **Relates to**: ADR-001 (Redis cache) relates to ADR-005 (tenant isolation strategy) because the cache key design depends on the tenant model.
+- **Follows from**: ADR-003 (Service Bus for workflows) follows from ADR-002 (Modular Monolith) because the module communication pattern was established first.
+
+These links create a decision graph that helps future engineers understand how architectural decisions evolved and which constraints influenced later choices.
+
+## ADR Tooling
+
+Several tools help manage ADRs in practice:
+
+- **adr-tools** (command-line) provides commands like `adr new`, `adr list`, and `adr generate graph` for managing a collection of ADRs in a repository.
+- **log4brains** publishes ADRs as a searchable knowledge base with a web UI, including decision graphs and full-text search.
+- **ADR Manager** (VS Code extension) provides snippets and templates for creating ADRs following the MADR format.
+
+These tools are optional but can help teams adopt ADR practices with less friction. The format itself is more important than the tooling.
+
+## Tone and Audience
+
+Michael Nygard, who originated the ADR pattern, described the ideal tone as "a conversation with a future developer." An ADR should not read like a corporate memo or a dry specification. It should explain the reasoning as if the author were sitting beside the reader, walking through the context, the forces at play, and the thinking behind the decision.
+
+This tone makes ADRs more likely to be read and maintained. A future engineer debugging a puzzling behavior in the payment module is more likely to read an ADR that sounds like it was written by a human trying to help than one that reads like a compliance document.
+
 ## ADR Template
 
 ```markdown
@@ -452,7 +486,7 @@ This ADR does not say Kafka is bad. It says Kafka is not the best fit for this s
 
 ## Example 4: Token Strategy
 
-(For a detailed discussion of JWT structure, validation, refresh flows, and storage considerations, see Chapter 8, "JWT" and "OAuth 2.0 And OIDC". For permission system design and resource-level authorization, see Chapter 8, "Authorization Models, Permissions, And Resource Access".)
+(For a detailed discussion of JWT structure, validation, refresh flows, and storage considerations, see Chapter 8, "Tokens, JWTs, And Session Boundaries" and "OAuth 2.0, OpenID Connect, And Delegated Trust". For permission system design and resource-level authorization, see Chapter 8, "Authorization Models, Permissions, And Resource Access".)
 
 ```markdown
 # ADR-004: Use Short-Lived JWT Access Tokens With Refresh Flow
@@ -539,7 +573,7 @@ Good ADRs are:
 We chose Kafka because Kafka is popular and scalable.
 ```
 
-Why weak:
+This example falls short because:
 
 - no context;
 - no alternatives;

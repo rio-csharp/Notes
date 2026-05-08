@@ -81,7 +81,52 @@ test("calls onSearchChange", async () => {
 });
 ```
 
-## Testing Async UI
+## Testing Forms With Actions (React 19)
+
+React 19 form actions can be tested by observing the form's behavior after submission:
+
+```tsx
+test("submits form action and shows pending state", async () => {
+  const user = userEvent.setup();
+  const mockAction = vi.fn();
+
+  render(
+    <form action={mockAction}>
+      <input name="customerId" defaultValue="123" />
+      <button type="submit">Submit</button>
+    </form>
+  );
+
+  await user.click(screen.getByRole("button", { name: /submit/i }));
+  expect(mockAction).toHaveBeenCalled();
+  expect(mockAction.mock.calls[0][0]).toBeInstanceOf(FormData);
+});
+```
+
+For testing `useActionState` with pending states, wrap the component in a test-friendly render with router and query providers as needed. The `isPending` state is controlled by the Transition -- in tests, the action completes synchronously within `act()`, so the pending phase may not be observable. For more precise control, test the error and success states through the action's return value.
+
+## Testing Suspense Boundaries
+
+Components that use `Suspense` can be tested by wrapping them in a Suspense boundary with a fallback:
+
+```tsx
+test("shows fallback while lazy component loads", async () => {
+  const LazyComponent = lazy(() =>
+    Promise.resolve({ default: () => <div>Loaded</div> })
+  );
+
+  render(
+    <Suspense fallback={<div>Loading...</div>}>
+      <LazyComponent />
+    </Suspense>
+  );
+
+  expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  expect(await screen.findByText(/loaded/i)).toBeInTheDocument();
+});
+```
+
+For testing with `use()` and Suspense-enabled data fetching, wrap the component tree in a `Suspense` boundary and use `findBy*` queries that wait for resolution.
 
 ```tsx
 test("shows loaded orders", async () => {

@@ -45,7 +45,7 @@ git diff --staged                     # show staged changes (what will commit)
 
 This separation between the working directory and the index gives fine-grained control over what goes into each commit. It is especially useful for splitting large changes into logical, reviewable commits.
 
-## How Branching Works
+## Branching Mechanics
 
 A branch in Git is simply a movable pointer to a commit. The file `.git/refs/heads/main` contains a 40-character SHA-1 hash. When you make a new commit on a branch, Git updates this file to point to the new commit.
 

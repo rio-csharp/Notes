@@ -497,4 +497,92 @@ public sealed class UnionFind
 
 Path compression and union by rank make operations almost constant in practice.
 
-Tree and graph algorithms form the backbone of problems involving hierarchical data, connectivity analysis, dependency resolution, and shortest-path computation.
+## Trie (Prefix Tree)
+
+A trie is a tree-like data structure for storing strings, optimized for prefix-based lookup. Each node represents a prefix (or complete word), and edges represent individual characters. Unlike a binary search tree, a trie does not store keys at nodes -- it encodes them in the path from root to a marked terminal node.
+
+Tries are commonly used for autocomplete, spell checking, IP routing prefix matching, and dictionary word lookup.
+
+### Node Definition
+
+```csharp
+public sealed class TrieNode
+{
+    public Dictionary<char, TrieNode> Children { get; } = new();
+    public bool IsEndOfWord { get; set; }
+}
+```
+
+### Basic Trie
+
+```csharp
+public sealed class Trie
+{
+    private readonly TrieNode _root = new();
+
+    public void Insert(string word)
+    {
+        var node = _root;
+
+        foreach (var ch in word)
+        {
+            if (!node.Children.TryGetValue(ch, out var next))
+            {
+                next = new TrieNode();
+                node.Children[ch] = next;
+            }
+
+            node = next;
+        }
+
+        node.IsEndOfWord = true;
+    }
+
+    public bool Search(string word)
+    {
+        var node = FindNode(word);
+        return node is not null && node.IsEndOfWord;
+    }
+
+    public bool StartsWith(string prefix)
+    {
+        return FindNode(prefix) is not null;
+    }
+
+    private TrieNode? FindNode(string prefix)
+    {
+        var node = _root;
+
+        foreach (var ch in prefix)
+        {
+            if (!node.Children.TryGetValue(ch, out var next))
+            {
+                return null;
+            }
+
+            node = next;
+        }
+
+        return node;
+    }
+}
+```
+
+Complexity:
+
+```text
+Insert:   O(k) where k is word length
+Search:   O(k)
+Prefix:   O(k)
+Space:    O(total characters stored across all words)
+```
+
+The space cost depends on the common prefix density among stored words. Words sharing long prefixes reuse trie nodes, which is more compact than storing each word separately.
+
+### Practical Considerations
+
+The basic trie uses a `Dictionary<char, TrieNode>` per node, which carries overhead. For large static dictionaries, a **compressed trie** (also called a radix tree or Patricia trie) merges single-child nodes into a single edge labeled with a substring, reducing node count and memory use. For alphabets limited to lowercase letters, an array of 26 node references per node avoids dictionary overhead but wastes memory when few children exist.
+
+Trie variants such as the ternary search tree (TST) provide a middle ground, using three pointers per node (less than, equal, greater) to combine the branching of a trie with the compactness of a binary search tree.
+
+The data structures and algorithms in this chapter -- tree traversal, graph search, topological ordering, union-find connectivity, and trie-based prefix matching -- form the backbone of problems involving hierarchical data, connectivity analysis, dependency resolution, shortest-path computation, and string lookup.

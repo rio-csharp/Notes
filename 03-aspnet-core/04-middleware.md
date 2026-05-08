@@ -331,3 +331,99 @@ Middleware is appropriate for concerns such as:
 Filters are more appropriate when the logic depends on MVC-specific context such as action arguments, model state, or action results. In other words, middleware shapes the HTTP pipeline broadly, while filters shape controller execution more locally.
 
 This distinction matters because middleware should not become an all-purpose dumping ground for concerns that actually need endpoint-specific semantic context.
+
+## Built-in Rate Limiting
+
+ASP.NET Core includes built-in rate limiting middleware (`Microsoft.AspNetCore.RateLimiting`) that applies configurable limits to endpoints. Four algorithm types are available:
+
+| Algorithm | Behavior | Best for |
+|---|---|---|
+| **Fixed window** | Resets count at fixed intervals | Simple per-period limits |
+| **Sliding window** | Divides window into segments, smoother limiting | More even request distribution |
+| **Token bucket** | Tokens replenish at fixed rate, supports bursts | Burst-tolerant APIs |
+| **Concurrency** | Limits simultaneous in-flight requests | Expensive/slow endpoints |
+
+Configuration example:
+
+```csharp
+using System.Threading.RateLimiting;
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("api", config =>
+    {
+        config.PermitLimit = 10;
+        config.Window = TimeSpan.FromSeconds(10);
+        config.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        config.QueueLimit = 2; // 0 = no queue; reject excess immediately
+    });
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.Headers["Retry-After"] = "10";
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "Rate limit exceeded. Retry after 10 seconds." }, ct);
+    };
+});
+
+app.UseRateLimiter(); // after UseRouting
+```
+
+Policies apply to endpoints or groups:
+
+```csharp
+app.MapGet("/api/limited", () => "OK").RequireRateLimiting("api");
+```
+
+Partitioned rate limiting creates separate counters per user, IP, or API key:
+
+```csharp
+options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: ctx.User.Identity?.Name ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "anon",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 100,
+            Window = TimeSpan.FromMinutes(1)
+        }));
+```
+
+Partitions prevent one user or tenant from consuming the entire rate budget, and they enable tiered limits (premium vs. free API keys). The rate limit middleware belongs after `UseRouting` so that endpoint-specific policies are available.
+
+## Built-in Output Caching
+
+Output caching (.NET 7+) is distinct from the older response caching middleware. Response caching sets `Cache-Control` headers for client/browser caching. Output caching stores the response body server-side and serves it directly, bypassing the entire downstream pipeline. The result is a significant reduction in server work for cacheable responses.
+
+```csharp
+builder.Services.AddOutputCache(options =>
+{
+    options.AddBasePolicy(builder => builder.Expire(TimeSpan.FromSeconds(30)));
+    options.AddPolicy("LongLived", builder => builder.Expire(TimeSpan.FromMinutes(5)));
+});
+
+app.UseOutputCache(); // after UseCors, after UseRouting for Razor/controller apps
+```
+
+Apply to endpoints:
+
+```csharp
+app.MapGet("/cached", () => DateTime.UtcNow).CacheOutput();
+app.MapGet("/cached-long", () => DateTime.UtcNow).CacheOutput("LongLived");
+```
+
+Default behavior: only HTTP 200 responses to GET/HEAD requests are cached. Responses that set cookies or require authentication are excluded. Custom policies can override these defaults (e.g., cache POST responses, vary by query string).
+
+**Tag-based eviction** invalidates groups of cached entries at once:
+
+```csharp
+app.MapGet("/blog/{id}", ...).CacheOutput(builder => builder.Tag("blog"));
+// POST to /purge/blog evicts all blog responses
+app.MapPost("/purge/{tag}", async (string tag, IOutputCacheStore store)
+    => await store.EvictByTagAsync(tag, default));
+```
+
+**Cache revalidation** via ETag or `If-Modified-Since` is automatic when output caching is enabled — the server returns `304 Not Modified` when the client holds a fresh copy. For multi-server deployments, Redis storage (`AddStackExchangeRedisOutputCache`) provides a shared cache across instances.
+
+The output cache middleware must be registered before endpoints that depend on it. For Minimal APIs, a common placement is after `UseCors` and before `UseAuthorization`.

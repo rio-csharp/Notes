@@ -57,6 +57,42 @@ DELETE FROM Users
 WHERE Id = 1;
 ```
 
+The `OUTPUT` clause (SQL Server) or `RETURNING` clause (PostgreSQL) captures the rows affected by a modification without a separate SELECT:
+
+```sql
+-- SQL Server
+INSERT INTO Users (Name, Email, IsActive)
+OUTPUT inserted.Id, inserted.CreatedAt
+VALUES ('Alice', 'alice@example.com', 1);
+
+-- PostgreSQL
+INSERT INTO Users (Name, Email, IsActive)
+VALUES ('Alice', 'alice@example.com', 1)
+RETURNING Id, CreatedAt;
+```
+
+This is especially useful when the application needs the generated identity value, computed column, or default right after the insert. It avoids a separate round-trip to retrieve what the database just produced.
+
+The `MERGE` statement (SQL Server) or `INSERT ... ON CONFLICT` (PostgreSQL) performs upsert — insert or update depending on whether a matching row exists:
+
+```sql
+-- SQL Server
+MERGE INTO Customers AS target
+USING (VALUES (@Email, @Name)) AS source (Email, Name)
+ON target.Email = source.Email
+WHEN MATCHED THEN
+    UPDATE SET Name = source.Name
+WHEN NOT MATCHED THEN
+    INSERT (Email, Name) VALUES (source.Email, source.Name);
+
+-- PostgreSQL
+INSERT INTO Customers (Email, Name)
+VALUES (@Email, @Name)
+ON CONFLICT (Email) DO UPDATE SET Name = EXCLUDED.Name;
+```
+
+`MERGE` is useful for ETL, data synchronization, and idempotent write operations. The trade-off is that it holds more locks than a simple INSERT or UPDATE, and in SQL Server it has historically had correctness edge cases that require careful testing.
+
 These operations should be read with the same set-oriented mindset as queries. Even an `UPDATE` that affects one row is still expressed as a set operation over all rows matching the predicate. That is why an omitted `WHERE` clause on an update or delete is so dangerous: it changes the target set from one row to all rows.
 
 ## Ordering And Deterministic Results
@@ -252,6 +288,19 @@ WHERE RowNumber <= 3;
 ```
 
 Window functions are one of the clearest examples of SQL's expressive power as a set language. They solve many problems that would be awkward or inefficient if approached procedurally.
+
+The `LAG` and `LEAD` functions access values from preceding or following rows without self-joins:
+
+```sql
+SELECT Id, Total,
+    LAG(Total) OVER (ORDER BY CreatedAt) AS PreviousTotal,
+    LEAD(Total) OVER (ORDER BY CreatedAt) AS NextTotal
+FROM Orders
+WHERE CustomerId = 42
+ORDER BY CreatedAt;
+```
+
+`LAG` and `LEAD` are among the most commonly used analytic functions in practice — for comparing consecutive rows, calculating deltas, detecting gaps, and building trend queries. The `ROWS` / `RANGE` frame specification (`ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING`) provides additional control over which rows participate in the calculation for aggregate window functions like `SUM` or `AVG`.
 
 ## `NULL` And Three-Valued Logic
 

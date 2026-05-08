@@ -272,6 +272,88 @@ function OrderDetailPage() {
 }
 ```
 
+## Navigation State
+
+React Router exposes the current navigation state for global loading indicators:
+
+```tsx
+import { useNavigation } from "react-router-dom";
+
+function GlobalLoadingIndicator() {
+  const navigation = useNavigation();
+
+  if (navigation.state === "loading") {
+    return <div className="global-loader">Loading...</div>;
+  }
+
+  return null;
+}
+```
+
+The navigation state transitions through `idle`, `submitting`, and `loading`, giving fine-grained control over loading UI.
+
+## Fetcher: Mutations Without Navigation
+
+`useFetcher` submits to actions or calls loaders without causing a navigation. This is ideal for toggles, inline deletes, and background operations:
+
+```tsx
+import { useFetcher } from "react-router-dom";
+
+function ToggleOrderStatus({ orderId }: { orderId: string }) {
+  const fetcher = useFetcher();
+
+  return (
+    <fetcher.Form method="post" action={`/orders/${orderId}/toggle`}>
+      <button type="submit" disabled={fetcher.state === "submitting"}>
+        {fetcher.state === "submitting" ? "Updating..." : "Toggle status"}
+      </button>
+    </fetcher.Form>
+  );
+}
+```
+
+`useFetcher` behaves like a route-level data mutation but stays on the current page. It automatically revalidates affected route loaders after submission, keeping the cache consistent without manual invalidation.
+
+## Deferred Data and Streaming
+
+For pages where some data loads slower than others, `defer()` in a loader streams the slow data while rendering the fast data immediately:
+
+```tsx
+import { defer, type LoaderFunctionArgs } from "react-router-dom";
+
+async function orderLoader({ params }: LoaderFunctionArgs) {
+  const order = await fetchOrder(params.id); // fast
+  const history = fetchOrderHistory(params.id); // slow, do not await
+
+  return defer({ order, history });
+}
+```
+
+```tsx
+import { Await, useLoaderData, Suspense } from "react-router-dom";
+
+function OrderDetailPage() {
+  const data = useLoaderData() as { order: Order; history: Promise<HistoryEntry[]> };
+
+  return (
+    <>
+      <OrderSummary order={data.order} />
+      <Suspense fallback={<p>Loading history...</p>}>
+        <Await resolve={data.history}>
+          {(history) => <OrderHistory history={history} />}
+        </Await>
+      </Suspense>
+    </>
+  );
+}
+```
+
+Deferred data keeps the initial page render fast and streams the slower data behind a Suspense boundary.
+
+## React Router Version Context
+
+The examples in this chapter use React Router v6's data router API (`createBrowserRouter`), which remains the standard pattern. React Router v7 is available as the latest major release, introducing a framework-mode API (via Vite plugin) alongside the traditional library-mode usage. The core concepts of loaders, actions, nested routes, and error elements remain the same across versions. For new projects, the v7 Vite plugin provides tighter build integration, while library mode continues to work as shown in this chapter.
+
 ## Under The Hood: Client-Side Routing
 
 React Router uses the browser's History API (`pushState`, `replaceState`, and the `popstate` event) to manage URL changes without triggering a full page reload. When a user clicks a `<Link>` or calls `navigate()`, React Router intercepts the navigation, updates the URL via the History API, and renders the matching route component instead of fetching a new page from the server. This is the key difference between client-side routing and traditional server-rendered navigation.

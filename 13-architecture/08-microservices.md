@@ -112,6 +112,20 @@ Cons:
 - ordering challenges;
 - eventual consistency.
 
+## API Gateway Pattern
+
+Client applications rarely communicate directly with individual services in production. An API Gateway sits between clients and services, providing a single entry point that handles routing, authentication, rate limiting, and protocol translation.
+
+Responsibilities:
+
+- route requests to the appropriate service;
+- enforce authentication and authorization centrally;
+- apply rate limiting and throttling;
+- transform request/response formats (for example, aggregate multiple responses);
+- translate between external protocols (HTTP/WebSocket) and internal protocols (gRPC/AMQP).
+
+An API Gateway reduces the number of client-to-service round trips and centralizes cross-cutting concerns. However, it introduces a potential single point of failure and must be deployed with high availability. For complex systems, multiple fine-grained gateways (one per client type or domain) are preferred over a single monolithic entry point, following the Backends for Frontends pattern.
+
 ## Service Template
 
 A service should have clear ownership, API contracts, data ownership, and operational endpoints.
@@ -361,6 +375,12 @@ This is simplified. Real sagas also need idempotency, retries, compensation fail
 - fallback;
 - idempotency;
 - dead-letter queue.
+
+## Service Mesh
+
+In larger deployments, implementing resilience patterns in every service becomes repetitive. A service mesh offloads these concerns to a sidecar proxy that intercepts all service-to-service traffic. Each service instance runs alongside a proxy (such as Envoy), forming a mesh data plane managed by a control plane (such as Istio or Consul Connect).
+
+A service mesh provides uniform retry policies, circuit breaker thresholds, mutual TLS, traffic routing for canary deployments, and distributed tracing without modifying application code. It adds operational complexity (proxy overhead, debugging through an extra hop, control plane management) and is rarely justified below 10-15 services, but for large heterogeneous deployments it can reduce per-service boilerplate significantly.
 
 ## Observability
 

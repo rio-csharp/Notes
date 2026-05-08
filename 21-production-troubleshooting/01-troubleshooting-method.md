@@ -262,7 +262,9 @@ dotnet-dump collect --process-id 1234 --output app.dmp
 dotnet-gcdump collect --process-id 1234 --output app.gcdump
 ```
 
-Note: in newer versions of `dotnet-counters`, provider names must be passed with the `--counters` flag as comma-separated values rather than space-separated positional arguments.
+Note: `dotnet-counters` accepts the `--counters` flag with comma-separated provider names (e.g., `System.Runtime,Microsoft.AspNetCore.Hosting`). On Linux and macOS, the target application and `dotnet-counters` must share the same `TMPDIR` environment variable; otherwise, the command times out.
+
+Warning: `dotnet-gcdump` triggers a full (generation 2) garbage collection to walk the GC heap. On large heaps this can suspend the runtime for a noticeable duration. Do not use it in performance-sensitive environments with large heaps.
 
 In containers/Kubernetes:
 

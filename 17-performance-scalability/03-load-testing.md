@@ -72,14 +72,19 @@ Expected load for 4-24 hours
 | Metric | What It Reveals |
 |---|---|
 | API CPU | Application-level CPU saturation |
-| Memory | Steady-state vs. growing (leak); GC pressure |
-| GC (Gen 0/1/2 collections per second, pause durations) | Allocation rate and GC overhead |
+| Memory (working set, GC heap size) | Steady-state vs. growing (leak); GC pressure |
+| GC (Gen 0/1/2 collections per second, pause durations, LOH size) | Allocation rate, GC overhead, large object fragmentation |
 | Thread pool queue length | Thread pool starvation or blocked threads |
 | SQL CPU / query duration | Database-side bottlenecks |
-| SQL connection pool usage | Pool exhaustion or connection leaks |
+| SQL connection pool usage (active vs. idle connections) | Pool exhaustion or connection leaks |
 | Redis / cache latency | Cache efficiency and network overhead |
 | Queue depth (message broker) | Consumer throughput vs. producer throughput |
 | External dependency latency | Downstream service degradation |
+
+In .NET applications, additional runtime counters (available via `dotnet-counters` or Application Insights) help pinpoint the bottleneck:
+- `dotnet.thread_pool.thread.count` rising rapidly while CPU is low signals thread pool starvation.
+- `dotnet.gc.heap.total_allocated` growing quickly indicates high allocation rate.
+- `dotnet.gc.pause.time` increasing as throughput rises suggests GC is becoming a bottleneck.
 
 ### Relationship Between VUs, Think Time, and RPS
 
@@ -266,7 +271,7 @@ Warm-up stabilizes the runtime before measurement begins. Without it, first-requ
 
 ### What Happens During Warm-up
 
-- **JIT compilation**: the .NET runtime compiles IL to machine code on first call to each method. Tiered compilation (available since .NET Core 3.0) initially generates a low-optimized version and later replaces it with a highly optimized version once the method is recognized as hot. This means methods improve in performance over the first few invocations.
+- **JIT compilation**: the .NET runtime compiles IL to machine code on first call to each method. Tiered compilation (available since .NET Core 3.0) initially generates a low-optimized version (tier 0) and later replaces it with a highly optimized version (tier 1) once the method is recognized as hot. This two-tier approach means methods improve in performance over the first few invocations as the JIT background thread promotes hot methods. A request that exercises code paths still at tier 0 will be measurably slower than the same request after all hot methods reach tier 1.
 - **Connection pool creation**: the first request triggers the creation of database and HTTP connections, which takes time and may cause initial latency spikes.
 - **Cache misses**: in-memory and distributed caches are cold. The first requests hit the database directly.
 - **EF Core model initialization**: the first query triggers EF Core's model building and view compilation, which can take hundreds of milliseconds.
@@ -378,6 +383,12 @@ Absolute max throughput:     300 RPS (but p95 = 3.5 s, 12% errors)
 ```
 
 The difference between these two numbers reveals how graceful (or sudden) the degradation curve is. A sudden cliff suggests a hard resource limit (connection pool, CPU); a gradual slope suggests queuing in the system.
+
+### The Elastic Limit
+
+In queuing theory, the "elastic limit" is the load point where latency begins increasing faster than throughput. Below this point, the system can absorb additional load with minimal latency impact. Beyond it, latency rises non-linearly because service time is dominated by queue wait.
+
+Plotting latency versus throughput on a graph, the elastic limit is the knee in the curve. Operating below this knee ensures that brief traffic bursts do not trigger cascading latency spikes. Production capacity planning should set headroom (typically 30-50% below the measured saturation point) to absorb traffic variability.
 
 ## Testing Horizontal Scaling
 

@@ -54,6 +54,8 @@ Captured -> Refunded
 Captured -> PartiallyRefunded
 ```
 
+Refunds and partial refunds must also be idempotent. The provider sends a `payment.refunded` event that should be handled by looking up the existing refund record by the provider's refund ID, not by blindly creating a new refund entry.
+
 Bad:
 
 ```csharp
@@ -334,6 +336,14 @@ public static OutboxMessage From<T>(string type, T payload)
 ```
 
 The payment state update and outbox insert happen in one local transaction. A background publisher sends the event later.
+
+## Security Considerations
+
+The webhook endpoint must use HTTPS in production. Without TLS, signatures can be replayed and payloads intercepted.
+
+Payment provider IP ranges should be allow-listed at the infrastructure level when possible, preventing unauthenticated requests from reaching the endpoint at all.
+
+For local development and testing, tools such as ngrok or `dotnet-dev-certs` provide a TLS-terminated tunnel to a local development server.
 
 ## Return Codes
 

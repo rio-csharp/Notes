@@ -23,9 +23,11 @@ var item = pq.Dequeue(); // "high"
 
 .NET PriorityQueue is min-priority by default.
 
-## Binary Heap Mental Model
+## Heap Mental Model
 
-A binary heap is a complete binary tree stored in an array. The .NET `PriorityQueue<TElement, TPriority>` (introduced in .NET 6) uses a binary min-heap internally.
+A heap is conceptually a complete tree stored in an array. The .NET `PriorityQueue<TElement, TPriority>` (introduced in .NET 6) uses a **quaternary (4-ary) min-heap** internally. A 4-ary heap has the same `O(log n)` bounds for insertion and removal as a binary heap, but with a shallower tree structure: each node has up to four children instead of two. Fewer tree levels often mean fewer comparisons per operation, though each comparison at a 4-ary node checks more children.
+
+The same array-indexing pattern applies regardless of arity. For a binary heap (two children per node), the formulas are:
 
 For index `i`:
 
@@ -34,6 +36,8 @@ left child:  2 * i + 1
 right child: 2 * i + 2
 parent:      (i - 1) / 2
 ```
+
+For a 4-ary heap, the first child of index `i` is at `4 * i + 1` and the parent is at `(i - 1) / 4`.
 
 Min-heap property:
 

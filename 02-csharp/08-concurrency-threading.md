@@ -165,6 +165,33 @@ public void Increment()
 }
 ```
 
+`Interlocked` provides `Increment`, `Decrement`, `Add`, `Exchange`, `CompareExchange`, and `Read` (for 64-bit values on 32-bit platforms). Each operation is guaranteed atomic — no other thread can observe a partially completed operation.
+
+### `volatile` And Memory Ordering
+
+The `volatile` keyword disables certain compiler and hardware optimizations on field access. Without it, the JIT compiler, CPU caches, and memory model may reorder reads and writes, and a thread may see a stale value indefinitely:
+
+```csharp
+private volatile bool _shutdownRequested;
+
+public void RequestShutdown()
+{
+    _shutdownRequested = true; // write is immediately visible to all processors
+}
+
+public void ProcessLoop()
+{
+    while (!_shutdownRequested) // read always goes to memory — not cached in register
+    {
+        // work
+    }
+}
+```
+
+Without `volatile`, the JIT might hoist `_shutdownRequested` into a register once and never check memory again, causing the loop to run forever. With `volatile`, every read goes to main memory and every write is immediately published.
+
+`volatile` is a narrow tool. It does not make `_count++` atomic (read-modify-write is still three operations), it does not prevent all reorderings (only around the volatile field itself), and it adds a small per-access cost. For most synchronization needs, `lock` or `Interlocked` are safer, clearer choices. `volatile` is most appropriate for simple flags — shutdown signals, status indicators — where a single write communicates a signal to readers and atomicity of compound operations is not required.
+
 When a larger invariant must be protected, `lock` is often the simplest correct tool:
 
 ```csharp
@@ -199,6 +226,22 @@ finally
 ```
 
 The `lockTaken` flag ensures `Monitor.Exit` is called only when the lock was successfully acquired, preventing corrupted state if `Monitor.Enter` throws. This `try/finally` structure means exceptions that escape the critical section still release the lock — which is usually correct but can leave protected state partially mutated.
+
+**`System.Threading.Lock` (.NET 9).** .NET 9 introduced the `Lock` class as the recommended replacement for locking on `object`. `Lock` provides clearer intent (the type name specifies its purpose) and enables future JIT optimizations specific to lock operations:
+
+```csharp
+private readonly Lock _gate = new();
+
+public void Increment()
+{
+    lock (_gate)
+    {
+        _count++;
+    }
+}
+```
+
+The `lock` keyword works with both `object` and `Lock` instances. `Lock` is preferred for new code; `object` remains valid for existing codebases and is not deprecated. The behavioral semantics are identical — `lock` on a `Lock` instance compiles to the same `Monitor.Enter`/`Monitor.Exit` try/finally pattern.
 
 **`lock` cannot span `await`.** `Monitor` tracks thread ownership. When a thread calls `Monitor.Enter`, it owns the lock; only that same thread can call `Monitor.Exit`. If an `await` occurs inside a `lock` block, the continuation after the `await` may execute on a different thread. When that new thread attempts to exit the monitor (via the `finally` block), `Monitor.Exit` throws a `SynchronizationLockException` because the calling thread does not own the lock. The compiler prevents this situation for the simple `lock` keyword — it produces error CS1996 ("Cannot await in the body of a lock statement") — but code using `Monitor.Enter` / `Monitor.Exit` directly can fall into this trap at runtime.
 
@@ -428,6 +471,53 @@ public sealed record UserSnapshot(int Id, string Name, string Email);
 
 Immutable data avoids many coordination problems because shared readers no longer compete over mutation.
 
+## Thread-Local And Async-Local State
+
+Some state is meaningful only within a specific execution context — a thread, or an asynchronous flow. Keeping it out of shared mutable fields eliminates contention and coordination entirely.
+
+### `ThreadLocal<T>`
+
+`ThreadLocal<T>` stores a separate value for each thread:
+
+```csharp
+private static readonly ThreadLocal<Stack<int>> _undoStack =
+    new(() => new Stack<int>());
+
+public void PushUndo(int operationId)
+{
+    _undoStack.Value!.Push(operationId);
+}
+```
+
+Each thread sees its own stack; no lock is needed. `ThreadLocal<T>` is most useful for pooling per-thread resources — `StringBuilder` instances, scratch buffers, or accumulated state that is later aggregated — and for scenarios where the same logical field must be distinct across threads.
+
+The `ThreadStaticAttribute` provides similar isolation for static fields but does not support initialization — each thread sees `default(T)` until explicitly set. `ThreadLocal<T>` wraps this with initialization and value disposal.
+
+### `AsyncLocal<T>`
+
+`AsyncLocal<T>` extends `ThreadLocal<T>` through asynchronous continuations. A `ThreadLocal<T>` value does not flow across `await` boundaries because the continuation may run on a different thread. `AsyncLocal<T>` propagates via `ExecutionContext` — the same mechanism that carries security context, culture, and synchronization context:
+
+```csharp
+private static readonly AsyncLocal<int> _requestDepth = new();
+
+public async Task ProcessAsync()
+{
+    _requestDepth.Value++;
+    try
+    {
+        await NextAsync(); // _requestDepth.Value is preserved across await
+    }
+    finally
+    {
+        _requestDepth.Value--;
+    }
+}
+```
+
+`AsyncLocal<T>` is the foundation for `HttpContext` access in ASP.NET Core, `Activity.Current` in OpenTelemetry tracing, and ambient correlation IDs. Changes made to an `AsyncLocal<T>` inside an `async` method are visible only to that method's continuation tree — not to sibling continuations or the caller after `await`.
+
+The cost is an allocation on each write: the `ExecutionContext` is immutable, so modifying an `AsyncLocal<T>` value creates a new `ExecutionContext` that copies the previous one with the change. Reading is allocation-free (it reads through the current context). In hot paths with frequent writes, batching writes or using alternatives (method parameters, explicitly passed context objects) avoids repeated allocation.
+
 ## Backpressure And Bounded Work
 
 One of the most important concurrency concepts in production systems is backpressure: the idea that producers should not create work faster than consumers can process it sustainably.
@@ -518,6 +608,53 @@ var dropOldest = Channel.CreateBounded<OrderJob>(new BoundedChannelOptions(100)
 `DropWrite` discards the incoming item when the channel is full — appropriate for fire-and-forget telemetry where newer data is not more important than already-queued data. `DropOldest` evicts the oldest item to make room — appropriate when fresher data is more valuable than stale data, such as real-time price updates or sensor readings where an old value is useless by the time a consumer processes it.
 
 Both modes sacrifice completeness for predictable memory and latency. The trade-off should be explicit: the system chooses which data to lose under overload rather than letting unbounded growth crash the process.
+
+## TPL Dataflow — Composable Processing Pipelines
+
+`System.Threading.Tasks.Dataflow` (the TPL Dataflow library, available as a NuGet package) provides higher-level building blocks that compose into processing pipelines with explicit parallelism, throttling, and fan-out/fan-in. While `Channel<T>` provides the queue, Dataflow provides the processing stage wrapped around the queue.
+
+The core blocks:
+
+- `ActionBlock<T>` — executes a delegate for each item. Degree of parallelism is configurable.
+- `TransformBlock<TInput, TOutput>` — processes each input into an output, feeding the next block.
+- `BufferBlock<T>` — an unbounded or bounded buffer, like a `Channel<T>` without processing.
+- `BroadcastBlock<T>` — sends each item to all linked consumers.
+
+A pipeline example makes the composition clearer:
+
+```csharp
+using System.Threading.Tasks.Dataflow;
+
+var downloadBlock = new TransformBlock<string, byte[]>(
+    async url => await _httpClient.GetByteArrayAsync(url),
+    new ExecutionDataflowBlockOptions
+    {
+        MaxDegreeOfParallelism = 4,
+        BoundedCapacity = 100
+    });
+
+var processBlock = new ActionBlock<byte[]>(
+    async data => await ProcessDataAsync(data),
+    new ExecutionDataflowBlockOptions
+    {
+        MaxDegreeOfParallelism = 2,
+        BoundedCapacity = 50
+    });
+
+downloadBlock.LinkTo(processBlock, new DataflowLinkOptions { PropagateCompletion = true });
+
+foreach (var url in urls)
+{
+    await downloadBlock.SendAsync(url, ct);
+}
+
+downloadBlock.Complete();
+await processBlock.Completion;
+```
+
+`BoundedCapacity` on each block provides backpressure: when a block's input queue is full, `SendAsync` on the preceding block waits, propagating backpressure up the pipeline. `MaxDegreeOfParallelism` controls concurrent processing within each block independently from other blocks. `PropagateCompletion` ensures that completing the first block automatically signals completion to the second.
+
+Dataflow shines when the pipeline has multiple stages with different concurrency requirements — for example, network I/O at 4x concurrency feeding CPU processing at 2x concurrency. For simple single-stage producer-consumer scenarios, `Channel<T>` is lighter and does not require an external NuGet dependency. The choice depends on whether the pipeline's structure is the primary concern (Dataflow) or the handoff and backpressure are the primary concern (Channel).
 
 ## CPU-Bound Work In Request-Driven Systems
 

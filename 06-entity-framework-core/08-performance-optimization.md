@@ -240,6 +240,39 @@ They should not be introduced speculatively. Most EF Core performance issues com
 
 Compiled queries are best treated as a late-stage optimization for a measured hot path whose broader query shape is already sound.
 
+## Streaming Results
+
+When a query returns a large result set, the default buffering behavior -- materializing the full set into memory -- can cause significant memory pressure. `AsAsyncEnumerable` streams each row as it arrives, keeping peak memory proportional to one row:
+
+```csharp
+await foreach (var order in _dbContext.Orders
+    .AsNoTracking()
+    .Where(o => o.Region == region)
+    .OrderBy(o => o.Id)
+    .AsAsyncEnumerable())
+{
+    await ProcessOrderAsync(order, ct);
+}
+```
+
+Streaming is appropriate for batch jobs, exports, and data migration workloads where the total row count is large but each row is processed independently. The trade-off is that the database connection remains open for the duration of the enumeration.
+
+## Query Tags For Performance Correlation
+
+Tagging queries with `TagWith` embeds identifying comments into the generated SQL, making it easier to correlate logged command execution times with specific application code paths:
+
+```csharp
+var orders = await _dbContext.Orders
+    .TagWith("SearchOrders")
+    .Where(o => o.Status == status)
+    .Select(o => new OrderListItemDto { Id = o.Id, Total = o.Total })
+    .ToListAsync(ct);
+```
+
+In command logs, the tag appears as a SQL comment, allowing the operator or DBA to identify which part of the application produced a given query. This is especially useful when analyzing slow query logs from the database side. For automatic source location, `TagWithCallSite()` inserts the file path and line number.
+
+Tags have no execution cost beyond the comment text in the SQL string. They are purely a diagnostics aid.
+
 ## Logging And SQL Inspection
 
 Operational tuning depends on visibility. `ToQueryString`, EF logging, tracing, and database execution plans form the bridge between application code and database behavior.

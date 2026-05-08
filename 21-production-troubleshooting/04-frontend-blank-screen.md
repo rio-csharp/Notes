@@ -156,7 +156,7 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-Error boundaries catch render errors, not every async error.
+Error boundaries catch render errors, not every async error. Runtime errors in event handlers, async operations, and setTimeout callbacks are not caught by error boundaries and must be handled separately, typically through global `window.onerror` and `unhandledrejection` handlers.
 
 ## Chunk Load Error
 
@@ -426,6 +426,26 @@ window.addEventListener("unhandledrejection", (event) => {
 In real production, send these to an error tracking service with release version and user/session context.
 
 Be careful not to send secrets or personal data unnecessarily.
+
+For correlating frontend errors with backend logs, include the request's correlation ID in error reports. When an API call fails or a blank screen occurs, the backend may have logged errors that are only traceable if the frontend captures and reports the correlation ID from the response header:
+
+```ts
+async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: { "X-Correlation-ID": getOrCreateCorrelationId(), ...init?.headers },
+  });
+
+  if (!response.ok) {
+    const correlationId = response.headers.get("X-Correlation-ID");
+    reportError({ url, status: response.status, correlationId });
+  }
+
+  return response.json();
+}
+```
+
+This connects frontend failures to the corresponding backend traces, a technique described in Chapter 21, "Troubleshooting Method."
 
 ## Browser Compatibility
 

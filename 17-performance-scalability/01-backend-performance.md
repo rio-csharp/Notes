@@ -111,6 +111,28 @@ This points to SQL first, then payload/serialization.
 
 ## Async I/O
 
+Use async APIs for I/O. Do not use `Task.Run` to make a synchronous API asynchronous -- this just schedules synchronous work on a thread pool thread without freeing the thread. Instead, prefer native async APIs on data access, I/O, and long-running operations.
+
+### IAsyncEnumerable for Streaming Responses
+
+Starting with ASP.NET Core 3.0, controller actions can return `IAsyncEnumerable<T>` to stream results asynchronously without buffering the entire collection in memory. The serializer iterates the sequence asynchronously, keeping memory proportional to the page size.
+
+```csharp
+[HttpGet("stream-orders")]
+public IAsyncEnumerable<OrderDto> StreamOrders(CancellationToken ct)
+{
+    return _dbContext.Orders
+        .AsNoTracking()
+        .Where(o => o.Status == OrderStatus.Paid)
+        .Select(o => new OrderDto(o.Id, o.OrderNumber, o.TotalAmount))
+        .AsAsyncEnumerable();
+}
+```
+
+Do not return `IEnumerable<T>` from synchronous controller actions, because the serializer iterates it synchronously, blocking the thread pool thread. Use `ToListAsync` before returning, or switch to `IAsyncEnumerable<T>`.
+
+### Async/Await Pattern
+
 Use async APIs for I/O.
 
 ```csharp
@@ -146,7 +168,7 @@ Thread pool starvation occurs when the thread pool has no available threads to s
 
 When ASP.NET Core receives an HTTP request, it dispatches the request to a thread pool thread. If that thread calls `.Result` or `.Wait()` on an incomplete `Task`, the calling thread blocks synchronously, waiting for the operation to complete. While blocked, that thread cannot process other requests.
 
-The thread pool's hill-climbing algorithm attempts to compensate by injecting additional threads, but the injection rate is deliberately slow -- typically one new thread every 500 milliseconds to 2 seconds. Under a sudden burst of blocking calls, requests accumulate in the queue far faster than new threads can be added, causing latency to spike even while CPU utilization remains moderate.
+The thread pool's hill-climbing algorithm attempts to compensate by injecting additional threads, but the injection rate is deliberately slow. In .NET 5 and earlier, the thread pool added approximately one new thread every 500 milliseconds to 2 seconds. Starting with .NET 6, the heuristics were improved to scale up thread count much faster in response to certain blocking Task APIs, reducing the duration of starvation episodes. However, the fundamental problem remains: a sudden burst of blocking calls can still cause requests to accumulate in the queue far faster than new threads can be added, driving latency spikes even while CPU utilization stays moderate.
 
 ### Symptoms
 
@@ -217,6 +239,30 @@ The .NET garbage collector uses a generational model: objects are allocated in G
 The GC triggers a collection when a generation's allocation budget is exhausted. Higher allocation rates cause more frequent collections. Gen 0 collections are cheap and fast (sub-millisecond), but frequent Gen 1 and especially Gen 2 collections introduce noticeable application pauses because the runtime must suspend managed threads to compact reachable objects.
 
 High allocation rate also increases CPU usage from the collection work itself. In server GC mode (the default for ASP.NET Core), each logical processor gets its own heap and collection thread, so allocations scale well -- but every object still must be collected eventually.
+
+### Buffer Pooling with ArrayPool&lt;T&gt;
+
+For scenarios that require temporary large arrays (buffers, serialization, streaming), allocate from `ArrayPool<T>` rather than creating new arrays on each call. Array pooling reuses buffers, reducing both allocation rate and GC pressure, especially for allocations near the LOH threshold.
+
+```csharp
+using System.Buffers;
+
+public byte[] ReadFileInChunks(string path)
+{
+    var buffer = ArrayPool<byte>.Shared.Rent(8192);
+    try
+    {
+        // Use buffer for reading
+        return buffer;
+    }
+    finally
+    {
+        ArrayPool<byte>.Shared.Return(buffer);
+    }
+}
+```
+
+`ArrayPool<T>.Shared` maintains a thread-local and global cache of arrays, avoiding allocation for frequently reused buffers. The `Rent` method may return an array larger than the requested size; the caller must respect the returned length, not the requested size.
 
 ### Risky Pattern: String Concatenation
 
@@ -333,7 +379,7 @@ public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
 
 ### HybridCache (L1 + L2)
 
-Starting with .NET 9, `HybridCache` combines an in-memory cache (L1) with a distributed cache (L2) behind a single API. It provides built-in cache stampede protection, automatic serialization, and a simplified `GetOrCreateAsync` method that reduces boilerplate compared to using `IMemoryCache` and `IDistributedCache` separately.
+Starting with .NET 9, the `Microsoft.Extensions.Caching.Hybrid` NuGet package provides `HybridCache`, which combines an in-memory cache (L1) with a distributed cache (L2) behind a single API. It provides built-in cache stampede protection, automatic serialization (using `System.Text.Json` by default, with support for protobuf and custom serializers), and a simplified `GetOrCreateAsync` method that reduces boilerplate compared to using `IMemoryCache` and `IDistributedCache` separately.
 
 ```csharp
 public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
@@ -349,11 +395,12 @@ public async Task<CategoryDto[]> GetCategoriesAsync(CancellationToken ct)
 
 HybridCache handles:
 
-- **Stampede protection** at the L1 level without requiring manual `SemaphoreSlim` locking.
-- **Tag-based invalidation**: evict multiple related entries at once (e.g., invalidate all entries tagged `"categories"` when categories are updated).
-- **Serialization pooling**: reduces allocations by reusing pooled buffers for serialized values.
+- **Stampede protection** at the L1 level: only one concurrent caller for a given key executes the factory method; other callers wait for the result of that call. This eliminates the need for manual `SemaphoreSlim` locking.
+- **Tag-based invalidation**: logically invalidate multiple related entries by tag. Calling `RemoveByTagAsync("categories")` ensures entries tagged with `"categories"` are treated as cache misses on subsequent reads. Note that this is a logical operation: the physical cache entries remain until they expire naturally via their configured lifetime.
+- **Serialization pooling**: reduces allocations by reusing pooled buffers for serialized values, and supports custom serializers including protobuf.
+- **Reuse of immutable objects**: types marked with `[ImmutableObject(true)]` and `sealed` can be returned from the cache without per-call deserialization, reducing CPU overhead for frequently accessed data.
 
-For applications that need both local and distributed caching, `HybridCache` is simpler and more efficient than combining `IMemoryCache` and `IDistributedCache` manually. For applications with only a single server or only one cache tier, `IMemoryCache` or `IDistributedCache` individually remain appropriate.
+HybridCache can work without any secondary cache -- it provides in-process caching and stampede protection even when no `IDistributedCache` is configured. For applications that need both local and distributed caching, `HybridCache` is simpler and more efficient than combining `IMemoryCache` and `IDistributedCache` manually. For applications with only a single server or only one cache tier, `IMemoryCache` or `IDistributedCache` individually remain appropriate.
 
 ### When to Cache
 
@@ -447,6 +494,23 @@ var items = await _dbContext.Orders
 
 Keyset pagination avoids scanning/skipping many rows for deep pages.
 
+## Response Compression
+
+Reducing response payload size improves client-side latency and reduces bandwidth costs. ASP.NET Core provides response compression middleware that negotiates with the client (via the `Accept-Encoding` request header) to apply Gzip, Brotli, or other compression algorithms.
+
+```csharp
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<BrotliCompressionProvider>();
+    options.Providers.Add<GzipCompressionProvider>();
+});
+
+app.UseResponseCompression();
+```
+
+Compression is most effective for text-based responses (JSON, HTML, XML). Pre-compressed or already-small payloads (images, short API responses) may not benefit and can waste CPU cycles on compression. Measure the trade-off before enabling globally.
+
 ## Serialization And Payload Size
 
 Avoid returning huge object graphs.
@@ -478,7 +542,7 @@ API contracts should return the shape the client needs, not the entire entity gr
 
 ## HTTP Client Performance
 
-Use `IHttpClientFactory`.
+Use `IHttpClientFactory` (available since ASP.NET Core 2.1) to manage `HttpClient` instances. It pools HTTP connections and handles lifetime management, preventing socket exhaustion.
 
 ```csharp
 builder.Services.AddHttpClient<IPaymentClient, PaymentClient>(client =>
@@ -488,13 +552,24 @@ builder.Services.AddHttpClient<IPaymentClient, PaymentClient>(client =>
 });
 ```
 
-Avoid creating many raw `HttpClient` instances manually:
+Avoid creating raw `HttpClient` instances manually:
 
 ```csharp
 using var client = new HttpClient();
 ```
 
-That can cause socket exhaustion in long-running services.
+Although `HttpClient` implements `IDisposable`, disposing it repeatedly in a hot path leaves sockets in the `TIME_WAIT` state, eventually exhausting the available ephemeral port range. `IHttpClientFactory` reuses pooled handlers, avoiding this problem.
+
+## DbContext Pooling
+
+For high-throughput ASP.NET Core applications using EF Core, `DbContext` pooling reuses context instances across requests, avoiding the cost of creating and configuring new `DbContext` instances on every request.
+
+```csharp
+builder.Services.AddDbContextPool<AppDbContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+```
+
+Pooling is most beneficial when `DbContext` configuration is expensive (e.g., complex model initialization). It is not a replacement for connection pooling, which is managed by the database driver. The pool size is configurable via the `poolSize` parameter (default: 128). Measure the impact before adopting pooling -- for applications with simple model configurations, the overhead saved may be negligible.
 
 ## External Calls
 
@@ -643,6 +718,26 @@ await consumer;
 ```
 
 The appropriate concurrency limit depends on the downstream dependency's capacity. Measure the dependency's p95 latency and error rate under increasing concurrency to find the saturation point, then set the limit well below it.
+
+## Rate Limiting
+
+Unbounded request rates can overwhelm backend resources even when individual endpoints are well-optimized. ASP.NET Core includes built-in rate limiting middleware (since .NET 7) that supports multiple algorithms: fixed window, sliding window, token bucket, and concurrency limiter.
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("api", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 0;
+    });
+});
+
+app.UseRateLimiter();
+```
+
+Rate limiting can be applied globally, per endpoint, or per user partition. A detailed treatment of rate limiter algorithms, partitioning strategies, and fail-open versus fail-closed trade-offs appears in Chapter 18.02 (Rate Limiter System Design).
 
 ## Horizontal Scaling
 

@@ -62,7 +62,11 @@ This is useful because it gives the system a more explicit authorization languag
 
 ### Policy Registration And Enforcement
 
-In ASP.NET Core, permission-based authorization is typically expressed through policies that map permissions to claims or requirements. Policies are registered during startup and then applied declaratively on controller actions or endpoints:
+In ASP.NET Core, permission-based authorization is typically expressed through policies that map permissions to claims or requirements. Policies are registered during startup and then applied declaratively on controller actions or endpoints.
+
+An important detail is that authorization handlers are called even when authentication has not succeeded. The handler must not assume that `context.User.Identity.IsAuthenticated` is true. A handler that returns success without checking authentication status can inadvertently authorize unauthenticated callers. Checking for the expected claims explicitly (rather than assuming they exist) avoids this pitfall.
+
+Policies can also be composed through handler logic. When a policy has a single requirement but multiple handlers for that requirement, success from any handler is sufficient -- handlers are evaluated on an OR basis. This is useful when multiple credential types or conditions can satisfy the same requirement:
 
 ```csharp
 // Program.cs — register policies backed by permission claims
@@ -127,6 +131,10 @@ The handler is registered in DI and invoked from within the action:
 ```csharp
 builder.Services.AddScoped<IAuthorizationHandler, OrderOwnerHandler>();
 ```
+
+For CRUD-style operations, ASP.NET Core provides the `OperationAuthorizationRequirement` helper, which allows a single handler to evaluate multiple operation types (create, read, update, delete) without implementing separate requirement classes. The handler checks which operation is being requested and evaluates the user and resource accordingly.
+
+The `AuthorizationHandlerContext` also provides a `Fail()` method. Calling `context.Fail()` guarantees the authorization decision is negative even if other handlers succeed for the same requirement. By default, all handlers are still invoked after a failure (controlled by the `AuthorizationOptions.InvokeHandlersAfterFailure` property, which defaults to `true`). Setting it to `false` causes the middleware to short-circuit on failure, which can be useful for performance-sensitive paths where a failure is determinative. In most cases, leaving it at the default and letting all handlers run is safer because it allows unrelated handlers to produce side effects such as audit logging.
 
 ```csharp
 [HttpDelete("{id:int}")]

@@ -394,6 +394,97 @@ public abstract class Entity
 
 The choice matters because inheritance is a long-term commitment. An abstract base class fixes part of the hierarchy permanently and consumes the type's one base-class slot. Interfaces remain more flexible when the purpose is collaboration rather than shared implementation.
 
+### Interface Default Implementations
+
+C# 8 introduced default interface methods — method bodies defined directly on the interface that implementing types inherit without explicit implementation:
+
+```csharp
+public interface ILogger
+{
+    void Log(string message);
+
+    void LogError(string message)
+    {
+        Log($"[ERROR] {message}");
+    }
+
+    void LogWarning(string message)
+    {
+        Log($"[WARN] {message}");
+    }
+}
+```
+
+The primary use case is library evolution. When a library author adds a new method to a published interface, every existing implementation would normally break. A default implementation provides the new method without forcing all consumers to recompile or implement it. The runtime resolves the default through virtual dispatch: if the concrete type provides an override, that wins; if not, the interface's default executes.
+
+Default implementations carry constraints. They cannot access instance state directly — an interface has no fields. They can only call other interface members. The static type at the call site determines whether a default method is reachable: calling `obj.LogError(...)` requires the variable to be typed as `ILogger`, not as the concrete implementation type. This is because default methods belong to the interface, not to the implementing class's dispatch table.
+
+Default implementations narrow the gap between interfaces and abstract classes, but they do not close it. An abstract class still owns state, constructors, and the "is-a" relationship. A default interface method is a convenience for evolution and optional behavior, not a mechanism for building base classes through interfaces.
+
+### Delegates And Events
+
+Interfaces and abstract classes model capabilities on types. Delegates model behavior as values — a reference to a specific method, with a known signature, that can be passed, stored, and invoked.
+
+```csharp
+public delegate bool OrderValidator(Order order);
+```
+
+A delegate type defines a method signature. Instances point to concrete methods — static methods, instance methods, or lambdas:
+
+```csharp
+OrderValidator validator = order => order.Items.Count > 0;
+
+bool isValid = validator(someOrder); // invokes the referenced method
+```
+
+The BCL provides three generic delegate families that cover most cases:
+
+- `Action` and `Action<T1, T2, ...>` — methods returning `void`.
+- `Func<T1, T2, ..., TResult>` — methods returning a value.
+- `Predicate<T>` — methods returning `bool`, semantically for tests and filters.
+
+```csharp
+Func<int, int, int> add = (a, b) => a + b;
+Action<string> log = message => Console.WriteLine(message);
+Predicate<Order> isShipped = order => order.Status == OrderStatus.Shipped;
+```
+
+Delegates are multicast: a single delegate instance can reference multiple methods. Invoking it calls each method in order:
+
+```csharp
+Action<string> pipeline = null;
+pipeline += msg => Console.WriteLine($"First: {msg}");
+pipeline += msg => Console.WriteLine($"Second: {msg}");
+pipeline("test"); // both fire
+```
+
+Multicast is the mechanism behind events. An `event` is a delegate field with access restrictions — external code can add and remove handlers but cannot invoke the delegate or overwrite the handler list:
+
+```csharp
+public sealed class OrderService
+{
+    public event EventHandler<OrderEventArgs>? OrderSubmitted;
+
+    public async Task SubmitAsync(Order order, CancellationToken ct)
+    {
+        // ... persistence ...
+
+        OrderSubmitted?.Invoke(this, new OrderEventArgs(order.Id));
+    }
+}
+```
+
+Callers subscribe and unsubscribe:
+
+```csharp
+service.OrderSubmitted += (sender, args) => _logger.LogInformation("Order {Id} submitted", args.OrderId);
+service.OrderSubmitted -= handler; // unsubscribe to prevent memory leaks
+```
+
+The `EventHandler<T>` pattern (sender + EventArgs) is the standard .NET convention for events, used throughout the BCL. Deviating from it is occasionally justified for internal events where the sender/args ceremony adds noise, but public events should follow the convention so callers recognize the shape.
+
+The memory leak risk from events is real: a publisher holds a reference to every subscriber's handler delegate, which in turn holds a reference to the subscriber object. If the subscriber is short-lived and the publisher is long-lived, the subscriber is never collected until it unsubscribes. This is the event-subscription leak pattern covered in the garbage collection chapter.
+
 ## Composition Over Inheritance
 
 Composition means building behavior by combining collaborators instead of subclassing existing types.

@@ -56,6 +56,8 @@ Reads messages from Kafka.
 
 Consumers in the same group coordinate to share partition processing. Kafka assigns each partition to exactly one consumer within the group at any given time. If a topic has 6 partitions and a consumer group has 3 consumers, each consumer may process 2 partitions.
 
+Modern Kafka (2.4+) supports **incremental cooperative rebalancing**, which reassigns only a subset of partitions at a time rather than stopping all consumers. This avoids the "stop-the-world" rebalance pause that older versions imposed on every membership change. The `CooperativeStickyAssignor` is the recommended partition assignor for new deployments.
+
 The assignment is managed through a **group coordinator** broker. When consumers start, stop, or fail, the coordinator triggers a rebalance that redistributes partitions using a configurable partition assignor strategy (such as range or round-robin).
 
 Parallelism within a consumer group is bounded by the partition count. If there are 4 consumers for a topic with 2 partitions, 2 consumers will remain idle.

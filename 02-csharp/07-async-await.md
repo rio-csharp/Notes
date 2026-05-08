@@ -140,6 +140,8 @@ Four mechanisms deserve close attention.
 
 Three engineering consequences follow from this transformation. First, asynchronous methods are not free of allocation; the state machine box incurs GC pressure on hot paths. Second, exceptions thrown after an `await` do not surface synchronously to the caller — they fault the returned task via `SetException`. Third, a method appears to "return" before its work is finished because what it returns is the task — the promise of eventual completion — not the final result.
 
+A fourth consequence is subtler: the suspension at an `await` point is not a method exit, so `finally` blocks do not run at suspension. If an async method holds a `using` declaration and suspends at an `await`, the `Dispose` call waits until the method resumes — not when it suspends. If the task is never awaited and the state machine is never resumed, the `finally` block (and therefore the `Dispose` call) never executes. This is another reason fire-and-forget async work is dangerous: it can leak resources without any observable failure.
+
 ## Awaitables And The Awaiter Pattern
 
 In normal application code, the most common awaitable types are `Task`, `Task<T>`, `ValueTask`, and `ValueTask<T>`. The language, however, is defined in terms of an awaiter pattern rather than a hard dependency on `Task`.
@@ -366,6 +368,60 @@ public async Task<UserProfilePage> GetProfilePageAsync(int userId, CancellationT
 This is valuable when the operations do not depend on one another and the downstream systems can tolerate the combined concurrency. The warning matters as much as the benefit: `Task.WhenAll` is not a universal optimization. Starting too much work at once can overload external systems, create memory pressure, or trigger rate limits.
 
 Asynchronous composition is about both latency and load shape.
+
+### `Task.WhenAny` And Racing Operations
+
+`Task.WhenAny` completes when any of the supplied tasks completes — the first to finish, succeed, or fail. This enables timeout patterns, hedging, and "first acceptable result" scenarios:
+
+```csharp
+using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+var fetchTask = _client.GetDataAsync(ct);
+var timeoutTask = Task.Delay(TimeSpan.FromSeconds(5), ct);
+
+var completed = await Task.WhenAny(fetchTask, timeoutTask);
+
+if (completed == timeoutTask)
+{
+    throw new TimeoutException("Data fetch timed out.");
+}
+
+var data = await fetchTask; // already completed — no additional await cost
+```
+
+A hedging pattern races two requests to different endpoints and takes the faster response:
+
+```csharp
+var primaryTask = _primaryApi.GetAsync(id, ct);
+var fallbackTask = _fallbackApi.GetAsync(id, ct);
+
+var completed = await Task.WhenAny(primaryTask, fallbackTask);
+var result = await completed; // unwrap the winner
+```
+
+`Task.WhenAny` does not cancel the losing tasks — they continue executing to completion. For long-running operations, this means the losing task still consumes resources (threads, memory, downstream connections). Cancelling the losers requires explicit coordination:
+
+```csharp
+using var primaryCts = new CancellationTokenSource();
+using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(primaryCts.Token, ct);
+
+var primaryTask = _primaryApi.GetAsync(id, linkedCts.Token);
+var fallbackTask = _fallbackApi.GetAsync(id, ct);
+
+var completed = await Task.WhenAny(primaryTask, fallbackTask);
+
+if (completed == primaryTask)
+{
+    // Primary won — cancel the fallback (it observes ct, which is usually caller cancellation)
+    // If fallback needs explicit cancellation, pass a separate token.
+    var result = await primaryTask;
+}
+else
+{
+    primaryCts.Cancel(); // stop the losing primary request
+    var result = await fallbackTask;
+}
+```
 
 ## Async Streams And Incremental Consumption
 

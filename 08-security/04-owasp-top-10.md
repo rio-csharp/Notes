@@ -83,7 +83,32 @@ Server-side request forgery is an especially good example of modern trust-bounda
 
 The key defense idea is that outbound requests are also a trust boundary. Allowlisting, egress controls, redirect control, and cautious URL handling matter because the server's network position is more privileged than the attacker's browser.
 
-## Mishandling Of Exceptional Conditions
+## Identification And Authentication Failures
+
+Authentication failures extend beyond weak passwords. Common patterns include:
+
+- permitting credential stuffing or brute-force attacks through missing rate limiting;
+- weak or no multi-factor authentication for privileged actions;
+- verbose login error messages that enable account enumeration;
+- session fixation or predictable session identifiers;
+- missing or improperly validated token expiration and revocation.
+
+The recurring lesson is that authentication is a system property, not a single login endpoint. Session lifetime, credential rotation, failed-attempt tracking, and step-up authentication for sensitive operations all belong in the same design conversation.
+
+## Software And Data Integrity Failures
+
+Integrity failures occur when the system trusts code or data from an unverified source. Supply chain attacks are a primary example: a compromised dependency, a tampered CI/CD artifact, or an unsigned update package can introduce malicious behavior through a channel the application implicitly trusted.
+
+Defense patterns include:
+
+- signing and verifying software artifacts and packages;
+- using package integrity locks such as lock files and hash verification;
+- validating that data originated from a trusted source, especially for deserialization or configuration inputs;
+- avoiding unsigned updates and insecure deserialization pipelines.
+
+This category connects closely to dependency hygiene, but extends beyond it. The question is not only whether a dependency has known vulnerabilities, but whether the pipeline that produced the artifact can be trusted at all.
+
+## Fail-Safe Behavior Under Error
 
 Exceptional conditions such as unexpected inputs, system failures, or unusual state combinations are a recurring source of security exposure. Systems that fail closed under error are often safer than systems that leave resources accessible, allow unintended state transitions, or expose diagnostic details under abnormal conditions.
 
@@ -95,7 +120,7 @@ Common failure patterns include:
 - continuing processing after validation failures instead of aborting;
 - ignoring error return values from security-critical dependencies.
 
-The defense pattern is consistent: exceptional conditions should preserve the system's security posture rather than bypass it. Error paths should be tested with the same discipline as happy paths, because attackers often trigger failures specifically to observe how the system behaves outside its normal assumptions.
+The defense pattern is consistent: exceptional conditions should preserve the system's security posture rather than bypass it. Error paths should be tested with the same discipline as happy paths, because attackers often trigger failures specifically to observe how the system behaves outside its normal assumptions. This principle is not an OWASP category by itself, but it cuts across many categories because insecure design and broken access control often manifest through error-path bypasses.
 
 ## Design Consequences
 
@@ -107,6 +132,8 @@ The value of security risk taxonomies is that they teach recurring habits:
 - model abuse cases early;
 - configure infrastructure narrowly rather than broadly;
 - monitor sensitive actions and state changes;
-- treat outbound connectivity as part of the attack surface.
+- treat outbound connectivity as part of the attack surface;
+- design authentication as an end-to-end system property, not a single endpoint;
+- verify the integrity of code and data pipelines beyond the application boundary.
 
 When those habits become normal engineering practice, the categories matter less because the design process has already internalized them.

@@ -309,3 +309,25 @@ Redux provides structured state updates through reducers, middleware, and DevToo
 API data is server state. It needs caching, refetching, stale handling, retries, and invalidation. React Query handles these concerns better than any client-side store because it is purpose-built for the asynchronous, cache-oriented nature of server data.
 
 State that should be shareable or restorable — such as filters, pagination, search, and selected tabs — belongs in the URL rather than in local or global state. URL state survives page refreshes, is shareable, and integrates naturally with server-side rendering.
+
+## The `use()` Hook for Context
+
+React 19's `use()` hook can read Context values as a more flexible alternative to `useContext`. Unlike hooks, `use()` supports conditional calls:
+
+```tsx
+import { use } from "react";
+
+function Sidebar({ showTheme }: { showTheme: boolean }) {
+  if (showTheme) {
+    const theme = use(ThemeContext);
+    return <div className={theme}>...</div>;
+  }
+  return <div>...</div>;
+}
+```
+
+The official documentation recommends `use()` over `useContext` because of this flexibility. Both hooks search upward through the provider tree and subscribe to changes.
+
+## React Compiler and State Optimization
+
+The React Compiler (stable in React 19) automates memoization, reducing the need for manual `useMemo`, `useCallback`, and `React.memo` in compiled code. This changes the optimization landscape for state management: derived values, callback references, and component memoization that previously required explicit hooks are now handled automatically. For new projects starting with the compiler, the primary optimization concern shifts from preventing unnecessary re-renders to choosing the right state location — local, URL, server, or global. The compiler handles the memoization mechanics; the developer handles state ownership and placement.

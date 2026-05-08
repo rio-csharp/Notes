@@ -240,3 +240,9 @@ Lifetime is often described as a performance concern, but correctness is usually
 Choosing singleton when the object should really be scoped can create cross-request leakage, stale state, and threading hazards. Choosing transient when the object is expensive and stateless can create unnecessary churn. Choosing scoped for request-specific coordination can make business behavior clearer because the lifetime now matches the operational boundary.
 
 This is why lifetime should not be chosen mechanically. It should follow the shape of the service's state, ownership, thread-safety expectations, and intended unit of work.
+
+### Container Thread Safety
+
+The built-in DI container is thread-safe for resolution. Once an `IServiceProvider` or `IServiceScope` is built, multiple threads can resolve services concurrently without coordination — the container's internal data structures handle concurrent access correctly.
+
+This does not make resolved services thread-safe. A singleton service that holds mutable state accessed by multiple threads must implement its own synchronization. A scoped service resolved concurrently within the same scope by two different threads is the same instance for both. The container guarantees that resolution itself does not corrupt internal state; it does not guarantee that the resolved objects are safe for concurrent use.

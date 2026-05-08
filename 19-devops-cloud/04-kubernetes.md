@@ -290,6 +290,14 @@ Has this slow-starting app finished booting?
 
 Recommended split for ASP.NET Core:
 
+Add the SQL Server health check package:
+
+```powershell
+dotnet add package AspNetCore.HealthChecks.SqlServer
+```
+
+Configure probes:
+
 ```csharp
 builder.Services.AddHealthChecks()
     .AddSqlServer(

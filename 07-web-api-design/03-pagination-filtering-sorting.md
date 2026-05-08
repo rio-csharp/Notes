@@ -58,6 +58,23 @@ Its costs are also real:
 
 Cursor pagination is therefore not universally better. It is better for specific collection-access patterns.
 
+## Keyset Pagination
+
+Keyset pagination (also called seek pagination) is a variant that uses a unique sort key to navigate pages rather than an opaque cursor token. The client specifies the last seen key value, and the server returns rows after that value:
+
+```http
+GET /api/orders?afterId=123&limit=50
+```
+
+```csharp
+query = query
+    .Where(o => o.Id > afterId)
+    .OrderBy(o => o.Id)
+    .Take(limit);
+```
+
+This approach is efficient because the database can use an index seek rather than a full scan plus offset. It also avoids the O(n) performance degradation that offset pagination suffers on deep pages. The trade-off is that the client must understand the key structure, and jumping to arbitrary pages is not possible without scanning to a known key.
+
 ## Deterministic Ordering
 
 Pagination only works well if ordering is stable. Sorting solely by a non-unique field such as `CreatedAt` can lead to row movement between pages when duplicate values exist.
@@ -112,6 +129,45 @@ private static IQueryable<Order> ApplySorting(IQueryable<Order> query, string so
 ```
 
 Sorting fields belong to a known contract. Arbitrary field names or raw SQL order fragments should not flow directly from user input into the query layer.
+
+## Total Count And Performance
+
+Offset pagination often includes a `total` field that tells the client how many items exist in the full result set. That total count usually requires a separate `COUNT(*)` query, which can become expensive on large tables, especially with complex filters.
+
+Several strategies help manage this cost:
+
+- Caching the total count and refreshing it on a schedule or after writes.
+- Showing an approximate count from index statistics instead of an exact count.
+- Omitting the total in cursor-based pagination, where the client navigates forward with `hasNext` and does not need to know the total depth.
+- Using `COUNT(*)` with the same filtering but without ordering, which still scans but avoids sort overhead.
+
+The choice depends on how critical the exact total is for the client experience. Showing "about 1,000 results" rather than "1,047 results" is often acceptable and avoids forcing a potentially expensive query on every request.
+
+## Generic Pagination Envelope
+
+A reusable pagination envelope keeps collection responses consistent across the API:
+
+```csharp
+public sealed record PagedResult<T>
+{
+    public required IReadOnlyList<T> Items { get; init; }
+    public int Page { get; init; }
+    public int PageSize { get; init; }
+    public int Total { get; init; }
+    public bool HasNext => Page * PageSize < Total;
+}
+```
+
+For cursor-based pagination, a separate envelope avoids mixing concepts:
+
+```csharp
+public sealed record CursorResult<T>
+{
+    public required IReadOnlyList<T> Items { get; init; }
+    public string? NextCursor { get; init; }
+    public bool HasNext { get; init; }
+}
+```
 
 ## Metadata In Collection Responses
 

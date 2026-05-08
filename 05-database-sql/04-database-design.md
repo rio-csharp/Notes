@@ -60,6 +60,35 @@ These fields are not decorative. They support investigation, reconciliation, com
 
 Using UTC-based timestamps is generally the right default because it keeps storage unambiguous and avoids local-time interpretation errors.
 
+### Temporal Tables — System-Versioned History
+
+SQL Server temporal tables (system-versioned tables) automate row history by maintaining a parallel history table. The database captures every row version with valid-from and valid-to timestamps:
+
+```sql
+CREATE TABLE Orders
+(
+    Id INT IDENTITY PRIMARY KEY,
+    CustomerId INT NOT NULL,
+    Status NVARCHAR(30) NOT NULL,
+    Total DECIMAL(18, 2) NOT NULL,
+    ValidFrom DATETIME2 GENERATED ALWAYS AS ROW START NOT NULL,
+    ValidTo DATETIME2 GENERATED ALWAYS AS ROW END NOT NULL,
+    PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo)
+)
+WITH (SYSTEM_VERSIONING = ON);
+```
+
+Querying current data uses the same table as always. Querying historical state uses the `FOR SYSTEM_TIME` clause:
+
+```sql
+-- Order as it existed at a specific point in time
+SELECT * FROM Orders
+FOR SYSTEM_TIME AS OF '2026-04-01 10:00:00'
+WHERE Id = 123;
+```
+
+Temporal tables shift the audit burden from application code to the storage engine. The trade-off is larger storage (the history table retains every version) and schema complexity (altering a versioned table requires additional steps). They are most appropriate when compliance or investigation demands an exact record of what the database contained at any point in time — and when application-side audit columns alone would leave gaps.
+
 ## Soft Delete And Its Costs
 
 Soft delete is a design choice, not just a column:

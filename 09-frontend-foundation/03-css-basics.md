@@ -39,13 +39,15 @@ State selectors:
 
 ## Cascade
 
-When multiple rules apply, browser decides based on:
+When multiple rules apply, the browser resolves conflicts through a five-level cascade. Each level is checked in order; the first level that distinguishes between competing declarations wins:
 
-- importance;
-- specificity;
-- source order.
+1. **Origin and importance**: User-agent styles, author styles, and `!important` declarations. `!important` reverses the normal priority order (author beats user-agent, but `!important` in user-agent overrides `!important` in author).
+2. **Cascade layers**: Styles in `@layer` blocks. Unlayered styles beat layered styles within the same origin. Layers declared later in the stylesheet override earlier ones.
+3. **Specificity**: The selector weight calculation described below.
+4. **Scoping proximity**: Within `@scope` blocks, the rule set closest to the element in the DOM tree wins.
+5. **Source order**: The last declaration in the stylesheet wins when all previous levels are equal.
 
-Avoid fighting CSS with too many overrides.
+Avoid fighting the cascade with overly specific selectors or redundant `!important` flags.
 
 ## Specificity
 
@@ -137,15 +139,23 @@ Absolute positioning is relative to the nearest positioned ancestor.
 
 ## Z-index And Stacking Context
 
-`z-index` works only in stacking contexts and positioned elements.
+`z-index` controls the stacking order of overlapping elements, but it only applies within the same stacking context. A stacking context is an atomic painting unit: elements inside one context are painted as a group relative to elements outside it.
 
-Stacking contexts can be created by:
+Stacking contexts are created by:
 
-- position + z-index;
-- transform;
-- opacity less than 1;
-- filter;
-- isolation.
+- The root element (`<html>`);
+- `position: relative` or `absolute` with a `z-index` value other than `auto`;
+- `position: fixed` or `sticky` (regardless of any `z-index` value);
+- flex or grid items with a `z-index` value other than `auto`;
+- `opacity` less than 1;
+- `transform`, `scale`, `rotate`, `translate`, or `perspective` with a value other than `none`;
+- `filter` or `backdrop-filter` with a value other than `none`;
+- `clip-path`, `mask`, or `mask-image` with a value other than `none`;
+- `mix-blend-mode` with a value other than `normal`;
+- `isolation: isolate`;
+- `contain: layout` or `contain: paint`;
+- `container-type` with `size` or `inline-size`;
+- `will-change` set to any property that would itself create a stacking context.
 
 ## Complete Component Style Example
 
@@ -247,11 +257,18 @@ The `z-index` property controls which elements appear on top when they overlap, 
 
 New stacking contexts are created by:
 
+- The root element (`<html>`).
 - A positioned element (`position` other than `static`) with a `z-index` value other than `auto`.
+- Elements with `position: fixed` or `sticky` (regardless of `z-index`).
+- Flex or grid items with a `z-index` value other than `auto`.
 - Elements with `opacity` less than 1.
-- Elements with `transform`, `filter`, `perspective`, `clip-path`, `mask`, or `mask-image` set (even without `position`).
+- Elements with `transform`, `scale`, `rotate`, `translate`, or `perspective` set to a value other than `none`.
+- Elements with `filter`, `backdrop-filter`, `clip-path`, `mask`, or `mask-image` set to a value other than `none`.
+- Elements with `mix-blend-mode` other than `normal`.
 - Elements with `isolation: isolate`.
 - Elements with `contain: layout` or `contain: paint`.
+- Elements with `container-type: size` or `inline-size`.
+- Elements with `will-change` set to any property that itself creates a stacking context.
 
 When `z-index` seems to have no effect, inspect the element's ancestors for these properties. A positioned child with `z-index: 999` has no effect if a grandparent with `transform: translateZ(0)` creates a stacking context that isolates it. The "999" value only determines stacking within that grandparent's context, not globally.
 
@@ -280,6 +297,6 @@ button.primary { color: green; }
 #main { color: purple; }
 ```
 
-The universal selector `*`, combinators (`>`, `+`, `~`), and `:not()`, `:is()`, `:has()` do not contribute to specificity (though the selectors inside `:not()` and `:is()` do count in newer CSS specifications). When two selectors have equal specificity, the one declared later in the stylesheet wins.
+The universal selector `*`, combinators (`>`, `+`, `~`), and `:where()` do not contribute to specificity. The pseudo-classes `:is()`, `:not()`, and `:has()` also do not contribute themselves, but the highest-specificity selector inside their parentheses is counted. When two selectors have equal specificity, the one declared later in the stylesheet wins.
 
 Avoid over-nesting selectors like `body div.main div.card button.primary` -- they are fragile (a markup change breaks the selector) and their high specificity makes future overrides difficult. Prefer a flat class-based approach.

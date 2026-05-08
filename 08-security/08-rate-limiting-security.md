@@ -70,4 +70,186 @@ Once designed that way, rate limiting becomes a meaningful security boundary rat
 
 ## ASP.NET Core Built-In Support
 
-ASP.NET Core includes built-in rate limiting middleware through `Microsoft.AspNetCore.RateLimiting` and the `System.Threading.RateLimiting` namespace. It supports fixed window, sliding window, token bucket, and concurrency limiters. Policies are registered during startup and applied per endpoint through the `RequireRateLimiting` extension method or the `[EnableRateLimiting]` attribute. The middleware integrates with the request pipeline and should be placed after `UseRouting` when endpoint-specific policies are used.
+ASP.NET Core includes built-in rate limiting middleware through the `Microsoft.AspNetCore.RateLimiting` package and the `System.Threading.RateLimiting` namespace. The middleware was introduced in .NET 7 and is fully supported in .NET 10.
+
+### Registration and Middleware Ordering
+
+Rate limiting services are registered with `AddRateLimiter`, and the middleware is enabled with `UseRateLimiter`. The ordering of middleware matters: `UseRateLimiter` must be called after `UseRouting` when endpoint-specific policies are used, because the middleware needs route information to match named policies to endpoints. When only global limiters are configured, `UseRateLimiter` can appear before `UseRouting`.
+
+```csharp
+builder.Services.AddRateLimiter(options => { /* policy configuration */ });
+
+var app = builder.Build();
+app.UseRouting();
+app.UseRateLimiter();    // After UseRouting when using named policies
+app.UseAuthentication(); // Rate limiting typically precedes auth
+app.UseAuthorization();
+app.MapControllers();
+```
+
+### Rate Limiter Algorithms
+
+The middleware provides four built-in algorithm types, each suited to different traffic patterns.
+
+**Fixed window** limits requests within a fixed time window. When the window expires, the counter resets. This is the simplest model and works well for coarse rate ceilings.
+
+**Sliding window** divides the window into segments. Each segment interval, the oldest segment's requests are recycled, smoothing the boundary between windows. This avoids the traffic burst that can occur immediately after a fixed-window reset.
+
+**Token bucket** adds a fixed number of tokens each replenishment period, up to a configurable maximum. This model accommodates bursts while still enforcing a long-term average rate. It is the most flexible algorithm and corresponds well to real-world usage patterns.
+
+**Concurrency** limits the number of simultaneous requests rather than the total over time. Each active request consumes one permit; when it completes, the permit returns. This is useful for protecting resources with constrained parallel capacity, such as database connection pools.
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    // Fixed window: 10 requests per minute
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = 10;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+        opt.QueueLimit = 0;
+    });
+
+    // Sliding window: 100 requests per 30s window with 3 segments
+    options.AddSlidingWindowLimiter("sliding", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromSeconds(30);
+        opt.SegmentsPerWindow = 3;
+        opt.QueueLimit = 0;
+    });
+
+    // Token bucket: 100 tokens max, replenish 10 per second
+    options.AddTokenBucketLimiter("token", opt =>
+    {
+        opt.TokenLimit = 100;
+        opt.TokensPerPeriod = 10;
+        opt.ReplenishmentPeriod = TimeSpan.FromSeconds(1);
+        opt.AutoReplenishment = true;
+        opt.QueueLimit = 0;
+    });
+
+    // Concurrency: max 20 concurrent requests
+    options.AddConcurrencyLimiter("concurrent", opt =>
+    {
+        opt.PermitLimit = 20;
+        opt.QueueLimit = 0;
+    });
+});
+```
+
+### Applying Policies to Endpoints
+
+Named policies are applied through the `RequireRateLimiting` extension method on endpoint conventions:
+
+```csharp
+app.MapGet("/api/search", () => "Search results")
+   .RequireRateLimiting("fixed");
+
+app.MapControllers().RequireRateLimiting("sliding");
+```
+
+On controller actions, the `[EnableRateLimiting]` and `[DisableRateLimiting]` attributes provide finer control:
+
+```csharp
+[ApiController]
+[Route("api/orders")]
+public class OrdersController : ControllerBase
+{
+    [HttpGet]
+    [EnableRateLimiting("sliding")]
+    public IActionResult GetAll() => Ok();
+
+    [HttpPost]
+    [EnableRateLimiting("fixed")]
+    public IActionResult Create() => Ok();
+
+    [HttpDelete("{id}")]
+    [DisableRateLimiting]
+    public IActionResult Delete(int id) => Ok();
+}
+```
+
+### Partition-Based Limiters
+
+Beyond named policies, the middleware supports partition-based global limiters. A partition divides traffic into separate buckets with independent counters, keyed by properties such as client IP, user identity, or API key.
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(
+        httpContext =>
+        {
+            var clientIp = httpContext.Connection.RemoteIpAddress?.ToString()
+                           ?? "unknown";
+
+            return RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: clientIp,
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 100,
+                    Window = TimeSpan.FromMinutes(1)
+                });
+        });
+});
+```
+
+Combining dimensions is often stronger than relying on a single key. The `CreateChained` method runs multiple limiters in sequence, and each must grant a permit:
+
+```csharp
+options.GlobalLimiter = PartitionedRateLimiter.CreateChained(
+    PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.Identity?.Name ?? "anonymous",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 1000,
+                Window = TimeSpan.FromMinutes(1)
+            })),
+    PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString()
+                         ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 50,
+                Window = TimeSpan.FromMinutes(1)
+            }))
+);
+```
+
+### Rejection Behavior
+
+When a request exceeds a rate limit, the middleware can be configured to return appropriate status codes and headers. The `OnRejected` callback provides a hook for custom response formatting and logging:
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.Headers["Retry-After"] = "60";
+
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter,
+            out var retryAfter))
+        {
+            context.HttpContext.Response.Headers["Retry-After"] =
+                ((int)retryAfter.TotalSeconds).ToString();
+        }
+
+        await context.HttpContext.Response.WriteAsync(
+            "Rate limit exceeded. Please retry later.",
+            cancellationToken);
+    };
+});
+```
+
+### Testing and Operational Considerations
+
+Rate limiting policies must be validated under realistic load before deployment. Tools such as JMeter, Azure Load Testing, or custom scripts can simulate burst and sustained traffic patterns. Partition keys derived from user-supplied input (such as client IP) introduce a potential denial-of-service vector: an attacker who spoofs source IPs can create many partitions and exhaust server memory. Use partition keys with bounded cardinality where possible, and monitor partition count in production.
+
+### Metrics
+
+The rate limiting middleware exposes built-in metrics through `Microsoft.AspNetCore.RateLimiting` event counters and meters, including total rejected requests, current queue length, and per-partition permit utilization. These metrics can be integrated with monitoring systems to detect abuse patterns and validate that limit configurations match real traffic profiles.

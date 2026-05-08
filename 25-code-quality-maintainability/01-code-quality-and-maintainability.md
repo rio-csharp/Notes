@@ -71,6 +71,30 @@ bool hasExceededCreditLimit;
 bool shouldSendNotification;
 ```
 
+### EditorConfig
+
+Consistent code style across a team cannot rely on personal preference alone. The .editorconfig file defines formatting conventions that all editors and IDEs can enforce automatically: indent style, indent size, trailing whitespace rules, newline characters, and file encoding. When combined with `EnforceCodeStyleInBuild` enabled in the project file, these rules become build-time checks rather than optional suggestions.
+
+A minimal .editorconfig for a C# project:
+
+```ini
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.cs]
+indent_size = 4
+dotnet_style_readonly_field = true:warning
+csharp_style_var_elsewhere = true:suggestion
+csharp_style_namespace_declarations = file_scoped:warning
+```
+
+The .editorconfig file should be checked into the repository root. Tools like `dotnet format` can apply editorconfig rules from the command line during CI pipelines.
+
 ## Function Size And Responsibility
 
 A function should have one clear reason to change.
@@ -476,7 +500,7 @@ Good logs include:
 
 ## Testing As Maintainability
 
-Tests make future changes safer. (For a detailed discussion of testing strategy, the test pyramid, test double types, and risk-based testing, see Chapter 20, "Testing Strategy". For integration testing patterns in .NET, see Chapter 20, "Integration Testing In .NET".)
+Tests make future changes safer. (For a detailed discussion of testing strategy, the test pyramid, test double types, and risk-based testing, see Chapter 20, "Testing Strategy". For integration testing patterns in .NET, see Chapter 20, "Integration Testing In ASP.NET Core".)
 
 Unit test domain rule:
 
@@ -511,6 +535,90 @@ public async Task ApproveOrder_Should_Return_NotFound_For_Other_Tenant_Order()
 
 Tests are part of design. Hard-to-test code often signals unclear boundaries.
 
+## Automated Code Analysis
+
+Automated analysis tools catch issues before they reach code review. The .NET SDK ships with built-in Roslyn analyzers that run during compilation, detecting violations across categories including security, performance, reliability, maintainability, naming, and usage patterns.
+
+### Configuring Roslyn Analyzers
+
+Roslyn analyzers are enabled by default for projects targeting .NET 5 and later. Two MSBuild properties control their aggressiveness:
+
+```xml
+<PropertyGroup>
+  <AnalysisLevel>latest-recommended</AnalysisLevel>
+  <AnalysisMode>All</AnalysisMode>
+  <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+</PropertyGroup>
+```
+
+- **AnalysisLevel** selects which rule set version to use. `latest-recommended` enables the recommended rules from the most recent .NET release. For .NET 10 projects, this is the default.
+- **AnalysisMode** controls how many rules are enabled as build warnings. `All` enables the most comprehensive set.
+- **EnforceCodeStyleInBuild** turns IDE code-style suggestions (IDEXXXX) into build-time diagnostics rather than editor-only hints.
+
+Rules can be configured per-category for finer control:
+
+```xml
+<PropertyGroup>
+  <AnalysisLevelSecurity>preview</AnalysisLevelSecurity>
+  <AnalysisModePerformance>All</AnalysisModePerformance>
+</PropertyGroup>
+```
+
+Violations appear as CAxxxx (code analysis) or IDExxxx (code style) warnings during build. Configure rule severity in a `.editorconfig` or `.globalconfig` file to promote critical rules to errors or suppress false positives:
+
+```ini
+[*.cs]
+dotnet_diagnostic.CA1849.severity = error
+dotnet_diagnostic.CA1822.severity = none
+```
+
+### SdkAnalysisLevel
+
+Introduced in .NET 9, `SdkAnalysisLevel` controls SDK tooling strictness including NuGet restore behavior and dependency resolver selection. Setting it to a specific feature band value ensures consistent behavior across SDK versions:
+
+```xml
+<PropertyGroup>
+  <SdkAnalysisLevel>10.0.100</SdkAnalysisLevel>
+</PropertyGroup>
+```
+
+### External Static Analysis Tools
+
+Beyond the built-in analyzers, several tools provide deeper or domain-specific analysis:
+
+- **SonarQube** / **SonarCloud** tracks code quality over time, detects code smells, security hotspots, and technical debt with a dashboard that enforces quality gates before pull requests merge.
+- **CodeQL** (by GitHub) runs semantic analysis to find security vulnerabilities including SQL injection, XSS, and path traversal. It is available as a GitHub Actions workflow and integrates with repository secret scanning.
+- **Roslyn Security Guard** provides specialized rules for ASP.NET Core security concerns: XSS, open redirects, insecure deserialization, SQL injection, and authorization weaknesses.
+- **ReSharper** / **JetBrains Rider** offer solution-wide analysis with hundreds of additional inspections, structural search and replace, and continuous code quality monitoring.
+
+These tools complement each other. Roslyn analyzers provide immediate feedback during development, while SonarQube or CodeQL add cross-project trend analysis and security-focused scanning in CI.
+
+### Code Coverage
+
+Code coverage measures which lines, branches, and methods are exercised during tests. While 100% coverage is neither realistic nor necessary, coverage data helps identify untested code paths and areas of risk.
+
+The .NET ecosystem provides several coverage tools:
+
+- **Coverlet** integrates with the `dotnet test` command and outputs Cobertura, OpenCover, or LCov format reports. It is included in some .NET project templates.
+- **Fine Code Coverage** (VS extension) shows per-line coverage highlighting in the editor.
+- **dotnet-coverage** (Microsoft) provides cross-platform coverage collection.
+
+A typical CI pipeline step:
+
+```xml
+<PackageReference Include="coverlet.collector" Version="6.*" />
+```
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+dotnet tool run reportgenerator \
+  -reports:**/TestResults/**/coverage.cobertura.xml \
+  -targetdir:./CoverageReport \
+  -reporttypes:Html
+```
+
+Coverage thresholds can be enforced in CI, but the threshold should be treated as a safety net rather than a target. Coverage without meaningful assertions is worse than no coverage because it creates false confidence.
+
 ## Refactoring
 
 Refactoring changes code structure without changing external behavior.
@@ -535,7 +643,9 @@ Common refactorings:
 - introduce interface at boundary;
 - split large service by use case.
 
-Do not refactor unrelated code during risky feature work unless it is necessary for the change.
+Modern IDEs automate most of these refactorings. Visual Studio, JetBrains Rider, and VS Code with the C# extension all provide automated refactoring commands: rename symbol, extract method, introduce variable, change signature, and convert to file-scoped namespace. Using IDE automation reduces the risk of manual errors during restructuring.
+
+Do not refactor unrelated code during risky feature work unless it is necessary for the change. Refactoring during feature work should be limited to what the feature needs; larger restructuring belongs in a dedicated change.
 
 ## Technical Debt
 

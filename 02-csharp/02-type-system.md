@@ -278,6 +278,31 @@ Console.WriteLine(left == right); // false by default
 
 Records suit DTOs, commands, and read models for this reason. Domain entities, whose identity persists across data changes, should be designed carefully when using records — the underlying question is whether the type is identified by identity or by the data it carries.
 
+### `with` Expressions And Non-Destructive Mutation
+
+Records and record structs support the `with` expression, which creates a copy with selected properties changed:
+
+```csharp
+var original = new UserDto(1, "Alice");
+var updated = original with { Name = "Bob" };
+
+Console.WriteLine(original.Name); // "Alice" — original is unchanged
+Console.WriteLine(updated.Name);  // "Bob"
+```
+
+The `with` expression calls a compiler-generated copy constructor that copies every field, then applies the property assignments listed in the initializer. For positional records, this means the positional properties; for nominal records, it includes any property with `init` or `set` access. The copy is shallow — reference-type fields are copied by reference, not cloned.
+
+The mechanism differs between `record class` and `record struct`. For `record class`, the copy is a new heap allocation. For `record struct`, the copy is a value copy on the stack (or inlined into the enclosing object), and the `with` expression is simply a convenient syntax over constructing a new value:
+
+```csharp
+public readonly record struct Money(decimal Amount, string Currency);
+
+var price = new Money(10m, "USD");
+var updated = price with { Amount = 15m }; // new struct value, no heap allocation
+```
+
+`with` is the standard pattern for producing updated versions of immutable data. In event-sourced systems, it is the mechanism that applies an event to a projection: `projection with { Status = OrderStatus.Submitted }`. In API layers, it maps an update DTO to a domain object without mutating the original.
+
 ## Nullable Reference Types
 
 Enable:
@@ -414,6 +439,33 @@ var request = JsonSerializer.Deserialize<CreateOrderRequest>("""{"Discount":5}""
 ```
 
 The broader principle is that nullable reference types describe a static contract, but data from external systems — JSON payloads, database rows, message queues — enters the process at runtime and must be validated at that boundary. Treating deserialized objects as trusted without validation is the most common way nullable reference types fail to deliver their intended benefit.
+
+### Null-Coalescing And Null-Conditional Operators
+
+Working with nullable values in expressions requires compact syntax for fallback and safe navigation. Three operators provide this:
+
+`??` provides a fallback value when the left-hand operand is null:
+
+```csharp
+string name = input ?? "Unknown";
+```
+
+`??=` assigns the right-hand value only when the left-hand operand is null:
+
+```csharp
+_cache ??= new Dictionary<string, User>();
+```
+
+`?.` and `?[]` short-circuit to null when the receiver is null, avoiding `NullReferenceException`:
+
+```csharp
+int? len = user?.Address?.City?.Length;   // null if user, Address, or City is null
+string first = tags?[0];                   // null if tags is null
+```
+
+These operators are not merely syntactic conveniences; they reduce the null-checking ceremony that otherwise dominates nullable-annotated code. A chain like `user?.Address?.City?.Length` expresses the intent "give me the length of the city name, or null if anything along the path is missing" without intermediate `if` blocks. The compiler compiles each `?.` into a null check followed by either a member access or a null result — the IL contains explicit branches, not a magic null-safe dispatch.
+
+The combination of nullable reference type annotations and these operators creates a null-handling discipline: the annotations warn where nulls are possible, the operators handle them concisely, and the result is code that explicitly names which variables can be null and what should happen when they are.
 
 ## Pattern Matching
 
@@ -662,6 +714,19 @@ dict[key] = "value";
 ```
 
 Positional records using `init`-only properties or `readonly record struct` avoid this problem because the compiler prevents post-construction mutation. For mutable records, the danger is real and the compiler offers no warning.
+
+## Compile-Time Type And Runtime Type
+
+A variable can have different types at compile time and at runtime. The compile-time type is the declared or inferred type in source code — it determines which members are available at the call site and guides overload resolution. The runtime type is the actual type of the instance the variable points to — it determines virtual method dispatch, `is` pattern matching, and `switch` expression evaluation.
+
+```csharp
+object boxed = "Hello, world!";              // compile-time: object, runtime: string
+IEnumerable<char> chars = "abcdefghij";      // compile-time: IEnumerable<char>, runtime: string
+```
+
+The runtime type must be assignment-compatible with the compile-time type. A `string` can be assigned to an `object` variable because `string` derives from `object`. The reverse requires a cast and may fail at runtime with `InvalidCastException` if the runtime type does not match.
+
+The distinction matters operationally in several familiar scenarios. Virtual method calls dispatch against the runtime type, not the compile-time type, which is why `obj.ToString()` calls `string.ToString()` when `obj` holds a `string`. Pattern matching (`is`, `switch`) tests against the runtime type. Generic variance (`IEnumerable<string>` assigned to `IEnumerable<object>`) preserves the compile-time abstraction while the runtime type remains concrete.
 
 ## Type Design Notes
 

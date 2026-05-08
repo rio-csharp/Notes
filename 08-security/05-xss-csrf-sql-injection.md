@@ -30,6 +30,8 @@ CSRF occurs when the browser sends an authenticated request that the user did no
 
 This is why CSRF risk depends strongly on the authentication model. Cookie-based sessions or refresh flows require deliberate CSRF thinking. Token-in-header APIs are less exposed to classic CSRF, but they often carry stronger XSS concerns instead.
 
+The SameSite cookie attribute directly addresses this. `SameSite=Strict` prevents the cookie from being sent on any cross-site request, but breaks legitimate cross-site navigation flows such as OAuth callbacks or embedded widgets. `SameSite=Lax` (the modern browser default) permits cookies on top-level navigations using safe HTTP methods, which covers most legitimate use cases while blocking malicious cross-site requests from POST forms, images, or scripts. Choosing between Lax and Strict is a judgment call based on whether the application needs to support cross-site redirect flows.
+
 No session model has zero risks. Different strategies shift where the primary browser-side danger lies.
 
 ## CSRF Defenses
@@ -41,6 +43,10 @@ Common defenses include:
 - origin or referer checking;
 - avoiding unsafe state-changing `GET` requests;
 - using custom headers in controlled API clients.
+
+In ASP.NET Core, the antiforgery system uses the synchronizer token pattern. The server embeds a token in rendered forms, and the client sends it back on state-changing requests. The `AutoValidateAntiforgeryToken` attribute applies validation to unsafe HTTP methods (POST, PUT, PATCH, DELETE) while skipping GET and HEAD requests. The stricter `ValidateAntiForgeryToken` requires a token on every request. Razor Pages and MVC with `AddControllersWithViews` include this by default, but `AddControllers` (used for Web API projects without views) does not -- a common oversight.
+
+Starting with .NET 8, the `IAntiforgery` service is also available for minimal APIs through `AddAntiforgery` and `UseAntiforgery` middleware, with support for selectively disabling validation on specific endpoints using `.DisableAntiforgery()`.
 
 These controls are strongest when they are treated as part of the session design rather than bolted on at the end.
 

@@ -6,10 +6,11 @@ File upload and download endpoints are specialized API surfaces. They differ fro
 
 ## Small Uploads Versus Large Uploads
 
-Small file uploads can often be handled directly through the application API:
+Small file uploads can often be handled directly through the application API using the buffered model, where the entire file is read into an `IFormFile` object:
 
 ```csharp
 [HttpPost("files")]
+[RequestSizeLimit(10 * 1024 * 1024)] // 10 MB
 public async Task<IActionResult> Upload(IFormFile file, CancellationToken ct)
 {
     if (file.Length == 0)
@@ -18,13 +19,53 @@ public async Task<IActionResult> Upload(IFormFile file, CancellationToken ct)
     }
 
     await using var stream = file.OpenReadStream();
-    await _fileStorage.SaveAsync(stream, file.FileName, file.ContentType, ct);
+    var storagePath = Path.Combine(_storagePath, Path.GetRandomFileName());
+    await _fileStorage.SaveAsync(stream, storagePath, file.ContentType, ct);
 
-    return Ok();
+    return Ok(new { storagePath });
 }
 ```
 
-That approach is acceptable only within bounded size and throughput assumptions. Once files become large or frequent, direct API handling often becomes the wrong boundary because the web server is now responsible for streaming, buffering, and guarding large payloads under normal request pressure.
+This uses `Path.GetRandomFileName()` for the storage name rather than the client-supplied filename, preventing path traversal and name collision issues.
+
+That approach is acceptable only within bounded size and throughput assumptions. The default multipart body length limit is 128 MB, configured through `FormOptions`:
+
+```csharp
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 268_435_456; // 256 MB
+});
+```
+
+The Kestrel server has its own independent limit:
+
+```csharp
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 52_428_800; // 50 MB
+});
+```
+
+The effective limit is the most restrictive of these two settings plus any IIS `maxAllowedContentLength` configuration. Once files become large or frequent, direct API handling often becomes the wrong boundary because the web server is now responsible for streaming, buffering, and guarding large payloads under normal request pressure.
+
+For larger uploads, a streaming approach reads the multipart sections without buffering the entire body. This requires disabling the form model binding that would otherwise consume the stream:
+
+```csharp
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+public sealed class DisableFormValueModelBindingAttribute : Attribute, IResourceFilter
+{
+    public void OnResourceExecuting(ResourceExecutingContext context)
+    {
+        context.ValueProviderFactories.RemoveType<FormValueProviderFactory>();
+        context.ValueProviderFactories.RemoveType<FormFileValueProviderFactory>();
+        context.ValueProviderFactories.RemoveType<JQueryFormValueProviderFactory>();
+    }
+
+    public void OnResourceExecuted(ResourceExecutedContext context) { }
+}
+```
+
+The streaming endpoint then processes the multipart reader directly, which keeps memory usage proportional to the size of each section rather than the total request body.
 
 ## Direct-To-Storage Upload Patterns
 
@@ -69,6 +110,59 @@ Relevant checks often include:
 - storage quota rules.
 
 Client-supplied filename and content type should not be trusted as authoritative truth. A file endpoint is an input boundary with unusually high abuse potential.
+
+### File Signature (Magic Byte) Validation
+
+File extension and MIME type are trivially spoofed. Validating file signatures (magic bytes) provides a stronger check that the content matches the declared type:
+
+```csharp
+private static readonly Dictionary<string, byte[]> _signatures = new()
+{
+    [".jpeg"] = [0xFF, 0xD8, 0xFF],
+    [".png"] = [0x89, 0x50, 0x4E, 0x47],
+    [".pdf"] = [0x25, 0x50, 0x44, 0x46],
+};
+
+public static bool HasValidSignature(string extension, Stream content)
+{
+    if (!_signatures.TryGetValue(extension, out var expected))
+        return false;
+
+    var header = new byte[expected.Length];
+    content.ReadExactly(header, 0, expected.Length);
+    content.Position = 0;
+
+    return header.AsSpan().SequenceEqual(expected);
+}
+```
+
+Signature validation is not a complete defense. A file can have valid magic bytes and still contain malicious content, but it catches the simplest class of content-type spoofing.
+
+### Malware Scanning
+
+For environments where uploaded files are redistributed to other users, malware scanning should be part of the upload pipeline. A common pattern is to store the file, mark it as pending scan, and only expose it after scanning completes:
+
+```csharp
+await _fileStorage.SaveAsync(stream, storageKey, ct);
+
+var fileRecord = new FileRecord
+{
+    StorageKey = storageKey,
+    OriginalName = Path.GetFileName(clientFileName),
+    ContentType = contentType,
+    Size = size,
+    ScanStatus = ScanStatus.Pending,
+    UploadedAt = DateTimeOffset.UtcNow
+};
+
+_db.FileRecords.Add(fileRecord);
+await _db.SaveChangesAsync(ct);
+
+// Background worker picks up pending files for scanning
+await _scanQueue.EnqueueAsync(fileRecord.Id, ct);
+```
+
+Downloads for files with a `Pending` or `Failed` scan status return `425 Too Early` or `403 Forbidden` instead of the file content.
 
 ## Download Semantics
 

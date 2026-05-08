@@ -156,3 +156,22 @@ It is worth distinguishing joins from set operations (`UNION`, `INTERSECT`, `EXC
 A join answers: "how are these entities related?" A set operation answers: "which rows appear in one or both result sets?" The two tools serve different structural purposes and are not interchangeable.
 
 Set operations are discussed in more detail in the SQL basics chapter, but the distinction matters here because teams sometimes reach for joins when a set operation would express the intent more clearly, or the reverse.
+
+### `APPLY` — Correlated Table-Valued Operations
+
+The `APPLY` operator (SQL Server `CROSS APPLY` / `OUTER APPLY`, PostgreSQL `JOIN LATERAL`) invokes a table-valued expression for each row of the outer query. It is the operator behind top-N-per-group queries expressed without window functions:
+
+```sql
+SELECT c.Name, o.Id, o.Total, o.CreatedAt
+FROM Customers c
+CROSS APPLY (
+    SELECT TOP 3 Id, Total, CreatedAt
+    FROM Orders
+    WHERE CustomerId = c.Id
+    ORDER BY Total DESC
+) o;
+```
+
+`CROSS APPLY` returns only rows where the inner expression produces results (like `INNER JOIN`). `OUTER APPLY` returns all outer rows, with NULLs when the inner produces nothing (like `LEFT JOIN`).
+
+`APPLY` is not a general-purpose replacement for joins. Its power lies in correlated operations that cannot be expressed as simple `ON` predicates: top-N-per-group, calling table-valued functions with row-specific arguments, or unnesting correlated subqueries into a more readable form. When a query reaches for a correlated subquery in the SELECT list, `APPLY` is often the clearer alternative.

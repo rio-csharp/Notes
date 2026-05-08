@@ -37,6 +37,7 @@ ASP.NET Core combines a number of capabilities that earlier frameworks or custom
 - configuration;
 - logging and diagnostics;
 - authentication and authorization;
+- rate limiting and output caching;
 - model binding and validation;
 - health checks and background hosting.
 
@@ -116,7 +117,7 @@ This arrangement is common because edge infrastructure often handles TLS termina
 
 ## Endpoint Styles: Controllers And Minimal APIs
 
-ASP.NET Core supports more than one endpoint programming model. The two most common styles are controllers and Minimal APIs.
+ASP.NET Core supports two endpoint programming models: Minimal APIs and controllers. The official guidance as of .NET 10 is that Minimal APIs are the recommended approach for new projects, while controllers remain available for larger applications that benefit from MVC conventions, advanced model binding extensibility, or OData support. The two styles coexist in the same pipeline and can be mixed within a single application.
 
 Controller-based endpoints are more structured:
 

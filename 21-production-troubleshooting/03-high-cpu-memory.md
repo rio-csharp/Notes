@@ -183,7 +183,7 @@ Monitor counters:
 dotnet-counters monitor --process-id 1234 --counters System.Runtime,Microsoft.AspNetCore.Hosting
 ```
 
-Note: in newer versions of `dotnet-counters`, provider names must be passed with the `--counters` flag as comma-separated values rather than space-separated positional arguments.
+Note: `dotnet-counters` accepts the `--counters` flag with comma-separated provider names. On Linux and macOS, the target application and `dotnet-counters` must share the same `TMPDIR` environment variable; otherwise, the command times out.
 
 Collect memory dump:
 
@@ -197,6 +197,16 @@ Collect GC dump:
 dotnet-gcdump collect --process-id 1234 --output app.gcdump
 ```
 
+Warning: `dotnet-gcdump` triggers a full (generation 2) garbage collection to reconstruct the heap graph. On large heaps this can suspend application threads for several seconds. Do not collect GC dumps in performance-sensitive production environments with large heaps.
+
+Generate a heap statistics report from a GC dump:
+
+```powershell
+dotnet-gcdump report ./app.gcdump
+```
+
+This prints type-level memory statistics (count and total bytes per type), useful for rapid leak investigation without opening a full dump viewer.
+
 Collect CPU trace:
 
 ```powershell
@@ -204,6 +214,14 @@ dotnet-trace collect --process-id 1234 --duration 00:00:30 --output cpu.nettrace
 ```
 
 Tools such as Visual Studio, PerfView, and `dotnet-dump analyze` can inspect these files.
+
+For CPU hotspot analysis, use the `report` command on a collected trace:
+
+```powershell
+dotnet-trace report cpu.nettrace topN -n 10
+```
+
+This shows the top 10 methods by exclusive CPU time, helping identify the specific code paths consuming the most CPU.
 
 ## Key Runtime Counters
 
@@ -460,7 +478,8 @@ Practical notes:
 - memory limit should be tested under realistic load;
 - server GC may use more memory;
 - large caches should respect container limits;
-- do not set memory limit too close to normal working set.
+- do not set memory limit too close to normal working set;
+- configure GC heap hard limit in containers via `DOTNET_gcHeapHardLimit` (in bytes) or `DOTNET_gcHeapHardLimitPercent` to cap GC memory usage before the container OOM kills the process. When a hard limit is set, the GC automatically compacts the Large Object Heap, which reduces fragmentation in memory-constrained environments.
 
 ## Investigation Steps
 

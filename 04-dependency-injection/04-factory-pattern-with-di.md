@@ -215,6 +215,17 @@ Keyed services reduce the need for some manual selection plumbing, but they do n
 
 For that reason, keyed services are often most effective as infrastructure support rather than as the entire public design. They can simplify registration and resolution internally while a factory, policy object, or dedicated abstraction still presents a more stable API to the rest of the application.
 
+`KeyedService.AnyKey` (.NET 8+) provides a fallback registration that matches any key not explicitly registered. A common use case is a default implementation with specific overrides:
+
+```csharp
+// Premium accounts get a dedicated cache.
+builder.Services.AddKeyedSingleton<ICache>("premium", new PremiumCache());
+// All other keys resolve to the default.
+builder.Services.AddKeyedSingleton<ICache>(KeyedService.AnyKey, (sp, key) => new DefaultCache(key?.ToString()));
+```
+
+Requesting `ICache` with key `"premium"` returns the dedicated instance; requesting with any other key creates a `DefaultCache` via the fallback factory that receives the key as context.
+
 ## Factories For Runtime Parameters
 
 Some object creation cannot be handled by the container alone because part of the constructor data exists only at runtime.
@@ -284,6 +295,21 @@ builder.Services.AddScoped<ReportExportJobFactory>();
 ```
 
 In long-lived infrastructure such as background services, the usual solution is to create a scope and resolve the factory inside that scope rather than stretching the factory's dependencies into singleton lifetime.
+
+### Async Factory Deadlocks
+
+A factory registration delegate must not perform asynchronous work synchronously. The DI container calls the factory synchronously during resolution. Using `Task.Result` or `GetAwaiter().GetResult()` inside a factory lambda blocks the resolving thread and can deadlock when the resolution itself occurs on a thread with a captured `SynchronizationContext`:
+
+```csharp
+// ANTI-PATTERN — causes deadlocks.
+builder.Services.AddSingleton<IPaymentClient>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<PaymentOptions>>();
+    return CreateClientAsync(options.Value).Result; // blocks, risks deadlock
+});
+```
+
+The correct approach is to keep factory delegates synchronous. If asynchronous initialization is required, defer it to an `InitializeAsync` method called after resolution, use a factory pattern with a separate async creation step, or register a wrapper that lazily initializes the underlying async resource on first use.
 
 In practice, this means factory design should be reviewed with the same discipline as any other service. A factory is not automatically "just glue code." If it stores collaborators, coordinates policy, or creates disposable runtime objects, its lifetime and ownership model need to be explicit.
 

@@ -247,15 +247,29 @@ public override async Task OnDisconnectedAsync(Exception? exception)
 
 Single-server SignalR is simple: all connections and in-memory groups are local. When traffic exceeds a single server, the architecture must route messages to the correct server that holds each connection.
 
+### Sticky Sessions Nuance
+
+SignalR requires that all HTTP requests for a specific connection be handled by the same server process. Sticky sessions (also called session affinity) are required unless one of these conditions holds:
+
+1. The app runs on a single server in a single process.
+2. The app uses the Azure SignalR Service (sticky sessions are handled by the service, not the app).
+3. All clients are configured to use only WebSockets **and** the `SkipNegotiation` setting is enabled.
+
+Even when using the Redis backplane, sticky sessions are still required because the backplane forwards messages to the correct *server*, but each server must continue serving its own connections.
+
 ### Options for Multi-Server SignalR
 
 | Approach | Mechanism | Trade-off |
 |---|---|---|
-| **Sticky sessions** | Load balancer routes the same client to the same server | Breaks if a server goes down; not suitable for all load balancers |
-| **SignalR backplane** | Servers subscribe to a shared pub/sub channel (Redis, Azure Service Bus). When a message targets a connection on another server, the backplane forwards it | Adds latency per message; Redis backplane is simple to set up |
-| **Managed SignalR (Azure SignalR Service)** | The service manages connections centrally; app servers are stateless | Vendor lock-in; per-connection cost; reduces operational complexity |
+| **Sticky sessions** | Load balancer routes the same client to the same server using a cookie or IP hash | Breaks client connection if the server goes down; required unless conditions above are met |
+| **Redis backplane** | Servers subscribe to a shared Redis pub/sub channel. When a message targets a connection on another server, the backplane forwards it | Adds per-message latency; still requires sticky sessions; simple to self-host |
+| **Azure SignalR Service** | The service manages connections centrally; app servers are stateless and require only a constant number of connections to the service | Vendor lock-in; per-connection cost; eliminates sticky sessions; scales connections separately from app logic |
 
-For self-hosted deployments, the Redis backplane is the most common approach. It uses Redis pub/sub to broadcast messages to all servers. Each server listens to a Redis channel and forwards messages to its local connections.
+### Choosing Between Backplane Options
+
+For self-hosted deployments, the Redis backplane is the most common approach. It uses Redis pub/sub to broadcast messages to all servers. Each server subscribes to a Redis channel, and when a message is published, every server receives it and forwards it to its local connections. This adds a network hop per message but is simple to set up and operate.
+
+For Azure-hosted applications, the Azure SignalR Service is recommended by the ASP.NET Core team because it eliminates server-side connection management, eliminates the sticky session requirement, and allows the app servers to scale independently of the number of concurrent connections. The trade-off is a per-connection cost and dependency on the Azure service.
 
 ## Verification
 

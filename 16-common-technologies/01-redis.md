@@ -179,8 +179,8 @@ Eviction:
 
 Expiration is handled with:
 
-- lazy expiration: key is checked when accessed;
-- active expiration: Redis samples keys with TTL and removes expired ones.
+- lazy expiration: key is checked when accessed and removed if expired;
+- active expiration: Redis periodically samples a subset of keys with TTL and removes expired ones.
 
 Eviction depends on `maxmemory-policy`, such as:
 

@@ -137,6 +137,24 @@ import type { Order } from "@/features/orders/types";
 
 `shared/ui/Table.tsx` becomes business-aware. A generic table should not know what an order is. Once shared code imports feature code, the dependency direction becomes unclear and changes become harder to reason about.
 
+### Barrel Exports and Tree-Shaking
+
+The `index.ts` files shown here are barrel exports -- they re-export select members from internal modules. While convenient, barrel files can negatively affect tree-shaking. When a bundler encounters `import { OrdersPage } from "@/features/orders"`, it may also include every other export from the barrel, even if unused, depending on the bundler configuration and whether side-effect flags are properly set.
+
+For large features, consider importing directly from internal paths when the import is for a specific sub-module (such as a type or utility), and reserve the barrel for public API surfaces. ESM-aware bundlers (Vite, Webpack with `"sideEffects": false`) handle this better than older tools, but it is worth verifying with bundle analysis.
+
+### React 19 Server Components and Architecture
+
+React 19 Server Components (RSC) change data fetching architecture at the framework level. Server Components run on the server and access data directly (databases, file systems, internal APIs) without exposing fetching logic to the client. Client Components handle interactivity and state.
+
+RSC affects the project structure in two ways:
+
+1. **Module boundaries become server/client boundaries**: Code in Server Components is never sent to the client. Expensive libraries (markdown parsers, date formatters, validation schemas used only on the server) can be imported freely in Server Components without affecting bundle size.
+
+2. **Data fetching moves closer to the component**: Instead of a separate `api/ordersApi.ts` layer, Server Components can read data directly with `async/await`. The API abstraction layer remains relevant for Client Components that need to fetch data interactively.
+
+For projects using RSC, the `api/` directory inside features still serves Client Components. Server Components may place data access utilities in a separate `data/` directory or inline them directly in the component, depending on the framework conventions.
+
 ## Public Module APIs
 
 Large features should expose a small public API.
@@ -984,6 +1002,24 @@ Costs:
 - observability across multiple frontend applications.
 
 Start with a modular frontend unless team boundaries and deployment boundaries clearly justify micro-frontends. A folder structure problem should usually be solved with modular architecture before adding runtime integration complexity.
+
+### Module Federation
+
+Module Federation (from Webpack 5, also available in other bundlers via plugins) is an alternative to micro-frontends that allows separately built applications to share components and dependencies at runtime. Unlike micro-frontends that compose at the page or route level, Module Federation can share individual components, state, or even library code (such as React itself) across independently deployed applications.
+
+Module Federation works well when multiple applications share a common design system or set of reusable modules but are built and deployed separately. It avoids duplicating shared dependencies in each application's bundle. However, it introduces coordination overhead for shared versioning, and misconfigured shared dependencies can cause runtime errors.
+
+### Monorepo Tooling
+
+For medium-to-large frontend projects, a monorepo (Nx, Turborepo, or pnpm workspaces) provides shared tooling configuration, dependency management, and task orchestration across multiple applications and libraries. Monorepo tooling enables:
+
+- shared ESLint, TypeScript, and Vite configurations across applications;
+- dependency graph visibility and build caching;
+- parallel and incremental task execution;
+- unified versioning for shared libraries;
+- code generation for consistent module creation.
+
+Monorepos are orthogonal to micro-frontends: a monorepo can host multiple micro-frontend applications or a single modular application. The choice depends on team boundaries and deployment requirements.
 
 ## Common Architecture Smells
 

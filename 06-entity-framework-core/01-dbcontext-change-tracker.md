@@ -247,6 +247,18 @@ This mode can be useful when the application wants read-only behavior but still 
 
 Even so, it should be used deliberately. The common read path in API work is still no-tracking projection into DTOs rather than materializing large entity graphs for output.
 
+## Batch Range Methods
+
+When adding or attaching many entities at once, the range overloads improve both performance and clarity:
+
+```csharp
+_dbContext.Orders.AddRange(order1, order2, order3);
+_dbContext.Orders.AttachRange(existingOrder1, existingOrder2);
+_dbContext.Orders.UpdateRange(order1, order2);
+```
+
+These methods behave identically to their single-entity counterparts but avoid calling `DetectChanges` after each individual operation. For bulk additions, `AddRange` is the preferred pattern over looping with single `Add` calls.
+
 ## `Add`, `Attach`, And `Update`
 
 The entry-point methods on `DbSet<T>` express different intent:
@@ -314,6 +326,29 @@ item.Order  -> order
 
 This relationship fix-up is convenient because it keeps tracked graphs internally consistent. It is also one more reason that a long-lived context becomes harder to predict. Once enough entities are tracked, the in-memory graph acquires behavior of its own, which may be useful during one unit of work but confusing across unrelated operations.
 
+## Checking Whether Changes Exist
+
+Before calling `SaveChanges`, the change tracker can report whether any tracked changes exist at all:
+
+```csharp
+if (_dbContext.ChangeTracker.HasChanges())
+{
+    await _dbContext.SaveChangesAsync(ct);
+}
+```
+
+`HasChanges` returns `true` when any tracked entity has been added, modified, or deleted. Calling it before `SaveChanges` can be useful for conditional save logic, though in most request-scoped work the application already knows whether changes were made. The method is most valuable in middleware, background jobs, or reusable infrastructure that must make save decisions generically.
+
+## Clearing The Change Tracker
+
+When a `DbContext` instance must be reused within a scope, or when the tracked graph needs to be reset, `ChangeTracker.Clear()` detaches all tracked entities at once:
+
+```csharp
+_dbContext.ChangeTracker.Clear();
+```
+
+This is significantly more efficient than detaching entities one at a time. After clearing, all previously tracked entities become `Detached`, and the change tracker starts fresh. Clearing is rarely needed in the standard unit-of-work pattern -- disposing the context at the end of the scope is the normal approach -- but it can be useful in batch-processing scenarios where a single context processes multiple independent units of work.
+
 ## The `SaveChanges` Pipeline
 
 `SaveChanges` is not just "send SQL to the database." It is a small execution pipeline:
@@ -357,6 +392,55 @@ builder.Services.AddDbContextPool<AppDbContext>(options =>
 Pooling can reduce allocation overhead in high-throughput applications, but it should not be treated as a free optimization. A pooled context instance is reused across scopes, so any custom mutable state placed directly on the context becomes dangerous unless it is correctly reset.
 
 This is one reason a `DbContext` should primarily represent persistence infrastructure, not a container for arbitrary request-specific flags. Pooling is most effective when the context remains lean and the rest of the request state lives elsewhere.
+
+## DbContext Factory Pattern
+
+For application types where scoped lifetime does not align with the desired unit-of-work boundary -- such as Blazor Server, background services, or batch processors -- EF Core provides `IDbContextFactory<T>`:
+
+```csharp
+builder.Services.AddDbContextFactory<AppDbContext>(options =>
+{
+    options.UseSqlServer(connectionString);
+});
+```
+
+The factory can then be injected and used to create short-lived context instances on demand:
+
+```csharp
+public sealed class OrderProcessingService
+{
+    private readonly IDbContextFactory<AppDbContext> _contextFactory;
+
+    public OrderProcessingService(IDbContextFactory<AppDbContext> contextFactory)
+    {
+        _contextFactory = contextFactory;
+    }
+
+    public async Task ProcessOrdersAsync(CancellationToken ct)
+    {
+        await using var dbContext = await _contextFactory.CreateDbContextAsync(ct);
+
+        // Use the context for one unit of work
+    }
+}
+```
+
+Each call to `CreateDbContext` produces a fresh, independent context instance. The application is responsible for disposing it. This pattern is essential when a single service scope must execute multiple units of work, or when the DI container does not naturally create scoped instances per work item.
+
+## OnConfiguring And DI Configuration
+
+When `AddDbContext` is used in ASP.NET Core, `OnConfiguring` is still called on the context instance. This means configuration can be split: the DI setup provides the provider and connection string, while `OnConfiguring` adds cross-cutting concerns such as logging, interceptors, or default tracking behavior:
+
+```csharp
+protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+{
+    optionsBuilder
+        .LogTo(Console.WriteLine, LogLevel.Information)
+        .EnableSensitiveDataLogging();
+}
+```
+
+Configuration applied in both places is additive. Options set in `OnConfiguring` do not replace those from `AddDbContext` unless they conflict. This composability is useful for reusable base classes or testing infrastructure.
 
 ## Design Consequences
 

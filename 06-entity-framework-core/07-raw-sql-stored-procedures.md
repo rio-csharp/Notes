@@ -16,6 +16,24 @@ Raw SQL is not a mark of sophistication by itself. In many codebases it becomes 
 
 This preserves the benefits of EF Core while still acknowledging that relational systems sometimes need relationally direct expression.
 
+## SQL Query Limitations
+
+When returning entity types from raw SQL, several constraints apply. The query must return data for all properties of the entity type -- partial column sets are not supported for entity materialization. Column names in the result set must match the column names that properties are mapped to in the model, not the property names themselves. Finally, `FromSql` can only be called directly on a `DbSet<T>`, not composed over an arbitrary LINQ query.
+
+## Scalar SQL Queries
+
+For read operations that need only single values or non-entity results, EF Core provides `SqlQuery<T>`:
+
+```csharp
+var totals = await _dbContext.Database
+    .SqlQuery<decimal>($"SELECT [Total] FROM [Orders] WHERE [Status] = {status}")
+    .ToListAsync(ct);
+```
+
+This returns scalar results without requiring a keyless entity type. The output column must be named according to the target type's mapping -- for primitive types, aliasing the column as `Value` enables LINQ composition over the SQL query.
+
+The raw variant `SqlQueryRaw` supports dynamically constructed SQL for the same scenarios, following the same safety rules as `FromSqlRaw`.
+
 ## `FromSql` And Parameterization
 
 EF Core provides two forms for raw SQL entity queries:
@@ -138,7 +156,7 @@ var recentPaidOrders = await _dbContext.Orders
     .ToListAsync(ct);
 ```
 
-This can be useful, but it should not be assumed universally. Composability depends on provider behavior and on the shape of the SQL. Procedure calls and highly specialized statements often form a harder boundary.
+This can be useful, but it should not be assumed universally. Composability works only when the SQL is itself a valid subquery -- a `SELECT` statement without trailing semicolons, query-level hints, or non-subquery-compatible `ORDER BY` clauses. Stored procedure calls cannot be composed at all on SQL Server: any attempt to apply additional LINQ operators after `FromSql` on a stored procedure produces invalid SQL. In that case, `AsEnumerable` or `AsAsyncEnumerable` must be used right after `FromSql` to force client-side composition.
 
 That boundary should be respected. If the query is fundamentally SQL-defined, it is often clearer to keep the surrounding application logic SQL-aware at that point rather than pretending the entire path remains ordinary LINQ composition.
 

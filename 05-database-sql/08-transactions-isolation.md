@@ -42,24 +42,49 @@ This is not only a syntactic wrapper. It tells the database that partial complet
 
 Isolation levels control which concurrency anomalies are allowed or prevented. Common phenomena include:
 
-- dirty reads;
-- non-repeatable reads;
-- phantom reads;
-- lost updates.
+- dirty reads — reading uncommitted data from another transaction;
+- non-repeatable reads — same row read twice within a transaction returns different values;
+- phantom reads — same query run twice within a transaction returns different rows;
+- lost updates — two transactions read then update the same row, one overwriting the other silently.
 
-The exact behavior depends on the engine and its implementation strategy, but the conceptual trade-off is stable: stronger isolation reduces anomalies and often reduces concurrency or increases coordination cost.
+| Isolation Level | Dirty Read | Non-Repeatable Read | Phantom |
+|---|---|---|---|
+| Read uncommitted | Yes | Yes | Yes |
+| Read committed (locking) | No | Yes | Yes |
+| Read committed snapshot (RCSI) | No | Yes | Yes |
+| Repeatable read | No | No | Yes |
+| Snapshot | No | No | No |
+| Serializable | No | No | No |
+
+Lock-based isolation uses shared locks for reads and exclusive locks for writes. Row-versioning isolation stores previous row versions and provides reads from those versions without acquiring shared locks.
 
 That is why isolation level should be chosen according to correctness requirements rather than by habit.
 
-## Read Committed, Repeatable Read, Serializable, Snapshot
+## Read Committed And Read Committed Snapshot
 
-`Read Committed` is a common default because it prevents dirty reads while preserving reasonable concurrency.
+`READ COMMITTED` is the default isolation level in SQL Server. In its locking form, a `SELECT` acquires and releases shared locks row-by-row as it reads — each row is locked only while being accessed. This prevents dirty reads but permits non-repeatable reads and phantoms.
 
-`Repeatable Read` and `Serializable` strengthen guarantees, but they may also enlarge lock duration or constrain concurrency more aggressively.
+`READ COMMITTED SNAPSHOT` (RCSI) is a database-level setting that changes `READ COMMITTED` to use row versioning instead of locking. Each statement sees the committed state as of the moment the statement began:
 
-`Snapshot` isolation uses versioned reads rather than traditional blocking reads. When enabled, the database stores row versions in tempdb (in SQL Server). A `SELECT` under snapshot isolation reads the latest committed version as of the start of the transaction, without acquiring shared locks. This eliminates most read-write blocking but adds tempdb overhead and may increase the cost of write operations that must check for version conflicts.
+```sql
+ALTER DATABASE OrdersDb SET READ_COMMITTED_SNAPSHOT ON;
+```
 
-The key engineering point is that no isolation level is simply "best." Each is a different correctness-versus-concurrency trade.
+With RCSI enabled, `SELECT` statements no longer acquire shared locks. Writers do not block readers, and readers do not block writers. This eliminates the most common source of read-write blocking in OLTP workloads. Azure SQL Database enables RCSI by default.
+
+The trade-off is tempdb overhead (each row version consumes space in the version store) and a subtle semantic change: a long-running statement sees data as it existed at the statement's start, not data committed mid-statement. For most application workloads, this is an acceptable or even desirable behavior. For workloads where a transaction must see its own prior writes consistently with later reads, `SNAPSHOT` isolation at the transaction level provides that guarantee.
+
+## Repeatable Read, Serializable, Snapshot
+
+`REPEATABLE READ` holds shared locks until the transaction ends, preventing non-repeatable reads at the cost of increased blocking. `SERIALIZABLE` adds key-range locks to prevent phantoms — the strictest locking-based level.
+
+`SNAPSHOT` isolation (transaction-level) uses row versioning so that every read in the transaction sees the committed state as of the transaction's start. Unlike RCSI, the snapshot point is fixed for the entire transaction, not per-statement. This requires `ALLOW_SNAPSHOT_ISOLATION` to be enabled at the database level and the transaction to explicitly set the isolation level:
+
+```sql
+SET TRANSACTION ISOLATION LEVEL SNAPSHOT;
+```
+
+The key engineering point is that no isolation level is simply "best." Each is a different correctness-versus-concurrency trade. Modern OLTP applications running on SQL Server frequently use RCSI as the foundation and escalate to `SNAPSHOT` or `SERIALIZABLE` only when the workload requires stronger guarantees.
 
 ## Lost Updates And Write Conflicts
 
@@ -72,6 +97,8 @@ Optimistic concurrency tokens at the application layer are one solution. Stronge
 ## Locks And Blocking
 
 Relational databases often use locks to coordinate concurrent access. Shared locks support reading. Exclusive locks support writing. Intent and update locks help the engine manage more complex access patterns.
+
+One rule is independent of isolation level: a transaction always holds exclusive locks on modified rows until the transaction commits or rolls back. Isolation level only changes how long *read* locks are held, not write locks. Even `READ UNCOMMITTED` holds write locks to completion.
 
 The important practical lesson is that lock behavior depends heavily on query shape. A precise indexed update may lock a very small set of rows. A broad scan under write pressure may touch and lock far more data than the application expected.
 

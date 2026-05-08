@@ -28,6 +28,28 @@ Commit
 
 This default behavior is often enough for a single, coherent unit of work. Manual transactions are needed when the application must coordinate several save phases or mix EF changes with additional commands inside one atomic boundary.
 
+## Savepoints
+
+When `SaveChanges` is called inside an explicit transaction, EF Core automatically creates a savepoint before saving. If the save operation fails, the transaction is rolled back to the savepoint rather than aborted entirely, leaving the transaction usable for retry or recovery. This is particularly relevant when optimistic concurrency conflicts occur during `SaveChanges`:
+
+```csharp
+await using var transaction = await _dbContext.Database.BeginTransactionAsync(ct);
+
+try
+{
+    // Operations here
+    await _dbContext.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+}
+catch (DbUpdateConcurrencyException)
+{
+    // The transaction is still valid because EF rolled back to the savepoint.
+    // The application can refresh the conflicting entity and retry.
+}
+```
+
+Savepoints are incompatible with SQL Server's Multiple Active Result Sets (MARS). When MARS is enabled, EF Core does not create savepoints, and a failed `SaveChanges` may leave the transaction in an indeterminate state.
+
 ## Explicit Transactions
 
 Explicit transactions become useful when one operation genuinely spans multiple persistence steps:
@@ -53,6 +75,29 @@ catch
 ```
 
 The important question is not whether explicit transactions are available. It is whether the business operation truly requires one broader atomic boundary. Keeping transactions narrower reduces locking time and usually improves operational safety.
+
+## Cross-Context Transactions
+
+When operations span multiple `DbContext` instances or mix EF Core with other data access technologies such as ADO.NET, transactions can be shared across context boundaries. This requires manually passing a `DbConnection` and using `UseTransaction`:
+
+```csharp
+await using var connection = new SqlConnection(connectionString);
+await using var transaction = await connection.BeginTransactionAsync(ct);
+
+var firstContext = new AppDbContext(options);
+await firstContext.Database.UseTransactionAsync(transaction, ct);
+
+var secondContext = new AnotherDbContext(otherOptions);
+await secondContext.Database.UseTransactionAsync(transaction, ct);
+
+// Both contexts participate in the same transaction
+await firstContext.SaveChangesAsync(ct);
+await secondContext.SaveChangesAsync(ct);
+
+await transaction.CommitAsync(ct);
+```
+
+This pattern is most useful in migration scenarios, batch jobs, or when integrating EF Core with non-EF data access code that must share the same atomic boundary.
 
 ## External Calls Do Not Belong Inside Database Transactions
 
@@ -83,6 +128,7 @@ Isolation levels control what one transaction can observe of another transaction
 
 Common levels include:
 
+- `Read Uncommitted`
 - `Read Committed`
 - `Repeatable Read`
 - `Serializable`
@@ -231,6 +277,8 @@ Some scenarios justify preventing concurrent modification up front instead of de
 That approach should be used carefully. It increases blocking, can raise deadlock risk, and usually reduces throughput. It is appropriate only when the cost of conflict is high enough that the system must serialize access more aggressively.
 
 Optimistic concurrency is the better default in many business applications because it preserves throughput and pushes conflict resolution to the cases where conflict actually occurs.
+
+Manually controlling transactions is incompatible with implicitly invoked retrying execution strategies. When an execution strategy retries a failed operation, it replays the full callback -- but a transaction that was already committed or rolled back inside a previous attempt cannot be replayed. For this reason, execution strategies and manual transactions must be used together only when the strategy's callback wraps the entire transaction lifecycle, as shown here.
 
 ## Execution Strategies And Retriable Failures
 

@@ -225,7 +225,7 @@ Use it in CI so type errors do not reach production builds.
 
 ### Strict Mode Configuration in Depth
 
-Enabling `strict: true` in `tsconfig.json` activates a family of individual strictness flags. Understanding each flag helps when migrating an existing project to strict mode incrementally:
+Enabling `strict: true` in `tsconfig.json` activates a family of nine individual strictness flags. Understanding each flag helps when migrating an existing project to strict mode incrementally:
 
 | Flag | Effect |
 |------|--------|
@@ -233,6 +233,11 @@ Enabling `strict: true` in `tsconfig.json` activates a family of individual stri
 | `noImplicitAny` | Reports an error when TypeScript cannot infer a type and falls back to `any`. This forces explicit annotations on function parameters and prevents accidental escape hatches. |
 | `strictFunctionTypes` | Enables stricter checking of function parameter bivariance. Without it, a function accepting `Animal[]` could be passed where `Dog[]` is expected, which is unsound. |
 | `strictPropertyInitialization` | Ensures all class properties are initialized in the constructor or via a default value. Prevents accessing uninitialized properties. |
+| `strictBindCallApply` | Checks that arguments to `bind`, `call`, and `apply` match the function's parameter types. |
+| `noImplicitThis` | Raises an error when `this` is implicitly typed as `any`. |
+| `alwaysStrict` | Emits ECMAScript strict mode directives (`"use strict"`) in output files. |
+| `useUnknownInCatchVariables` | Types catch clause variables as `unknown` instead of `any`, forcing explicit type handling. |
+| `strictBuiltinIteratorReturn` | Ensures iterator return types from built-in iterables are properly typed. |
 
 Beyond `strict`, additional flags provide further safety:
 

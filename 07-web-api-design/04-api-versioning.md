@@ -96,7 +96,25 @@ Versioning without deprecation discipline produces API sprawl. Once a new versio
 4. support both versions for a defined period;
 5. retire the old version on a communicated sunset date.
 
-Headers such as `Deprecation`, `Sunset`, and documentation links can make that lifecycle visible to clients rather than leaving the transition entirely to out-of-band communication.
+The `Deprecation` and `Sunset` HTTP headers (RFC 8594) make the version lifecycle visible to clients programmatically:
+
+```http
+GET /api/v1/orders HTTP/1.1
+---
+Deprecation: true
+Sunset: Sat, 01 Nov 2026 23:59:59 GMT
+Link: </api/v2/orders>; rel="successor-version"
+```
+
+The `Deprecation` header signals that the version is deprecated. The `Sunset` header communicates when support ends. The `Link` header with `rel="successor-version"` directs clients to the replacement. Middleware or action filters can add these headers automatically for deprecated versions.
+
+The `Asp.Versioning.Mvc` package can also report the current version through the `ReportApiVersions` option, which adds an `api-supported-versions` response header:
+
+```csharp
+options.ReportApiVersions = true;
+```
+
+This lets clients discover available versions through regular responses rather than through external documentation.
 
 ## Migration Guidance As Part Of The Contract
 
@@ -112,7 +130,7 @@ This is one reason versioning is partly a documentation problem and not only a r
 
 ## Tooling In ASP.NET Core
 
-ASP.NET Core supports structured versioning approaches through packages such as `Asp.Versioning.Mvc` and `Asp.Versioning.Mvc.ApiExplorer`. Those tools are useful because they keep version selection, routing, and documentation aligned.
+ASP.NET Core supports structured versioning approaches through packages such as `Asp.Versioning.Mvc` and `Asp.Versioning.Mvc.ApiExplorer`. These are community-maintained packages that replaced the earlier Microsoft-published versioning libraries and remain the recommended approach for controller-based APIs.
 
 A typical configuration registers versioning with a reader strategy, default version, and API explorer integration:
 
@@ -156,7 +174,50 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-This approach keeps versioning explicit in routing, discoverable through generated OpenAPI documentation, and separable by controller action. The tooling matters, but the architectural lesson matters more: versioning should be explicit, observable, and tied to documentation generation so that each supported contract surface remains understandable.
+### Version-Neutral Controllers
+
+Some controllers serve resources that are not expected to change across versions, such as health checks or reference data. These can be marked as version-neutral:
+
+```csharp
+[ApiController]
+[Route("api/health")]
+[ApiVersionNeutral]
+public sealed class HealthController : ControllerBase
+{
+    [HttpGet]
+    public IActionResult Get() => Ok(new { status = "healthy" });
+}
+```
+
+Version-neutral controllers are accessible regardless of the requested API version. This avoids forcing clients to specify a version for endpoints that have no meaningful version distinction.
+
+### Minimal API Versioning
+
+Minimal APIs can use the versioning package through `HasApiVersion` on route groups:
+
+```csharp
+var v1 = app.MapGroup("/api/orders")
+    .HasApiVersion(1.0);
+
+v1.MapGet("/", async (IOrderService service, CancellationToken ct) =>
+{
+    var orders = await service.GetAllAsync(ct);
+    return Results.Ok(orders);
+});
+
+var v2 = app.MapGroup("/api/orders")
+    .HasApiVersion(2.0);
+
+v2.MapGet("/", async (IOrderService service, CancellationToken ct) =>
+{
+    var orders = await service.GetAllAsync(ct);
+    return Results.Ok(orders.Select(o => new OrderResponseV2(o)));
+});
+```
+
+This approach keeps versioning visible at the route registration level rather than buried in controller attributes, and it supports the same reader strategies and API explorer integration as controller-based versioning.
+
+The result is a versioning surface that stays explicit in routing, discoverable through generated OpenAPI documentation, and separable per-endpoint or per-group. The tooling matters, but the architectural lesson matters more: versioning should be observable and tied to documentation generation so that each supported contract surface remains understandable.
 
 ## Design Consequences
 

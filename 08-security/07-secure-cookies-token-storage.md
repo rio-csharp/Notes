@@ -28,6 +28,8 @@ Security-related cookie flags exist because session cookies are credential-beari
 
 These flags are not advanced hardening trivia. They are part of the session contract between browser and server.
 
+An additional hardening measure is the `__Host-` cookie prefix. A cookie named with the `__Host-` prefix (for example, `__Host-session`) forces the browser to enforce three properties: the cookie must have the `Secure` flag, must be sent only from the origin that set it (no domain attribute), and must have `Path=/`. This prevents a class of domain- and path-based cookie injection attacks. Using `__Host-` for session and authentication cookies is a low-cost way to constrain the cookie's security properties explicitly rather than relying on configuration defaults.
+
 ## Access Tokens And Refresh Tokens In Browser Architectures
 
 One common SPA design keeps a short-lived access token in memory while storing the refresh token in an HttpOnly cookie. This limits the exposure of the longer-lived credential while avoiding persistent access-token storage in browser JavaScript.
@@ -46,6 +48,8 @@ This can improve security by keeping tokens out of browser JavaScript entirely. 
 - reduced simplicity compared with pure static SPA deployment.
 
 The BFF pattern is therefore a security-architecture choice, not a universal replacement for token-based SPAs.
+
+One caveat applies when the BFF itself participates in an OAuth/OIDC login flow: the redirect from the identity provider to the BFF's callback endpoint is a cross-site navigation. If the BFF's session cookie uses `SameSite=Strict`, the browser may not send it during the callback, breaking login. The callback endpoint typically needs at least `SameSite=Lax`, and careful path isolation (such as a dedicated callback route with relaxed SameSite) rather than blanket relaxation across all cookie uses.
 
 ## XSS Versus CSRF Pressure
 

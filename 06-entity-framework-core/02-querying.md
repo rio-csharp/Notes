@@ -20,7 +20,19 @@ At this stage, the application does not yet have results. It has an expression t
 - `CountAsync`
 - `AnyAsync`
 
-That deferred model is useful because it allows filters, ordering, projection, and pagination to compose into one provider-translated command instead of several disconnected operations.
+That deferred model is useful because it allows filters, ordering, projection, and pagination to compose into one provider-translated command instead of several disconnected operations. It also means the result set is fully buffered when a terminal method such as `ToListAsync` is called. For queries that return large result sets, `AsAsyncEnumerable` provides streaming behavior:
+
+```csharp
+await foreach (var order in _dbContext.Orders
+    .AsNoTracking()
+    .Where(o => o.Status == OrderStatus.Paid)
+    .AsAsyncEnumerable())
+{
+    // Process one row at a time without buffering all rows in memory
+}
+```
+
+This pattern avoids allocating a single large collection for the full result, but it keeps the database connection open for the duration of the enumeration.
 
 ## Expression Trees, Not Delegates
 
@@ -283,6 +295,36 @@ At first, this can look flexible. In practice, it often blurs ownership of:
 - where persistence concerns stop.
 
 It is usually better for query composition to live in the application or data-access layer, with materialization happening at a clear boundary. A controller should ideally receive read models or application-level results, not an unfinished persistence query.
+
+## Query Tags For Log Correlation
+
+When examining logged SQL, it is not always easy to tell which LINQ query produced which command. Query tags embed a comment into the generated SQL to bridge that gap:
+
+```csharp
+var orders = await _dbContext.Orders
+    .TagWith("GetActiveOrders")
+    .Where(o => o.Status == OrderStatus.Paid)
+    .Select(o => new OrderListItemDto
+    {
+        Id = o.Id,
+        Total = o.Total
+    })
+    .ToListAsync(ct);
+```
+
+The tag appears as a SQL comment:
+
+```sql
+-- GetActiveOrders
+
+SELECT [o].[Id], [o].[Total]
+FROM [Orders] AS [o]
+WHERE [o].[Status] = @__status_0
+```
+
+Tags accumulate: calling `TagWith` multiple times produces multiple comment lines in the generated SQL. EF Core also provides `TagWithCallSite()`, which automatically inserts the source file and line number, making it even easier to trace a slow query back to its origin in code.
+
+Tags have no effect on query semantics or execution. They are purely a diagnostics aid, but they are one of the most effective ones for correlating application behavior with database performance.
 
 ## Inspecting Generated SQL
 

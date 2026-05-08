@@ -10,10 +10,15 @@ At a basic level, EF Core compares the current model with the model snapshot and
 
 ```bash
 dotnet ef migrations add InitialCreate
+dotnet ef migrations list
+dotnet ef migrations remove
 dotnet ef database update
+dotnet ef database update LastGoodMigration
 dotnet ef migrations script
 dotnet ef migrations script --idempotent
 ```
+
+`migrations list` shows which migrations exist in the project and which have been applied to the target database. `migrations remove` deletes the most recent migration before it has been applied, which is useful during development when the migration has not yet been deployed. `database update` with a specific migration name rolls the database back to that migration, applying `Down` for any later migrations that had been applied.
 
 A migration contains two directions:
 
@@ -41,6 +46,29 @@ public partial class AddOrderStatus : Migration
 
 `Up` moves the schema forward. `Down` attempts to reverse that change. In practice, the existence of a `Down` method should not be mistaken for a guaranteed safe rollback story. Some schema and data changes are not reversibly safe in operational reality.
 
+## Migration History Table
+
+EF Core records applied migrations in a history table, typically named `__EFMigrationsHistory`. The table name and schema can be configured:
+
+```csharp
+optionsBuilder.UseSqlServer(connectionString, options =>
+{
+    options.MigrationsHistoryTable("__MyMigrationsHistory", "admin");
+});
+```
+
+This is relevant when multiple `DbContext` types share the same database and each needs its own migration history, or when organizational conventions require a specific schema for infrastructure tables.
+
+## Development-Time Schema Creation
+
+For local development and testing, `EnsureCreated` creates the database schema from the model without using migrations:
+
+```csharp
+await _dbContext.Database.EnsureCreatedAsync(ct);
+```
+
+This is faster than running migrations during rapid prototyping. However, `EnsureCreated` does not produce migration files or a migration history table, so it cannot evolve the schema later. Once the model stabilizes, the team should generate an initial migration and switch to the migration workflow.
+
 ## Model Snapshot And Migration History
 
 EF Core keeps a model snapshot in source control and records applied migrations in the database, usually through `__EFMigrationsHistory`.
@@ -56,18 +84,7 @@ That history is what makes idempotent scripts possible and what keeps multiple e
 
 By default, EF Core wraps each migration in its own transaction. This means that if a migration fails partway through, its DDL statements are rolled back, but already-applied earlier migrations remain committed. This is usually the correct behavior: partial application of a single migration is not recoverable, but the overall migration history advances only when a migration completes successfully.
 
-When a migration contains multiple DDL commands that must succeed or fail together, the generated code often wraps them in explicit transactions:
-
-```csharp
-protected override void Up(MigrationBuilder migrationBuilder)
-{
-    migrationBuilder.Sql("BEGIN TRANSACTION");
-
-    // DDL statements here
-
-    migrationBuilder.Sql("COMMIT");
-}
-```
+Each migration already executes inside one transaction, so manually adding `BEGIN TRANSACTION` and `COMMIT` inside a migration method is unnecessary. All DDL statements within a single migration already succeed or fail together.
 
 For migrations that mix schema changes with large data updates, transaction log growth is a real concern. Providers may offer batching or online DDL options (such as `ONLINE = ON` in SQL Server Enterprise) that affect how migration commands interact with user traffic.
 

@@ -314,6 +314,172 @@ function reducer(state: State, action: Action): State {
 }
 ```
 
+## useActionState
+
+`useActionState` is a React 19 hook designed for form actions. It accepts an action function and an initial state, and returns the current state, a dispatch function, and a pending flag:
+
+```tsx
+import { useActionState } from "react";
+
+type FormState = { success: boolean; message: string } | null;
+
+async function submitOrder(prevState: FormState, formData: FormData): Promise<FormState> {
+  const customerId = formData.get("customerId");
+  const response = await fetch("/api/orders", {
+    method: "POST",
+    body: JSON.stringify({ customerId })
+  });
+
+  if (!response.ok) {
+    return { success: false, message: "Order creation failed." };
+  }
+
+  return { success: true, message: "Order created." };
+}
+
+function CreateOrderForm() {
+  const [state, formAction, isPending] = useActionState(submitOrder, null);
+
+  return (
+    <form action={formAction}>
+      <input name="customerId" type="number" />
+      <button type="submit" disabled={isPending}>
+        {isPending ? "Submitting..." : "Create Order"}
+      </button>
+      {state && <p role="alert">{state.message}</p>}
+    </form>
+  );
+}
+```
+
+The action function receives the previous state as its first argument and the submitted `FormData` as the second. Dispatch calls are queued and run sequentially: each call waits for the previous one to finish and receives its result as `previousState`. If the action throws, React cancels all queued actions and displays the nearest Error Boundary.
+
+When the dispatch is passed to `<form action={...}>`, React automatically wraps the submission in a Transition. If called imperatively, the dispatch must be wrapped in `startTransition()` to correctly track `isPending`.
+
+## useFormStatus
+
+`useFormStatus` reads the pending status of the enclosing `<form>`. It must be called inside a component rendered within a `<form>` element:
+
+```tsx
+import { useFormStatus } from "react-dom";
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+
+  return (
+    <button type="submit" disabled={pending}>
+      {pending ? "Saving..." : "Save"}
+    </button>
+  );
+}
+
+function OrderForm() {
+  return (
+    <form action={submitOrder}>
+      <input name="customerId" />
+      <SubmitButton />
+    </form>
+  );
+}
+```
+
+`useFormStatus` is useful for building reusable submit buttons or form status indicators without manually threading `isPending` through the component tree.
+
+## useOptimistic
+
+`useOptimistic` displays a result before the server confirms it. It accepts the current state and an update function, and returns an optimistic snapshot and a dispatch function:
+
+```tsx
+import { useOptimistic, useRef } from "react";
+
+type Message = { id: number; text: string; sending?: boolean };
+
+function MessageList({ messages }: { messages: Message[] }) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [optimisticMessages, addOptimisticMessage] = useOptimistic(
+    messages,
+    (state, newMessage: string) => [
+      ...state,
+      { id: Date.now(), text: newMessage, sending: true }
+    ]
+  );
+
+  async function formAction(formData: FormData) {
+    addOptimisticMessage(formData.get("message") as string);
+    formRef.current?.reset();
+    await sendMessage(formData);
+  }
+
+  return (
+    <form action={formAction} ref={formRef}>
+      <input name="message" />
+      <button type="submit">Send</button>
+      <ul>
+        {optimisticMessages.map(msg => (
+          <li key={msg.id}>
+            {msg.text} {msg.sending ? "(sending...)" : ""}
+          </li>
+        ))}
+      </ul>
+    </form>
+  );
+}
+```
+
+The optimistic state updates immediately, providing instant UI feedback. When the server confirms, React reconciles the optimistic state with the real state. If the action errors, the optimistic update automatically rolls back.
+
+## The `use()` Hook
+
+The `use()` hook consumes a Promise or Context value. Unlike other hooks, it can be called conditionally and inside loops:
+
+```tsx
+import { use } from "react";
+
+function OrderDetails({ orderPromise }: { orderPromise: Promise<Order> }) {
+  const order = use(orderPromise);
+  return <OrderSummary order={order} />;
+}
+```
+
+When a Promise is passed, `use()` suspends the component -- the nearest `<Suspense>` boundary shows a fallback until the Promise resolves. This integrates Server Components and Client Components, allowing the server to stream data and the client to consume it without managing loading states manually.
+
+`use()` with Context replaces `useContext` and is preferred because it supports conditional calls:
+
+```tsx
+function Sidebar({ showTheme }: { showTheme: boolean }) {
+  if (showTheme) {
+    const theme = use(ThemeContext);
+    return <div className={theme}>...</div>;
+  }
+  return <div>...</div>;
+}
+```
+
+## useEffectEvent
+
+`useEffectEvent` extracts non-reactive logic from an effect without adding it to the dependency array. The returned function reads the latest props and state but does not need to be listed as a dependency:
+
+```tsx
+import { useEffect, useEffectEvent } from "react";
+
+function Connection({ roomId }: { roomId: string }) {
+  const onMessage = useEffectEvent((msg: string) => {
+    // reads latest state without being a dependency
+    logMessage(msg);
+  });
+
+  useEffect(() => {
+    const connection = createConnection(roomId);
+    connection.onMessage(onMessage);
+    return () => connection.disconnect();
+  }, [roomId]); // onMessage is NOT a dependency
+
+  return <div />;
+}
+```
+
+Without `useEffectEvent`, `onMessage` would need to be either a dependency (causing reconnection on every render) or suppressed from the linter. `useEffectEvent` solves this by making the function non-reactive -- it always reads the latest values but does not trigger the effect when they change.
+
 ## Custom Hook
 
 ```tsx

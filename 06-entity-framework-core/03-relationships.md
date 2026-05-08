@@ -143,6 +143,20 @@ An explicit join entity is appropriate when the relationship has its own:
 
 At that point, the join is no longer hidden infrastructure. It is part of the domain model.
 
+When the join entity has additional payload properties that should be configured in the model, `UsingEntity` provides explicit control:
+
+```csharp
+modelBuilder.Entity<Student>()
+    .HasMany(s => s.Courses)
+    .WithMany(c => c.Students)
+    .UsingEntity<Enrollment>(
+        e => e.HasOne(e => e.Course).WithMany(),
+        e => e.HasOne(e => e.Student).WithMany(),
+        e => e.Property(p => p.EnrolledAt).HasDefaultValueSql("GETUTCDATE()"));
+```
+
+This keeps the relationship mapping explicit while still allowing EF Core to manage the join table schema through migrations.
+
 ## Required And Optional Relationships
 
 Required and optional relationships should be expressed consistently in both CLR shape and relational mapping.
@@ -180,6 +194,10 @@ Common options include:
 - `Restrict`
 - `SetNull`
 - `NoAction`
+- `ClientCascade`
+- `ClientSetNull`
+
+The first four control both the database foreign key constraint and EF Core's in-memory behavior. `ClientCascade` and `ClientSetNull` are EF Core-specific options that apply cascade behavior only to loaded tracked entities without configuring a database cascade. These can be useful when the database schema must remain conservative but the application still benefits from automatic graph cleanup within a unit of work.
 
 The correct choice depends on business semantics, not on what is most convenient for the ORM. Cascading through a graph may be acceptable for clearly owned technical data. It is often dangerous for financial, audit, or historical data.
 
@@ -210,12 +228,34 @@ var orders = await _dbContext.Orders
 ```sql
 SELECT o.*, c.*
 FROM Orders o
-LEFT JOIN Customers c ON o.CustomerId = c.Id
+INNER JOIN Customers c ON o.CustomerId = c.Id
 ```
+
+With a required (non-nullable) foreign key, EF Core generates `INNER JOIN`. With an optional foreign key, it generates `LEFT JOIN` instead. The choice follows relational normal form: a required relationship guarantees a matching principal row exists, so an inner join is sufficient.
 
 When multiple `Include` calls or nested `ThenInclude` chains are used, the generated SQL may contain multiple JOINs, potentially creating a wide result set with duplicated parent data.
 
 This can be appropriate when the application truly needs related entities as entities. It is less appropriate when the output is a read model that only needs a few related columns, because projection is often more efficient and more explicit.
+
+## Auto-Including Navigations
+
+When a navigation property is always needed whenever its parent entity is loaded, the model can be configured to include it automatically on every query:
+
+```csharp
+modelBuilder.Entity<Order>()
+    .Navigation(o => o.Customer)
+    .AutoInclude();
+```
+
+With this configuration, every query returning `Order` entities will automatically join `Customer` without an explicit `Include` call. The automatic include can still be overridden per query using `IgnoreAutoIncludes()`:
+
+```csharp
+var orders = await _dbContext.Orders
+    .IgnoreAutoIncludes()
+    .ToListAsync(ct);
+```
+
+Auto-include is convenient for consistently loaded graphs, but it should be used sparingly. Applying it too broadly makes every query heavier, and the implicit join can surprise developers who expect a lightweight query.
 
 ## Split Queries For Large Graphs
 

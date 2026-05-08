@@ -465,6 +465,38 @@ Alias switch example:
 
 Mapping changes should not be treated casually. Versioned indexes and aliases allow rebuilding, validation, switching, and rollback without breaking search.
 
+## Field Filtering And The `_source` Field
+
+By default, Elasticsearch stores the original JSON document in the `_source` field and returns it in search hits. For indexes with large documents, returning `_source` for every hit adds unnecessary network and deserialization overhead.
+
+Use `_source` filtering to return only the fields needed:
+
+```json
+{
+  "_source": ["id", "name", "price"],
+  "query": {
+    "match": { "name": "keyboard" }
+  }
+}
+```
+
+For indexes where the stored document is never needed (for example, a log index queried only for aggregations), disable `_source` entirely:
+
+```json
+{
+  "mappings": {
+    "_source": { "enabled": false },
+    "properties": {
+      "@timestamp": { "type": "date" },
+      "level": { "type": "keyword" },
+      "message": { "type": "text" }
+    }
+  }
+}
+```
+
+Disabling `_source` saves disk space but prevents partial updates, reindexing from the stored document, and the `realtime get` API. Only disable it when you are certain the raw document will never be needed.
+
 ## Syncing Data
 
 Search index is usually not source of truth.

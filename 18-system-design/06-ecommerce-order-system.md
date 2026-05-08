@@ -103,13 +103,13 @@ Frontend
 
 ## Idempotency
 
-Checkout may be retried.
-
-Use:
+Checkout may be retried. The client sends an idempotency key in the request header (or request body), and the server guarantees that the same key results in the same outcome, even if the request is submitted multiple times.
 
 ```http
 Idempotency-Key: checkout-user-123-cart-456
 ```
+
+The server checks the idempotency key before processing. If the key already exists and the previous request completed successfully, return the stored result without re-executing. If the previous request failed, the server should return the existing error or, depending on the semantics, allow retrying with a new attempt.
 
 Database:
 
@@ -117,6 +117,10 @@ Database:
 CREATE UNIQUE INDEX UX_Orders_IdempotencyKey
 ON Orders (IdempotencyKey);
 ```
+
+### Idempotency Key Scope
+
+Idempotency keys must be unique per operation scope. For checkout, the scope is the user and cart: `checkout:{userId}:{cartId}`. For payments, the scope is the order: `payment:{orderId}`. For refunds, the scope is the payment and refund attempt number: `refund:{paymentId}:{attempt}`. Using the same key for different operations can cause unintended deduplication.
 
 ## Inventory Reservation
 

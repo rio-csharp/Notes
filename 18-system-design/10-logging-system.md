@@ -38,15 +38,15 @@ Applications
 
 ### Pipeline Stages
 
-1. **Collection**: log agents (filebeat, fluent-bit) or SDK sinks (Serilog `Sinks.ElasticSearch`) forward structured logs to a buffering layer. The agent tails log files or receives log events over the network. For containerized workloads, the agent runs as a sidecar and reads stdout/stderr.
+1. **Collection**: log agents (filebeat, fluent-bit) or SDK sinks (Serilog `Sinks.ElasticSearch`, `Sinks.Seq`) forward structured logs to a buffering layer. The agent tails log files or receives log events over the network. For containerized workloads, the agent runs as a sidecar and reads stdout/stderr. Applications should emit structured JSON logs rather than plain text, so that downstream parsing is deterministic.
 
-2. **Buffering**: a queue or stream (Kafka, Event Hubs) absorbs write bursts and decouples producers from consumers. This prevents backpressure from the search cluster from slowing down application logs. The buffer should be durable enough to survive a storage-layer outage without losing logs.
+2. **Buffering**: a queue or stream (Kafka, Azure Event Hubs, AWS Kinesis) absorbs write bursts and decouples producers from consumers. This prevents backpressure from the search cluster from slowing down application logs. The buffer should be durable enough to survive a storage-layer outage without losing logs. Choosing the right partitioning strategy is important: partition by service name or tenant to preserve ordering within a partition.
 
-3. **Processing**: a log processor reads from the buffer, parses unstructured messages into structured fields, enriches with metadata (cluster name, environment, data center), applies sampling rules for high-volume verbose logs, and writes to the search index.
+3. **Processing**: a log processor reads from the buffer, parses unstructured messages into structured fields, enriches with metadata (cluster name, environment, data center), applies sampling rules for high-volume verbose logs, and writes to the search index. Enrichment can include geo-IP lookups, user-agent parsing, and tag injection. Sampling rules should preserve error and warning logs at 100% while reducing debug and info logs during normal operation.
 
-4. **Indexing**: the search index (Elasticsearch, OpenSearch) organizes logs by timestamp-based indices (e.g., `logs-2026.05.08`). Each index has a mapping that defines which fields are searchable, aggregatable, or stored as keywords. Mappings directly affect storage cost and query performance.
+4. **Indexing**: the search index (Elasticsearch, OpenSearch) organizes logs by timestamp-based indices (e.g., `logs-2026.05.08`). Each index has a mapping that defines which fields are searchable, aggregatable, or stored as keywords. Mappings directly affect storage cost and query performance. Fields used only for display (not filtering) should be `text` rather than `keyword` to avoid bloating the index. Use index lifecycle management (ILM) policies to automate rollover, shrinking, and deletion.
 
-5. **Dashboard and alerting**: Kibana or Grafana dashboards surface real-time log views. Alerting rules trigger on error rate thresholds, missing log patterns, or ingestion lag.
+5. **Dashboard and alerting**: Kibana or Grafana dashboards surface real-time log views. Alerting rules trigger on error rate thresholds, missing log patterns, or ingestion lag. Avoid alerting on individual error log entries -- alert on rate-based aggregations to reduce noise.
 
 ## Log Format
 

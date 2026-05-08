@@ -244,6 +244,25 @@ public sealed class AppDbContext : DbContext
 
 Global filters reduce accidental leaks, but they are not a replacement for authorization and tests.
 
+**Query filter caveats.** When a global filter is applied to an entity that has a required navigation to another entity with a filter, EF Core uses an `INNER JOIN`, which can silently filter out rows from the parent entity. This is particularly relevant for multi-tenant systems where a `TenantId` filter on one table may unexpectedly reduce results from a related query. Making the navigation optional (or applying consistent filters on both entities) avoids this issue.
+
+**Multiple filters.** Before EF Core 10, `HasQueryFilter` overwrites previous calls. Multiple conditions must be combined with `&&`:
+
+```csharp
+modelBuilder.Entity<Order>()
+    .HasQueryFilter(o => o.TenantId == _tenantContext.TenantId && !o.IsDeleted);
+```
+
+In EF Core 10 and later, named query filters allow separate registration and selective disabling:
+
+```csharp
+modelBuilder.Entity<Order>()
+    .HasQueryFilter("TenantFilter", o => o.TenantId == _tenantContext.TenantId)
+    .HasQueryFilter("SoftDeleteFilter", o => !o.IsDeleted);
+```
+
+**Disabling filters.** Use `IgnoreQueryFilters()` to bypass all filters, which is necessary for admin cross-tenant operations. In EF Core 10, specific named filters can be disabled individually.
+
 ## Resource-Level Authorization
 
 Checking a permission is not enough. The resource must also belong to the current tenant. (For a detailed explanation of authorization models, permission policies, and resource-level handlers, see Chapter 8, "Authorization Models, Permissions, And Resource Access".)
@@ -378,7 +397,16 @@ public async Task ProcessAsync(OrderSubmittedMessage message, CancellationToken 
 
 ## Admin Cross-Tenant Access
 
-Some support users may need cross-tenant access.
+Some support users may need cross-tenant access. In such cases, bypass the global query filter explicitly:
+
+```csharp
+var orders = await _db.Orders
+    .IgnoreQueryFilters()
+    .Where(o => o.Id == orderId)
+    .ToListAsync(ct);
+```
+
+`IgnoreQueryFilters()` disables all filters on the query, so it must only be used in code paths gated by an explicit admin permission check.
 
 Rules:
 

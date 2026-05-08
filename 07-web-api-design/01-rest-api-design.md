@@ -83,7 +83,17 @@ This distinction becomes important in workflows such as report generation, payme
 
 Error handling is one of the most neglected parts of many APIs. Random exception text is not a contract.
 
-A structured format such as `ProblemDetails` creates a predictable error surface:
+### Problem Details Standard
+
+The `ProblemDetails` type implements RFC 9457 (formerly RFC 7807), the standard format for HTTP API error responses. ASP.NET Core supports this through the `IProblemDetailsService` interface, which can be registered globally:
+
+```csharp
+builder.Services.AddProblemDetails();
+```
+
+When registered, this service enables middleware components such as the Exception Handler Middleware and Status Code Pages Middleware to produce structured `ProblemDetails` responses automatically. The `[ApiController]` attribute also uses it to produce consistent error payloads for validation failures and other client errors.
+
+A typical `ProblemDetails` response looks like this:
 
 ```json
 {
@@ -97,7 +107,97 @@ A structured format such as `ProblemDetails` creates a predictable error surface
 }
 ```
 
+Customization is available through `ProblemDetailsOptions`:
+
+```csharp
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = context =>
+    {
+        context.ProblemDetails.Extensions["instance"] = 
+            $"{context.HttpContext.Request.Method} {context.HttpContext.Request.Path}";
+    };
+});
+```
+
 This helps clients distinguish validation failures, authorization problems, state conflicts, and server errors without parsing arbitrary strings. It also gives operators better correlation between client-visible failures and server-side traces.
+
+### Centralized Exception Handling
+
+For unhandled exceptions, the Exception Handler Middleware provides a centralized error path that avoids scattering try-catch blocks across actions:
+
+```csharp
+var app = builder.Build();
+
+app.UseExceptionHandler("/error");
+
+// ...
+
+app.MapControllers();
+app.Run();
+```
+
+The error handler action should not use HTTP method attributes and should be excluded from OpenAPI documentation:
+
+```csharp
+[ApiExplorerSettings(IgnoreApi = true)]
+[Route("/error")]
+public IActionResult HandleError() =>
+    Problem();
+```
+
+Since .NET 8, custom `IExceptionHandler` implementations offer an alternative that keeps the error handling logic self-contained:
+
+```csharp
+public sealed class GlobalExceptionHandler : IExceptionHandler
+{
+    private readonly ILogger<GlobalExceptionHandler> _logger;
+
+    public GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger)
+    {
+        _logger = logger;
+    }
+
+    public async ValueTask<bool> TryHandleAsync(
+        HttpContext httpContext,
+        Exception exception,
+        CancellationToken ct)
+    {
+        _logger.LogError(exception, "Unhandled exception occurred.");
+
+        var problemDetails = new ProblemDetails
+        {
+            Status = StatusCodes.Status500InternalServerError,
+            Title = "An unexpected error occurred.",
+            Type = "https://httpstatuses.com/500"
+        };
+
+        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await httpContext.Response.WriteAsJsonAsync(problemDetails, ct);
+        return true;
+    }
+}
+```
+
+Registration:
+
+```csharp
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+```
+
+The `TryHandleAsync` method returns `true` to signal that the exception was handled and the response is complete. Multiple handlers can be registered, and they are tried in order until one returns `true`.
+
+### Content Negotiation
+
+ASP.NET Core uses content negotiation to select the response format based on the client's `Accept` header. The built-in formatters support JSON (default) and optionally XML. Custom formatters can be added for media types such as Protocol Buffers or vCard. The `[Produces]` attribute on an action constrains the response formats it supports:
+
+```csharp
+[HttpGet]
+[Produces("application/json")]
+public IActionResult Get() { /* ... */ }
+```
+
+Format negotiation matters because clients may request different representations of the same resource.
 
 ## URI Stability And Resource Identity
 
@@ -111,6 +211,34 @@ Resource identity should therefore be explicit and durable enough that clients c
 - one operation outcome.
 
 This is also why API design overlaps with domain design. A weak domain boundary often produces weak URI structure because the system is unsure what the client is really addressing.
+
+## The `[ApiController]` Attribute
+
+The `[ApiController]` attribute enables several automatic behaviors that reduce boilerplate and enforce consistent contract structure.
+
+First, it requires attribute routing. A controller without `[ApiController]` can still use conventional routing, but once the attribute is applied, every action must have a `[Route]`, `[HttpGet]`, or similar attribute. This prevents accidental exposure of methods through convention-based matching.
+
+Second, it enables automatic model validation. When model binding fails, the framework returns a `400 Bad Request` with a `ValidationProblemDetails` response without any explicit check in the action body. This behavior can be suppressed through `SuppressModelStateInvalidFilter` if needed, but it provides a consistent validation surface by default.
+
+Third, it infers the source of action parameters. Complex types are automatically bound from the request body, while simple types are bound from the query string. This reduces the need for explicit `[FromBody]` and `[FromQuery]` attributes in most cases, though explicit annotations remain valuable for clarity and for edge cases where the inference is ambiguous.
+
+Fourth, it adds automatic `ProblemDetails` responses for error status codes returned by controller actions. Any result with a status code of 400 or higher is transformed into a `ProblemDetails` payload, making error responses consistent without per-endpoint configuration.
+
+### Configuring `ApiBehaviorOptions`
+
+The `[ApiController]` behaviors can be customized through `ApiBehaviorOptions`:
+
+```csharp
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.SuppressModelStateInvalidFilter = false;
+        options.ClientErrorMapping[StatusCodes.Status404NotFound].Link =
+            "https://httpstatuses.com/404";
+    });
+```
+
+`ClientErrorMapping` controls the `type` and `title` fields in the `ProblemDetails` response for standard client error status codes.
 
 ## Controllers As Contract Boundaries
 
@@ -129,6 +257,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet]
+    [ProducesResponseType<PagedResult<OrderResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<OrderResponse>>> Search(
         [FromQuery] OrderSearchRequest request,
         CancellationToken ct)
@@ -138,6 +267,8 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpPost]
+    [ProducesResponseType<OrderResponse>(StatusCodes.Status201Created)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<OrderResponse>> Create(
         CreateOrderRequest request,
         CancellationToken ct)
@@ -147,6 +278,8 @@ public sealed class OrdersController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [ProducesResponseType<OrderResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderResponse>> GetById(int id, CancellationToken ct)
     {
         var order = await _orders.GetByIdAsync(id, ct);
@@ -155,7 +288,7 @@ public sealed class OrdersController : ControllerBase
 }
 ```
 
-The value of code like this is not only that it compiles. It makes the API contract legible: the collection is searchable, creation returns a location for the new resource, and missing resources become `404`.
+The value of code like this is not only that it compiles. It makes the API contract legible: the collection is searchable, creation returns a location for the new resource, missing resources become `404`, and the `ProducesResponseType` attributes ensure the OpenAPI document reflects the full range of possible responses rather than only the success path.
 
 ## Design Consequences
 

@@ -383,7 +383,7 @@ public sealed class RateLimitMiddleware
 
 ## ASP.NET Core Built-in Rate Limiting
 
-Since .NET 7, ASP.NET Core includes a built-in rate limiting middleware (`Microsoft.AspNetCore.RateLimiting`) that supports fixed window, sliding window, token bucket, and concurrency limiter algorithms. This reduces the need for custom middleware in many applications.
+Since .NET 7, ASP.NET Core includes a built-in rate limiting middleware (`Microsoft.AspNetCore.RateLimiting`) that supports four algorithms: fixed window, sliding window, token bucket, and concurrency limiter. This reduces the need for custom middleware in many applications.
 
 ```csharp
 builder.Services.AddRateLimiter(options =>
@@ -393,10 +393,53 @@ builder.Services.AddRateLimiter(options =>
         opt.PermitLimit = 100;
         opt.Window = TimeSpan.FromMinutes(1);
         opt.QueueLimit = 10;
+        opt.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
     });
 });
 
 app.UseRateLimiter();
 ```
 
-The built-in middleware integrates with ASP.NET Core's policy infrastructure, supports partition-based limiting (by user, IP, or custom key), and works with `IDistributedCache` for multi-instance deployments. For most applications, the built-in middleware is preferred over a custom implementation. The custom approach shown earlier in this chapter is useful when you need Redis-backed distributed rate limiting with specific algorithmic control (token bucket with Lua scripting) or when rate limiting must be deployed at the API gateway level rather than in the application layer.
+### Concurrency Limiter
+
+Unlike the other algorithm types, the concurrency limiter does not cap the total number of requests in a time window -- it limits only the number of concurrent requests being processed at any moment. Each request reduces the concurrency limit by one; when the request completes, the limit increases by one. This is useful for protecting a resource that scales poorly with parallelism, such as a database connection pool or a single-threaded legacy service.
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddConcurrencyLimiter("concurrent", opt =>
+    {
+        opt.PermitLimit = 10;
+        opt.QueueLimit = 5;
+    });
+});
+```
+
+### Queue and Rejection Behavior
+
+Each limiter can be configured with a `QueueLimit` that specifies how many excess requests are queued when the limit is reached. When the queue is full, additional requests are rejected with HTTP 429. The `QueueProcessingOrder` (either `OldestFirst` or `NewestFirst`) controls which queued request is processed next. Setting `QueueLimit = 0` disables queuing, rejecting all excess requests immediately.
+
+The `OnRejected` callback can customize the rejection response, including adding `Retry-After` headers or logging the rejection:
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.StatusCode = 429;
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter =
+                ((int)retryAfter.TotalSeconds).ToString();
+        }
+        await context.HttpContext.Response.WriteAsync(
+            "Rate limit exceeded. Try again later.", ct);
+    };
+});
+```
+
+### Integration with ASP.NET Core
+
+The built-in middleware integrates with ASP.NET Core's policy infrastructure through `RequireRateLimiting()` on endpoint routing, `[EnableRateLimiting]` and `[DisableRateLimiting]` attributes on controllers and Razor Pages, and partition-based limiting (by user, IP, API key, or custom key). Chained limiters via `PartitionedRateLimiter.CreateChained` allow applying multiple independent rate limit policies to the same endpoint, each with its own counter.
+
+For most applications, the built-in middleware is preferred over a custom implementation. The custom Redis-backed approach shown earlier in this chapter is useful when rate limiting must be deployed at the API gateway level, or when cross-datacenter distributed rate limiting with custom Lua scripting is required.

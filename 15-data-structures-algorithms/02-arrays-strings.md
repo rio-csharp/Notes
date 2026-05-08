@@ -51,6 +51,8 @@ Time:
 O(n)
 ```
 
+Note: this example assumes there is space available at the end of the array. If the array is full, the last element is overwritten and lost. Real insertion logic checks capacity and often allocates a new array.
+
 ## `List<T>` Mental Model
 
 `List<T>` is a dynamic array.
@@ -119,7 +121,13 @@ string BuildCsv(IReadOnlyList<string> values)
 
 `char` in C# is a UTF-16 code unit, not always a full user-perceived character.
 
-For simple coding exercises, `char` loops are usually fine. For production text processing with emojis, combined characters, or different cultures, use .NET globalization APIs carefully.
+A single Unicode code point outside the Basic Multilingual Plane requires two `char` values (a surrogate pair). Some display characters, such as emoji with skin-tone modifiers, require multiple code points -- a grapheme cluster. Iterating a string `char` by `char` and treating each element as an independent character can produce incorrect results for these cases.
+
+For simple coding exercises that use only ASCII characters, `char` loops are fine. For production text processing:
+
+- Use `string.EnumerateRunes()` to iterate over Unicode scalar values via the `Rune` type, which handles surrogate pairs correctly.
+- Use `StringInfo` and `TextElementEnumerator` from `System.Globalization` when you need grapheme-cluster-aware enumeration (for example, counting visible characters or splitting text).
+- Be aware that `string.Length` returns the number of `char` instances (UTF-16 code units), not the number of visible characters.
 
 ## Two Sum
 
