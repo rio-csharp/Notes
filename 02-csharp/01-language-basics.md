@@ -473,7 +473,7 @@ For engineering work, this distinction matters because resource leaks often appe
 
 ## Extension Methods And API Shape
 
-Extension methods add method syntax to existing types without modifying their source definitions.
+Extension methods add method syntax to existing types without modifying their source definitions. In earlier C# versions, the defining signal is the `this` modifier on the first parameter of a static method. Beginning with C# 14, the language also adds `extension(...)` blocks for declaring extension members. That newer syntax does not replace the older one so much as generalize it: the older form still matters, but it is no longer the whole story.
 
 ```csharp
 public static class StringExtensions
@@ -485,6 +485,29 @@ public static class StringExtensions
 }
 ```
 
+The traditional form above defines an extension method only. The newer C# 14 syntax uses the `extension` keyword inside a top-level, nongeneric static class:
+
+```csharp
+public static class StringExtensions
+{
+    extension(string? value)
+    {
+        public bool IsBlank()
+        {
+            return string.IsNullOrWhiteSpace(value);
+        }
+    }
+}
+```
+
+This distinction matters because `extension` blocks can group multiple extension members around the same receiver and can express more than the old `this`-parameter syntax. Official guidance now frames the feature as extension members, not only extension methods. In practice, that means:
+
+- The classic `this`-parameter syntax defines instance extension methods.
+- The C# 14 `extension(...)` syntax can define extension methods, properties, and operators.
+- `extension(...)` can target an instance receiver or the type itself, which enables static extension members in addition to instance-style ones.
+
+For everyday application code, the design advice is still the same: use extensions to improve expressiveness at the call site, not to disguise hidden dependencies or move core domain behavior into arbitrary helper classes.
+
 They are most useful for lightweight operations that genuinely feel like part of the consumer's language. LINQ is the canonical example. The danger appears when extension methods hide infrastructure, persistence, or heavy side effects behind what looks like a simple instance call.
 
 ```csharp
@@ -494,9 +517,9 @@ public static Task ApproveOrderAsync(this Order order, AppDbContext db)
 }
 ```
 
-That style weakens clarity because the call site resembles domain behavior while quietly depending on infrastructure. Extension methods are best when they improve expression without obscuring responsibility.
+That style weakens clarity because the call site resembles domain behavior while quietly depending on infrastructure. Extension methods and extension members are best when they improve expression without obscuring responsibility.
 
-The compiler resolves extension methods by scanning `using` directives for static classes that contain a matching method. The search looks for a static method whose first parameter is decorated with `this` and whose type is compatible with the expression at the call site. Only `using`-imported namespaces are considered; a static class in the current namespace but not imported via `using` is invisible to extension resolution:
+The compiler resolves extension members by looking for matching extension declarations that are in scope at the call site. In the traditional form, the search looks for a static method whose first parameter is decorated with `this` and whose type is compatible with the expression at the call site. In the newer form, the compiler also considers matching `extension(...)` blocks. In practice, this usually means namespaces brought into scope through `using` directives:
 
 ```csharp
 using MyApp.StringHelpers; // Without this, IsBlank is not found.
@@ -517,6 +540,8 @@ var result = StringExtensions.IsBlank(input); // explicit disambiguation
 ```
 
 Instance methods always take priority over extension methods. If a type defines an instance method with a matching name and compatible parameters, the compiler selects the instance method even when an extension method would also apply. This is why adding an instance method to a type is a breaking change for any consumer that relied on an extension method with the same signature — the extension method becomes silently unreachable.
+
+One practical caution is version support. If a codebase targets a compiler or SDK that predates C# 14, `extension(...)` syntax will fail even though the older `this`-parameter form still compiles. That makes extension members another example of a feature that depends on the effective language version of the project, not just on the reader recognizing the syntax.
 
 ## Deferred Execution With Iterators
 

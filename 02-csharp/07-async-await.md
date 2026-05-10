@@ -500,8 +500,11 @@ await operation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
 `ConfigureAwaitOptions` provides three flags:
 
-- `None` — equivalent to `ConfigureAwait(true)`, continues on the captured context.
-- `ContinueOnCapturedContext` — explicit equivalent of `true`; continues on the captured SynchronizationContext or TaskScheduler.
+In current .NET, `ConfigureAwaitOptions` provides four values:
+
+- `None` — no special behavior is requested.
+- `ContinueOnCapturedContext` — equivalent to `ConfigureAwait(true)`; continues on the captured `SynchronizationContext` or `TaskScheduler` when one matters.
+- `ForceYielding` — forces the continuation to be scheduled asynchronously even when the awaited operation has already completed.
 - `SuppressThrowing` — suppresses the exception that would otherwise be thrown when the awaited operation is already in a faulted or canceled state at the point of `await`. This is useful when the caller intends to inspect the task's status directly after `await` without exception overhead.
 
 The `SuppressThrowing` option addresses a specific performance concern: when code awaits an operation that may have already faulted, the default behavior throws immediately, and catching that exception allocates. With `SuppressThrowing`, the `await` expression simply evaluates without throwing; the caller can then check `task.IsFaulted` or `task.Status` and handle the failure without exception allocation. This is a micro-optimization for hot paths, not a general-purpose pattern.

@@ -35,7 +35,7 @@ int[] fromSecond = numbers[1..]; // [20, 30, 40, 50] — to end
 int[] all = numbers[..];         // [10, 20, 30, 40, 50] — full copy
 ```
 
-The `^` operator constructs a `System.Index`. The `..` operator constructs a `System.Range`. Both are supported by any type with an indexer that accepts `Index` or a `Slice` method that accepts `Range` — arrays, `List<T>`, `Span<T>`, `ReadOnlySpan<T>`, and `string`.
+The `^` operator constructs a `System.Index`. The `..` operator constructs a `System.Range`. Both are supported by types that expose the necessary members for index and range semantics — arrays, `Span<T>`, `ReadOnlySpan<T>`, and `string` are the most common examples.
 
 For custom collection types, adding indexer and slice support for `Index` and `Range` is straightforward:
 
@@ -52,7 +52,7 @@ public T[] this[Range range]
 }
 ```
 
-The main operational note is that `Range` on `List<T>` and arrays allocates a new collection — it copies elements, not views them. For allocation-free slicing, use `Span<T>` or `ReadOnlySpan<T>`:
+The main operational note is that range slicing on arrays creates a new array — it copies elements rather than creating a view. `List<T>` does not support the range operator directly; the closest API is `GetRange`, which also creates a new list. For allocation-free slicing, use `Span<T>` or `ReadOnlySpan<T>`:
 
 ```csharp
 ReadOnlySpan<int> slice = numbers.AsSpan()[1..3]; // no allocation
