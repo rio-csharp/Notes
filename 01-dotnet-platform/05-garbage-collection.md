@@ -97,7 +97,23 @@ public static readonly List<Order> CachedOrders = new();
 
 The GC collects Gen 0 without scanning Gen 2, but Gen 2 objects can hold references to Gen 0 objects — for example, a static list updated with a newly allocated item. The GC must discover these cross-generational references without walking the entire Gen 2 heap.
 
-The solution is the **write barrier**, a small piece of code the JIT injects after every reference assignment in managed code. When a reference field is written, the write barrier sets a bit in the **card table** — a per-segment bitmap where each "card" covers 128 or 256 bytes of heap. During a Gen 0 collection, the GC scans only the Gen 2 cards that are marked dirty, not the entire Gen 2 heap. After the collection, dirty cards are cleared.
+The solution is the **write barrier**, a small piece of code the JIT injects after every reference assignment in managed code. When a reference field is written, the write barrier marks the corresponding entry in the **card table** as dirty. A card represents a small region of heap memory (implementation detail; the exact size is runtime-specific). The dirty mark does **not** mean the Gen 0 object is dirty; it means a region of older-generation memory that stores references may need to be re-examined.
+
+During a Gen 0 collection, the GC scans only the older-generation cards that are marked dirty, not the entire Gen 2 heap. From those cards it discovers the actual old-to-young references and treats the referenced young objects as roots for that collection. After the scan, the dirty mark can be cleared because it has served its purpose: recording that the region changed since the last time the GC examined it.
+
+What happens next is easiest to understand as a timeline:
+
+1. A Gen 2 object is updated to point to a Gen 0 object.
+2. The write barrier marks the corresponding card dirty.
+3. The next ephemeral GC scans that dirty card, finds the `Gen2 -> Gen0` reference, and keeps the young object alive.
+4. If the young object survives, the GC may move and promote it, for example from Gen 0 to Gen 1. The old object's reference is then updated to the object's new address.
+5. As long as the target remains in the ephemeral generations (Gen 0 or Gen 1), the GC must continue to discover that old-to-young reference in later ephemeral collections.
+6. Once the target is promoted to Gen 2, the reference is no longer old-to-young, so ephemeral collections no longer need to track it.
+
+So the dirty bit is not a permanent record of "this reference exists." It is a change-tracking aid that helps the GC find old-to-young references efficiently. The important distinction is:
+
+- **Dirty card** = "this older region may have had reference updates"
+- **Live young object** = "this object is reachable from the roots found during the current GC"
 
 ```text
 managed code:  user.Address = new Address(...);   // writes a reference field
@@ -107,6 +123,9 @@ write barrier:  mark corresponding card(s) in card table as dirty
                          │
                          ▼
 next Gen 0 GC:  scan only marked cards in Gen 2 to find cross-gen references
+                         │
+                         ▼
+after scan:     clear the dirty mark; future writes will dirty the card again
 ```
 
 The card table explains why reference-heavy code patterns carry a GC cost. A loop that writes references into a large array dirties many cards, increasing the work during the next ephemeral collection. A long-lived `Dictionary<int, Order>` stored in a static field dirties cards on every insert, forcing the GC to re-scan those cards on subsequent Gen 0 collections even for entries that have not changed — the card table has only one bit per card and does not track which specific field within the card was written. Understanding this mechanism turns allocation profiling into a concrete exercise: a Gen 0 collection that is unexpectedly slow often correlates with an unusually large set of dirty cards.
