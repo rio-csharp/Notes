@@ -85,7 +85,7 @@ Error handling is one of the most neglected parts of many APIs. Random exception
 
 ### Problem Details Standard
 
-The `ProblemDetails` type implements RFC 9457 (formerly RFC 7807), the standard format for HTTP API error responses. ASP.NET Core supports this through the `IProblemDetailsService` interface, which can be registered globally:
+The `ProblemDetails` type implements RFC 9457, the standard format for HTTP API error responses. ASP.NET Core supports this through the `IProblemDetailsService` interface, which can be registered globally:
 
 ```csharp
 builder.Services.AddProblemDetails();

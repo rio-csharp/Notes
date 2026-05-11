@@ -25,15 +25,15 @@ The CLR itself provides the core execution services: garbage collection, JIT com
 
 The runtime libraries are the concrete implementations of types in the `System.*` namespace. When application code calls `List<T>.Add` or `JsonSerializer.Serialize`, it invokes library APIs whose implementations live inside the runtime libraries shipped with the execution package. In everyday language, "the .NET runtime" typically means this entire execution bundle.
 
-Every line in a typical request handler crosses platform-layer boundaries:
+### Tiered Compilation
 
-```csharp
-using var client = new HttpClient();
-var response = await client.GetStringAsync("https://api.example.com/data");
-var items = JsonSerializer.Deserialize<List<Item>>(response);
-```
+.NET uses tiered compilation to balance startup speed and steady-state throughput. The first time a method is compiled, the runtime can generate a fast, lightly optimized version known as Tier 0. That gets the application running quickly without spending too much time optimizing methods that may never become important.
 
-The C# compiler and `dotnet build` come from the SDK. `HttpClient`, `JsonSerializer`, and `List<T>` are BCL APIs. At execution time, the host loads the application, the CLR JIT-compiles the methods, the runtime libraries provide the networking and JSON implementations, and the GC manages the memory for `response`, `items`, and the internal buffers `HttpClient` allocates. None of these layers is optional.
+When a method proves to be hot, the runtime recompiles it at Tier 1 with deeper optimization. The result is better machine code for the paths the application actually uses most, while cold methods avoid paying the cost of expensive optimization up front.
+
+This two-tier design is why tiered compilation is a good fit for server applications. A Web API may load many methods during startup, but only a small subset are hit on every request. Tier 0 helps the process start fast; Tier 1 concentrates optimization effort on the hot path where it matters.
+
+Every line in a typical request handler crosses platform-layer boundaries. The SDK provides the build tooling; the host starts the application; the CLR JIT-compiles methods on demand; the runtime libraries provide networking, JSON, and collection implementations; the GC manages memory for internal buffers. None of these layers is optional.
 
 ### SDK
 
@@ -95,7 +95,7 @@ appsettings.json
 
 A self-contained publish adds the runtime files or a platform-specific host executable, because the target machine is not expected to provide a shared runtime.
 
-Container deployments add their own layer of concern. In a Dockerfile, the choice between `mcr.microsoft.com/dotnet/sdk` and `mcr.microsoft.com/dotnet/aspnet` images mirrors the SDK-versus-runtime split: the SDK image builds, the runtime image hosts. Multi-stage Docker builds formalize this:
+Container deployments add their own layer of concern. In a Dockerfile, the choice between `mcr.microsoft.com/dotnet/sdk`, `mcr.microsoft.com/dotnet/runtime`, and `mcr.microsoft.com/dotnet/aspnet` mirrors the build-versus-run split: the SDK image builds, `runtime` hosts non-ASP.NET Core apps, and `aspnet` hosts ASP.NET Core apps that need `Microsoft.AspNetCore.*` assemblies. Multi-stage Docker builds formalize this:
 
 ```dockerfile
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
@@ -109,7 +109,7 @@ COPY --from=build /app .
 ENTRYPOINT ["dotnet", "MyApp.dll"]
 ```
 
-The runtime base image (`aspnet:9.0`) provides the shared framework — it is framework-dependent deployment packaged as a container layer. Self-contained publish in containers eliminates the runtime image dependency but increases the final image size and couples the image rebuild cycle to runtime patches. Choosing between `aspnet` and `runtime-deps` base images (for self-contained) is the container equivalent of the framework-dependent versus self-contained decision. Containers also interact with the host layer: .NET reads cgroup limits for GC heap sizing, thread pool defaults, and processor count — a container with 512 MB of memory and 1 CPU behaves differently from a VM with 16 GB and 8 CPUs, even running the same application bits.
+The `aspnet` base image is the framework-dependent runtime layer for ASP.NET Core applications, while `runtime` is the corresponding runtime layer for non-ASP.NET Core apps and `runtime-deps` is the thinner base for self-contained or Native AOT scenarios. Self-contained publish in containers eliminates the shared runtime dependency but increases the final image size and couples the image rebuild cycle to runtime patches. Containers also interact with the host layer: .NET reads cgroup limits for GC heap sizing, thread pool defaults, and processor count — a container with 512 MB of memory and 1 CPU behaves differently from a VM with 16 GB and 8 CPUs, even running the same application bits.
 
 ## Host And Runtime Resolution
 
@@ -251,9 +251,7 @@ The project file can capture these as publishing defaults:
 </PropertyGroup>
 ```
 
-In .NET 5 and later, bundled managed assemblies are loaded from memory rather than extracted as individual files. Native libraries and compatibility modes can still require extraction, controlled by settings such as `IncludeNativeLibrariesForSelfExtract` and `IncludeAllContentForSelfExtract`. The practical caveat is that APIs depending on assembly file paths change behavior: for bundled assemblies, `Assembly.Location` returns an empty string, so code should use `AppContext.BaseDirectory` for files deployed next to the executable.
-
-Self-contained and single-file publishing require a runtime identifier (`win-x64`, `linux-x64`, `osx-arm64`) because the output includes platform-specific runtime binaries. This is a common point of confusion: framework-dependent publish output (without single-file) is platform-neutral IL assemblies, while self-contained and single-file output is inherently platform-specific.
+In .NET 5 and later, bundled managed assemblies are loaded from memory rather than extracted as individual files. Native libraries and compatibility modes can still require extraction, controlled by settings such as `IncludeNativeLibrariesForSelfExtract` and `IncludeAllContentForSelfExtract`. The practical caveat is that APIs depending on assembly file paths change behavior: for bundled assemblies, `Assembly.Location` returns an empty string, so code should use `AppContext.BaseDirectory` for files deployed next to the executable. Self-contained and single-file publishing require a runtime identifier (`win-x64`, `linux-x64`, `osx-arm64`) because the output includes platform-specific runtime binaries. In a framework-dependent publish without single-file bundling, the application assemblies are platform-neutral IL, but the publish output still includes metadata files such as `.runtimeconfig.json` and `.deps.json` that describe framework requirements and dependency resolution. So the assemblies are portable, while the full publish directory is still runtime-aware rather than completely platform-agnostic. Self-contained and single-file output, by contrast, is inherently platform-specific.
 
 ### Native AOT Deployment
 
@@ -265,7 +263,9 @@ dotnet publish -c Release -r linux-x64 -p:PublishAot=true
 
 The trade-offs are substantial. Build times are longer because the compiler performs whole-program analysis and cross-module optimization. Not all .NET libraries are compatible — reflection-heavy code, assembly loading, and dynamic type creation require source-generated alternatives or explicit configuration. The debugging experience differs from standard .NET applications since the compiled output is native code.
 
-Native AOT is particularly suited to workloads where cold-start latency and memory footprint dominate: serverless functions, CLI tools, and microservices with aggressive scale-to-zero requirements. It is less suited to applications that depend on runtime code generation, unconstrained reflection, or dynamically loaded plugins.
+Native AOT still uses the .NET runtime components it was published with, including the garbage collector and thread pool support. Those components are no longer supplied by a shared runtime on the target machine, so they move with the published binary rather than being swapped in independently at deployment time.
+
+Native AOT is suited to workloads where cold-start latency and memory footprint dominate: serverless functions, CLI tools, microservices with aggressive scale-to-zero requirements, and cloud infrastructure with large numbers of deployed instances. It is less suited to applications that depend on runtime code generation, unconstrained reflection, or dynamically loaded plugins.
 
 ### ReadyToRun Deployment
 

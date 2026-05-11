@@ -738,6 +738,8 @@ IEnumerable<char> chars = "abcdefghij";      // compile-time: IEnumerable<char>,
 
 The runtime type must be assignment-compatible with the compile-time type. A `string` can be assigned to an `object` variable because `string` derives from `object`. The reverse requires a cast and may fail at runtime with `InvalidCastException` if the runtime type does not match.
 
+That runtime check is not always the same operation, though. A cast between reference types, such as `(string)obj`, checks whether the object reference points to a compatible runtime type. A cast that unboxes a value type, such as `(int)boxed`, checks whether the object contains a boxed `int` and then extracts the underlying value. Both can throw `InvalidCastException`, but they are different mechanisms.
+
 The distinction matters operationally in several familiar scenarios. Virtual method calls dispatch against the runtime type, not the compile-time type, which is why `obj.ToString()` calls `string.ToString()` when `obj` holds a `string`. Pattern matching (`is`, `switch`) tests against the runtime type. Generic variance (`IEnumerable<string>` assigned to `IEnumerable<object>`) preserves the compile-time abstraction while the runtime type remains concrete.
 
 ## Type Design Notes

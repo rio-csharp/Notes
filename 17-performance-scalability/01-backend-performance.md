@@ -168,7 +168,7 @@ Thread pool starvation occurs when the thread pool has no available threads to s
 
 When ASP.NET Core receives an HTTP request, it dispatches the request to a thread pool thread. If that thread calls `.Result` or `.Wait()` on an incomplete `Task`, the calling thread blocks synchronously, waiting for the operation to complete. While blocked, that thread cannot process other requests.
 
-The thread pool's hill-climbing algorithm attempts to compensate by injecting additional threads, but the injection rate is deliberately slow. In .NET 5 and earlier, the thread pool added approximately one new thread every 500 milliseconds to 2 seconds. Starting with .NET 6, the heuristics were improved to scale up thread count much faster in response to certain blocking Task APIs, reducing the duration of starvation episodes. However, the fundamental problem remains: a sudden burst of blocking calls can still cause requests to accumulate in the queue far faster than new threads can be added, driving latency spikes even while CPU utilization stays moderate.
+The thread pool's hill-climbing algorithm attempts to compensate by injecting additional threads, but the injection rate is deliberately slow. Starting with .NET 6, the heuristics were improved to scale up thread count much faster in response to certain blocking Task APIs, reducing the duration of starvation episodes. However, the fundamental problem remains: a sudden burst of blocking calls can still cause requests to accumulate in the queue far faster than new threads can be added, driving latency spikes even while CPU utilization stays moderate.
 
 ### Symptoms
 

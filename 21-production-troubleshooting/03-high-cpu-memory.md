@@ -479,7 +479,7 @@ Practical notes:
 - server GC may use more memory;
 - large caches should respect container limits;
 - do not set memory limit too close to normal working set;
-- configure GC heap hard limit in containers via `DOTNET_gcHeapHardLimit` (in bytes) or `DOTNET_gcHeapHardLimitPercent` to cap GC memory usage before the container OOM kills the process. When a hard limit is set, the GC automatically compacts the Large Object Heap, which reduces fragmentation in memory-constrained environments.
+- configure GC heap hard limit in containers via `DOTNET_GCHeapHardLimit` (in bytes) or `DOTNET_GCHeapHardLimitPercent` to cap GC memory usage before the container OOM kills the process. When a hard limit is set, the GC automatically compacts the Large Object Heap, which reduces fragmentation in memory-constrained environments.
 
 ## Investigation Steps
 
