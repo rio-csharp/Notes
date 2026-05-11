@@ -49,8 +49,10 @@ app.Run();
 In many deployments, port binding is configured through environment variables:
 
 ```text
-ASPNETCORE_URLS=http://+:8080
+ASPNETCORE_HTTP_PORTS=8080
 ```
+
+For .NET 8+ container images, `8080` is the default ASP.NET Core port and `ASPNETCORE_HTTP_PORTS` is the simpler port setting. `ASPNETCORE_URLS` still works when the application needs URL-level control over scheme, host, and port.
 
 ## Reverse Proxy Responsibilities
 

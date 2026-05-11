@@ -33,7 +33,7 @@ var assembly = Assembly.LoadFrom("extensions/MyExtension.dll");
 var type = assembly.GetType("MyExtension.ExtensionEntry");
 ```
 
-Loading an assembly means executing code from that assembly. Untrusted binaries should not be loaded into a process without a clear trust model. `AssemblyLoadContext` provides loading and version isolation — it is not a security sandbox.
+Loading an assembly makes its code available to the process; creating types, invoking members, or running module/static initializers can then execute that code. Untrusted binaries should not be loaded into a process without a clear trust model. `AssemblyLoadContext` provides loading and version isolation — it is not a security sandbox.
 
 A safer loading pattern validates the loaded type against a known contract and fails clearly when expectations are violated:
 

@@ -156,7 +156,7 @@ public async Task<string> DownloadAsync(HttpClient client, CancellationToken ct)
 }
 ```
 
-Async execution is part of the runtime model because scheduling and continuation flow are runtime behaviors, not language features. The compiler generates a state machine; the runtime decides how continuations are dispatched.
+Async execution is part of the runtime model because scheduling and continuation flow are runtime behaviors, not just language syntax. The compiler generates a state machine; awaiters and schedulers decide where continuations run, commonly through the thread pool for server-side code.
 
 File I/O demonstrates how execution characteristics depend on API choice:
 

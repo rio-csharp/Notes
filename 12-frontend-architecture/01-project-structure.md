@@ -143,9 +143,9 @@ The `index.ts` files shown here are barrel exports -- they re-export select memb
 
 For large features, consider importing directly from internal paths when the import is for a specific sub-module (such as a type or utility), and reserve the barrel for public API surfaces. ESM-aware bundlers (Vite, Webpack with `"sideEffects": false`) handle this better than older tools, but it is worth verifying with bundle analysis.
 
-### React 19 Server Components and Architecture
+### Server Components and Architecture
 
-React 19 Server Components (RSC) change data fetching architecture at the framework level. Server Components run on the server and access data directly (databases, file systems, internal APIs) without exposing fetching logic to the client. Client Components handle interactivity and state.
+React Server Components (RSC), when supported by the framework, change data fetching architecture at the framework level. Server Components run on the server and can access data directly (databases, file systems, internal APIs) without exposing that fetching logic to the client bundle. Client Components handle interactivity and state.
 
 RSC affects the project structure in two ways:
 

@@ -136,9 +136,9 @@ Four mechanisms deserve close attention.
 
 **`GetAwaiter().OnCompleted` / `AwaitUnsafeOnCompleted`.** This is how the state machine subscribes to completion. Rather than polling, the compiler calls `GetAwaiter()` on the awaited expression, checks `IsCompleted`, and if the operation is not yet done, passes the state machine itself as the continuation callback via `AwaitUnsafeOnCompleted`. The awaitable's implementation — whether it wraps I/O completion ports, timer callbacks, or task continuations — eventually invokes that callback, which calls back into `MoveNext`.
 
-**Lifted locals.** Local variables that survive across an `await` — `a` and `b` in this example — become fields on the state machine struct. This is the allocation cost of async methods: the state machine struct is boxed onto the heap when the first incomplete await is hit. Locals that do not cross `await` boundaries remain on the stack and incur no allocation. (See the garbage collection chapter for how these short-lived allocations interact with Gen 0 collection and GC pressure on hot paths.)
+**Lifted locals.** Local variables that survive across an `await` — `a` and `b` in this example — become fields on the generated state machine. If the method suspends at an incomplete await, that state has to live beyond the current stack frame, so it is kept in heap-backed async infrastructure associated with the returned task. Locals that do not cross `await` boundaries can remain stack locals or registers. (See the garbage collection chapter for how these short-lived allocations interact with Gen 0 collection and GC pressure on hot paths.)
 
-Three engineering consequences follow from this transformation. First, asynchronous methods are not free of allocation; the state machine box incurs GC pressure on hot paths. Second, exceptions thrown after an `await` do not surface synchronously to the caller — they fault the returned task via `SetException`. Third, a method appears to "return" before its work is finished because what it returns is the task — the promise of eventual completion — not the final result.
+Three engineering consequences follow from this transformation. First, asynchronous methods are not free of allocation when they actually suspend; the state that survives the await can create GC pressure on hot paths. Second, exceptions thrown after an `await` do not surface synchronously to the caller — they fault the returned task via `SetException`. Third, a method appears to "return" before its work is finished because what it returns is the task — the promise of eventual completion — not the final result.
 
 A fourth consequence is subtler: the suspension at an `await` point is not a method exit, so `finally` blocks do not run at suspension. If an async method holds a `using` declaration and suspends at an `await`, the `Dispose` call waits until the method resumes — not when it suspends. If the task is never awaited and the state machine is never resumed, the `finally` block (and therefore the `Dispose` call) never executes. This is another reason fire-and-forget async work is dangerous: it can leak resources without any observable failure.
 
@@ -498,16 +498,14 @@ In ASP.NET Core request code, adding `ConfigureAwait(false)` usually does not ch
 await operation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 ```
 
-`ConfigureAwaitOptions` provides three flags:
-
 In current .NET, `ConfigureAwaitOptions` provides four values:
 
 - `None` — no special behavior is requested.
 - `ContinueOnCapturedContext` — equivalent to `ConfigureAwait(true)`; continues on the captured `SynchronizationContext` or `TaskScheduler` when one matters.
 - `ForceYielding` — forces the continuation to be scheduled asynchronously even when the awaited operation has already completed.
-- `SuppressThrowing` — suppresses the exception that would otherwise be thrown when the awaited operation is already in a faulted or canceled state at the point of `await`. This is useful when the caller intends to inspect the task's status directly after `await` without exception overhead.
+- `SuppressThrowing` — suppresses the exception that would otherwise be thrown when awaiting a faulted or canceled non-generic `Task`. This is useful when the caller intends to inspect the task's status directly after `await` without exception overhead. It is not supported for `Task<TResult>` because there would be no valid `TResult` to return.
 
-The `SuppressThrowing` option addresses a specific performance concern: when code awaits an operation that may have already faulted, the default behavior throws immediately, and catching that exception allocates. With `SuppressThrowing`, the `await` expression simply evaluates without throwing; the caller can then check `task.IsFaulted` or `task.Status` and handle the failure without exception allocation. This is a micro-optimization for hot paths, not a general-purpose pattern.
+The `SuppressThrowing` option addresses a specific performance concern: when code awaits a non-generic task that may have already faulted, the default behavior throws immediately, and catching that exception allocates. With `SuppressThrowing`, the `await` expression completes without throwing; the caller can then check `task.IsFaulted`, `task.IsCanceled`, or `task.Status` and handle the failure without exception allocation. This is a micro-optimization for hot paths, not a general-purpose pattern.
 
 ## ValueTask And Hot-Path Optimization
 

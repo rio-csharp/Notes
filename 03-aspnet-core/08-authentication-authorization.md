@@ -307,6 +307,8 @@ One of the most important HTTP distinctions in security handling is the differen
 
 This distinction matters because it communicates a different remediation path to the client. A `401` response asks the client to authenticate. A `403` response says that authentication succeeded but access is still denied.
 
+This distinction also matters when browser-oriented cookie authentication is used beside APIs. Starting with ASP.NET Core 10, known API endpoints return `401` or `403` instead of redirecting to login or access-denied pages. That is the correct behavior for HTTP API clients: redirects are useful for interactive pages, while APIs need machine-readable status codes.
+
 ## Multiple Schemes And Mixed Surfaces
 
 Real applications sometimes expose more than one kind of surface. A system may serve JWT-protected APIs, cookie-protected admin pages, and internal API-key-protected integrations all at once.

@@ -394,7 +394,7 @@ Partitions prevent one user or tenant from consuming the entire rate budget, and
 
 ## Built-in Output Caching
 
-Output caching (.NET 7+) is distinct from the older response caching middleware. Response caching sets `Cache-Control` headers for client/browser caching. Output caching stores the response body server-side and serves it directly, bypassing the entire downstream pipeline. The result is a significant reduction in server work for cacheable responses.
+Output caching (.NET 7+) is distinct from the older response caching middleware. Response caching follows HTTP caching headers for client/proxy-oriented caching. Output caching is server controlled: it stores eligible responses and, on a cache hit, can serve the cached response without invoking the endpoint or later downstream work. The result is a significant reduction in server work for cacheable responses.
 
 ```csharp
 builder.Services.AddOutputCache(options =>
@@ -413,7 +413,7 @@ app.MapGet("/cached", () => DateTime.UtcNow).CacheOutput();
 app.MapGet("/cached-long", () => DateTime.UtcNow).CacheOutput("LongLived");
 ```
 
-Default behavior: only HTTP 200 responses to GET/HEAD requests are cached. Responses that set cookies or require authentication are excluded. Custom policies can override these defaults (e.g., cache POST responses, vary by query string).
+Default behavior: only HTTP 200 responses to GET/HEAD requests are cached. Responses that set cookies or are associated with authenticated requests are excluded. Custom policies can override these defaults, for example to cache other status codes, vary by route/query/header values, or apply a base policy across a group of endpoints.
 
 **Tag-based eviction** invalidates groups of cached entries at once:
 
@@ -424,6 +424,6 @@ app.MapPost("/purge/{tag}", async (string tag, IOutputCacheStore store)
     => await store.EvictByTagAsync(tag, default));
 ```
 
-**Cache revalidation** via ETag or `If-Modified-Since` is automatic when output caching is enabled — the server returns `304 Not Modified` when the client holds a fresh copy. For multi-server deployments, Redis storage (`AddStackExchangeRedisOutputCache`) provides a shared cache across instances.
+**Cache revalidation** is supported when output caching is enabled and the relevant validators exist, such as `ETag` / `If-None-Match` or `Last-Modified` / `If-Modified-Since`. In those cases the server can return `304 Not Modified` instead of the full body when the cached entry is still fresh. For multi-server deployments, Redis storage (`AddStackExchangeRedisOutputCache`) provides a shared cache across instances.
 
 The output cache middleware must be registered before endpoints that depend on it. For Minimal APIs, a common placement is after `UseCors` and before `UseAuthorization`.

@@ -31,7 +31,7 @@ The CLR provides a set of interdependent services that together form the managed
 
 **Garbage collection** (Chapter 5) manages heap memory through reachability analysis. The GC does not track explicit allocation counts or reference counts. It periodically suspends managed threads, walks the object graph from GC roots (stack locals, static fields, CPU registers, GC handles), marks reachable objects, and reclaims the rest. This design means allocation is cheap — typically a pointer bump in the allocation context — while collection cost scales with live object count, not garbage count.
 
-**Type safety** is enforced at runtime by the CLR's verification and casting machinery. Every object carries its type identity in its header. A cast like `(int)obj` compiles to a runtime check that reads the object's type and either allows the cast or throws `InvalidCastException`. This prevents the kind of memory reinterpretation bugs that unmanaged languages permit, at the cost of runtime type-checking overhead and the impossibility of certain zero-cost abstractions.
+**Type safety** is enforced at runtime by the CLR's verification and casting machinery. Every object carries its type identity in its header. A cast like `(int)obj` compiles to a runtime check that reads the object's type and either allows the cast or throws `InvalidCastException`. Safe managed code avoids the kind of arbitrary memory reinterpretation that unmanaged languages permit, at the cost of runtime type-checking overhead and the need to use `unsafe` explicitly for low-level memory work.
 
 **Exception handling** uses a two-pass unwinding model. The first pass walks the stack looking for a handler whose catch clause matches the exception type. The second pass unwinds frames, executing `finally` blocks and releasing resources. This two-pass design means `finally` blocks execute even when no matching catch is found — the stack unwinds completely, which is why `using` statements and `Dispose` calls in finally blocks are reliable cleanup mechanisms.
 
@@ -68,7 +68,7 @@ Even this short endpoint depends on multiple CLR services simultaneously. The JI
 
 ## Managed Code And The Unmanaged Boundary
 
-Managed code runs under the CLR's full set of guarantees: GC-managed memory, type safety, exception handling, runtime diagnostics, and cross-language interoperability. The CLR tracks object references, maintains metadata, walks call stacks, and enforces type rules because the code operates within its execution model.
+Safe managed code runs under the CLR's full set of guarantees: GC-managed memory, type safety, exception handling, runtime diagnostics, and cross-language interoperability. The CLR tracks object references, maintains metadata, walks call stacks, and enforces type rules because the code operates within its execution model.
 
 Unmanaged code — native C and C++ libraries, operating-system APIs — runs outside those guarantees. Crossing the boundary introduces explicit engineering concerns: resource ownership, calling conventions, object pinning, and failure modes that the CLR cannot automatically mediate.
 
@@ -130,7 +130,7 @@ if (value is string text)
 var number = (int)value;
 ```
 
-Every managed object carries its type identity in its method table pointer, and every cast compiles to a runtime type check. The CLR allows dynamic behavior — polymorphism, reflection, casting — but blocks arbitrary memory reinterpretation. A cast that would succeed in C (`*(int*)&stringValue`) throws `InvalidCastException` in .NET instead of silently producing garbage. This is a foundational property: managed code cannot corrupt the runtime's own data structures through type confusion.
+Every managed object carries its type identity in its method table pointer, and every cast compiles to a runtime type check. The CLR allows dynamic behavior — polymorphism, reflection, casting — but safe managed code blocks arbitrary memory reinterpretation. A cast that would succeed in C (`*(int*)&stringValue`) throws `InvalidCastException` in .NET instead of silently producing garbage. This is a foundational property: ordinary managed code cannot corrupt the runtime's own data structures through type confusion. Code using `unsafe`, raw pointers, or native interop deliberately steps outside part of that safety envelope.
 
 ## Exception Handling
 

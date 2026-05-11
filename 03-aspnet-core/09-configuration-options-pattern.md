@@ -376,7 +376,7 @@ ASP.NET Core applications often change behavior based on environment.
 ```csharp
 if (builder.Environment.IsDevelopment())
 {
-    builder.Services.AddSwaggerGen();
+    builder.Services.AddOpenApi();
 }
 ```
 
@@ -384,6 +384,7 @@ if (builder.Environment.IsDevelopment())
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
+    app.MapOpenApi();
 }
 else
 {

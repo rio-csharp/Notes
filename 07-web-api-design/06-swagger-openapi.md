@@ -57,7 +57,7 @@ app.Run();
 
 ### Visualizing The Document
 
-The `Microsoft.AspNetCore.OpenApi` package does not include a built-in UI. Swagger UI can be added using the `Swashbuckle.AspNetCore.SwaggerUi` package, which provides the web assets independently of Swashbuckle's generation pipeline:
+The `Microsoft.AspNetCore.OpenApi` package does not include a built-in UI. Swagger UI can be added using a UI package such as `Swashbuckle.AspNetCore.SwaggerUI`, which provides the web assets independently of the built-in document generation pipeline:
 
 ```csharp
 if (app.Environment.IsDevelopment())

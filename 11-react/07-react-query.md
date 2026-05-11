@@ -428,21 +428,7 @@ Cache invalidation is the process of marking cached data as stale or removing it
 
 TanStack Query v5 supports Suspense integration, eliminating manual loading state checks:
 
-```tsx
-function OrdersPage() {
-  const query = useQuery({
-    queryKey: ["orders"],
-    queryFn: fetchOrders,
-    suspense: true
-  });
-
-  return <OrderTable orders={query.data.items} />;
-}
-```
-
-With `suspense: true`, the component suspends while loading -- the nearest `<Suspense>` boundary handles the loading state. Error boundaries handle error states. This reduces boilerplate and works well with React 19's streaming SSR and concurrent features.
-
-The `useSuspenseQuery` hook provides an explicit alternative:
+In TanStack Query v5, Suspense uses dedicated hooks rather than the old experimental `suspense: true` option:
 
 ```tsx
 import { useSuspenseQuery } from "@tanstack/react-query";
@@ -458,4 +444,4 @@ function OrdersPage() {
 }
 ```
 
-`useSuspenseQuery` guarantees that `data` is available when the component renders, removing the need for null checks. It also allows `placeholderData` to be used alongside Suspense for transitions between different query results.
+`useSuspenseQuery` guarantees that `data` is available when the component renders, removing the need for null checks. Because Suspense handles the loading branch, options such as `enabled` and `placeholderData` are intentionally unavailable on this hook. To avoid replacing already-visible content with a fallback during query-key changes, wrap the state update that changes the key in `startTransition()`.

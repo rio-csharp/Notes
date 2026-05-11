@@ -442,13 +442,13 @@ Preload example:
 
 ## React Compiler and Automatic Optimization
 
-The React Compiler (stable in React 19) automates memoization at build time. It understands React's rules and automatically applies `useMemo`, `useCallback`, and `React.memo` where appropriate. For code compiled with the React Compiler, the manual optimization patterns described below (memoization, context stabilization, `React.memo`) are handled automatically.
+React Compiler automates memoization at build time for code it compiles. It understands React's rules and emits memoization-equivalent optimizations, reducing the need for manual `useMemo`, `useCallback`, and `React.memo` in many components.
 
-The compiler does not eliminate the need for architectural optimization -- state placement, context splitting, and virtualization remain developer responsibilities. But it removes the class of bugs caused by missing or incorrect manual memoization. For projects using the compiler, start with compiler optimization and only add manual memoization when profiling identifies a specific bottleneck.
+The compiler does not eliminate the need for architectural optimization: state placement, context splitting, and virtualization remain developer responsibilities. For projects using the compiler, start with compiler-friendly code and add manual memoization only when profiling identifies a specific bottleneck or when a library boundary still needs stable references.
 
 ## Streaming SSR and Performance
 
-React 19's streaming SSR (stable since React 18) improves perceived performance by sending HTML in chunks. Instead of waiting for the entire page to render on the server, the server streams ready content as it becomes available. The browser can render the first chunks while waiting for slower data.
+Streaming SSR, available in React 18+ and commonly exposed through frameworks, improves perceived performance by sending HTML in chunks. Instead of waiting for the entire page to render on the server, the server streams ready content as it becomes available. The browser can render the first chunks while waiting for slower data.
 
 Streaming SSR improves LCP and TTFB by delivering the page shell (navigation, headers, main layout) immediately while data-heavy sections stream in behind Suspense boundaries. Combined with selective hydration, the client can make interactive parts of the page usable before the entire page has streamed.
 

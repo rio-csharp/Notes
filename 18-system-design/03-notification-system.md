@@ -112,7 +112,7 @@ CREATE TABLE OutboxMessages
 );
 ```
 
-A separate outbox processor polls for unpublised records (`PublishedAt IS NULL`), publishes them to the message broker, and marks them as published. If the processor crashes mid-publish, the message remains unpublised and will be picked up on the next poll cycle. This guarantees at-least-once delivery: every outbox record eventually reaches the queue, and the worker must handle duplicate delivery via idempotency.
+A separate outbox processor polls for unpublished records (`PublishedAt IS NULL`), publishes them to the message broker, and marks them as published. If the processor crashes mid-publish, the message remains unpublished and will be picked up on the next poll cycle. This provides at-least-once delivery under normal retry assumptions: every outbox record should eventually reach the queue, and the worker must handle duplicate delivery via idempotency.
 
 The outbox pattern ensures that the notification record and the delivery message are never durably out of sync: both or neither are persisted.
 

@@ -22,7 +22,7 @@ add
 return
 ```
 
-IL's design serves several engineering purposes simultaneously. It enables language interoperability — F#, Visual Basic, and C# all compile to IL that the same runtime can execute. It defers architecture-specific optimization to the JIT, which can target the exact CPU features of the current machine. It preserves metadata that enables reflection, diagnostics, and tooling. And it provides platform flexibility — the same IL runs on Windows, Linux, and macOS without recompilation.
+IL's design serves several engineering purposes simultaneously. It enables language interoperability — F#, Visual Basic, and C# all compile to IL that the same runtime can execute. It defers architecture-specific optimization to the JIT, which can target the exact CPU features of the current machine. It preserves metadata that enables reflection, diagnostics, and tooling. And it provides platform flexibility — platform-neutral IL can run on Windows, Linux, and macOS when the target framework, runtime, and operating-system API usage are compatible.
 
 Metadata is the descriptive layer stored alongside IL. It records type names, method signatures, parameters, return types, attributes, referenced assemblies, and generic type information. When code applies `[Obsolete]` to a method, that attribute is stored as metadata — tools and frameworks inspect it later independently of the IL.
 
@@ -110,7 +110,7 @@ ReadyToRun is a middle ground. It reduces cold-start JIT cost without requiring 
 
 ## Native AOT
 
-Native AOT compiles the entire application ahead of time to a platform-specific native executable. The runtime is largely eliminated from the startup path — there is no JIT, and the executable loads and begins execution directly.
+Native AOT compiles the application ahead of time to a platform-specific native executable. The output still contains the runtime support needed for managed semantics, such as GC and exception handling, but it does not include the JIT-based execution pipeline. Startup avoids runtime IL compilation and begins executing native code directly.
 
 ```bash
 dotnet publish -c Release -p:PublishAot=true
@@ -142,10 +142,10 @@ The second pattern is not incorrect, but it shifts design toward runtime discove
 
 Native AOT in .NET 9 has specific constraints beyond the general reflection limitation:
 
-- **No `Assembly.Load`** — assemblies cannot be loaded dynamically from files or byte arrays. All code must be known at publish time.
+- **No dynamic assembly loading** — APIs such as `Assembly.LoadFile` / `Assembly.LoadFrom` cannot load new code after publish. All executable code must be known at publish time.
 - **No `System.Reflection.Emit`** — `DynamicMethod`, `MethodBuilder`, `TypeBuilder`, and expression-tree compilation to delegates all depend on runtime IL generation. `Expression<T>.Compile()` falls back to interpretation mode, which is significantly slower than JIT-compiled delegates.
 - **Limited `MakeGenericType`/`MakeGenericMethod`** — generic instantiation works for type parameters that the static analysis can trace. A `Dictionary<string, T>` instantiated for a type `T` resolved at runtime via `Type.GetType` may fail because the AOT compiler did not pre-generate that instantiation.
-- **`Assembly.Location` returns null** — assemblies no longer map to individual files in a native executable. The empty-string behavior applies only to single-file publish; NativeAOT returns `null` because the logical assembly has no on-disk file path.
+- **Assembly file paths are unreliable** — assemblies no longer necessarily map to individual files. In single-file deployments, bundled assemblies report an empty string from `Assembly.Location`; Native AOT has similar pressure against file-location assumptions. Use `AppContext.BaseDirectory` for deployed content instead of deriving paths from assemblies.
 
 The Native AOT publish output includes trim warnings that identify code patterns the compiler cannot prove are safe. Running with `<PublishAot>true</PublishAot>` and `<TrimmerSingleWarn>false</TrimmerSingleWarn>` produces per-location warnings:
 

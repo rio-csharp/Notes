@@ -145,43 +145,15 @@ Do not bind the JSON model before verifying the signature if the provider signs 
 
 ## Signature Verification
 
-Always verify provider signature before trusting payload.
+Always verify the provider signature before trusting the payload. The general HMAC pattern is covered in the webhook design chapter; the payment-specific concerns are stricter:
 
-```csharp
-public sealed class PaymentSignatureVerifier
-{
-    public bool Verify(
-        string payload,
-        string timestamp,
-        string signature,
-        string secret)
-    {
-        if (!DateTimeOffset.TryParse(timestamp, out var sentAt))
-        {
-            return false;
-        }
+- use the provider's exact signing string, header names, timestamp tolerance, and encoding rules;
+- compare signatures with constant-time comparison;
+- reject timestamps outside the replay window;
+- support secret rotation when the payment provider exposes multiple active signing secrets;
+- log verification failures without logging the raw secret, full token, or unnecessary card/payment data.
 
-        var age = DateTimeOffset.UtcNow - sentAt;
-
-        if (age.Duration() > TimeSpan.FromMinutes(5))
-        {
-            return false;
-        }
-
-        var signedPayload = $"{timestamp}.{payload}";
-
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-        var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(signedPayload));
-        var expected = Convert.ToHexString(hash).ToLowerInvariant();
-
-        return CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(expected),
-            Encoding.UTF8.GetBytes(signature.ToLowerInvariant()));
-    }
-}
-```
-
-Timestamp validation reduces replay attack risk.
+Do not normalize, deserialize, or reserialize the body before verification unless the provider explicitly signs the normalized representation.
 
 ## Webhook Event Table
 

@@ -345,37 +345,7 @@ Prefer:
 
 Every distributed request should carry a correlation ID.
 
-```csharp
-public sealed class CorrelationIdMiddleware
-{
-    private const string HeaderName = "X-Correlation-Id";
-    private readonly RequestDelegate _next;
-
-    public CorrelationIdMiddleware(RequestDelegate next)
-    {
-        _next = next;
-    }
-
-    public async Task InvokeAsync(HttpContext context)
-    {
-        var correlationId = context.Request.Headers.TryGetValue(HeaderName, out var value)
-            ? value.ToString()
-            : Guid.NewGuid().ToString("N");
-
-        context.Response.Headers[HeaderName] = correlationId;
-
-        using (context.RequestServices
-            .GetRequiredService<ILogger<CorrelationIdMiddleware>>()
-            .BeginScope(new Dictionary<string, object>
-            {
-                ["CorrelationId"] = correlationId
-            }))
-        {
-            await _next(context);
-        }
-    }
-}
-```
+At the application edge, middleware usually reads an incoming `X-Correlation-Id` header or creates one, writes it back to the response, and places it into the logging scope. The observability chapter shows the full middleware implementation; the distributed-systems concern is propagation across every hop.
 
 Also forward it in outgoing calls:
 

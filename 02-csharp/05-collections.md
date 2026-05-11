@@ -214,7 +214,7 @@ return matching value
 
 This explains several practical rules. Good hash distribution matters. Equality and hash code must agree. Collisions are normal and handled by the data structure, but pathological collision patterns can damage performance.
 
-The .NET runtime mitigates hash-collision denial-of-service attacks by randomizing hash codes per process (`HashRandomization`), which prevents attackers from predicting bucket assignments. In .NET 8, `Dictionary<TKey, TValue>` also supports alternate-key lookup via `IAlternateEqualityComparer<TKey, TAlternate>`, which enables key-based operations using a different type without allocating a full key instance — useful when the natural lookup value is a substring, a span, or a composite fragment rather than the full key object.
+Modern .NET mitigates common hash-collision denial-of-service attacks most notably through randomized string hashing and resilient comparer behavior in hash-based collections. The important design rule remains broader than strings: hash codes are implementation details, not stable identifiers, and should not be persisted or used across processes. In .NET 9, `Dictionary<TKey, TValue>` also supports alternate-key lookup via comparers that implement `IAlternateEqualityComparer<TAlternate, TKey>`, enabling lookups with a different key shape without allocating a full key instance — useful when the natural lookup value is a substring, a span, or a composite fragment rather than the full key object.
 
 ## Equality, Hash Codes, And Stable Keys
 

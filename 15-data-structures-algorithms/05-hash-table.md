@@ -43,7 +43,7 @@ When a collision occurs (two keys hash to the same bucket), new entries are link
 
 For small bucket chains, a linear scan is fast. If a bucket accumulates many entries due to poor hash distribution, the chain length grows and performance degrades toward `O(n)`.
 
-Starting with .NET 7, the internal implementation was changed from separate chaining to **open addressing with linear probing**. Instead of maintaining a separate bucket array with linked collision chains, entries now probe forward through a flat entries array to find an open slot. This change improves cache locality (contiguous memory access rather than pointer chasing) and reduces overall memory overhead. The public API surface is unchanged; code using `Dictionary<TKey, TValue>` requires no modification but benefits from better performance.
+The exact implementation is runtime-specific and can change, so application code should depend on the public contract rather than internal fields. The important mental model remains the same: hash distribution and equality semantics determine whether lookups stay near `O(1)` or degrade under heavy collision.
 
 ### Resizing
 

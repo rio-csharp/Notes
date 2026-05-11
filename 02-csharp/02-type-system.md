@@ -112,14 +112,14 @@ object boxed = number;     // boxing
 int unboxed = (int)boxed;  // unboxing
 ```
 
-Boxing allocates a heap object whose layout consists of three regions: a sync block (used for locking and GC bookkeeping), a method table pointer (identifying the type at runtime), and the raw bytes of the value itself. The value is copied from its current location into that heap allocation, and the resulting reference points to the managed heap like any other reference type.
+Boxing allocates a heap object with the normal object header and type information plus storage for the copied value. The exact layout is runtime-specific, but the important behavior is stable: the value is copied from its current location into a managed heap allocation, and the resulting reference points to that boxed object like any other reference type.
 
 ```text
 int number = 42
   -> value stored as int
 
 object boxed = number
-  -> new heap object containing [sync block | method table ptr | int 42]
+  -> new heap object containing object header/type info + int 42
   -> boxed reference points to heap object
 ```
 
@@ -142,7 +142,7 @@ When boxing occurs inside a hot loop, the cumulative allocation cost becomes mea
 // | ArrayListAdd   | 11.8 ns   |      32 B  |
 ```
 
-Each boxed `int` consumes 24 bytes of heap space on a 64-bit runtime (16 bytes of object header and 8 bytes for the payload, aligned), and each allocation contributes to gen-0 collection frequency. In a loop processing millions of elements, the difference between zero allocations and millions of short-lived heap objects is often the difference between stable throughput and visible GC pauses.
+Each boxed `int` typically consumes a few dozen bytes of heap space on a 64-bit runtime once object header, payload, and alignment are included, and each allocation contributes to gen-0 collection frequency. In a loop processing millions of elements, the difference between zero allocations and millions of short-lived heap objects is often the difference between stable throughput and visible GC pauses.
 
 Generic APIs avoid this cost entirely by preserving the concrete value type at every step:
 
@@ -292,13 +292,13 @@ Console.WriteLine(updated.Name);  // "Bob"
 
 The `with` expression calls a compiler-generated copy constructor that copies every field, then applies the property assignments listed in the initializer. For positional records, this means the positional properties; for nominal records, it includes any property with `init` or `set` access. The copy is shallow — reference-type fields are copied by reference, not cloned.
 
-The mechanism differs between `record class` and `record struct`. For `record class`, the copy is a new heap allocation. For `record struct`, the copy is a value copy on the stack (or inlined into the enclosing object), and the `with` expression is simply a convenient syntax over constructing a new value:
+The mechanism differs between `record class` and `record struct`. For `record class`, the copy is a new heap allocation. For `record struct`, the copy is a value copy wherever the struct is stored — local, field, array element, or async state-machine field — and the `with` expression is simply a convenient syntax over constructing a new value:
 
 ```csharp
 public readonly record struct Money(decimal Amount, string Currency);
 
 var price = new Money(10m, "USD");
-var updated = price with { Amount = 15m }; // new struct value, no heap allocation
+var updated = price with { Amount = 15m }; // new Money value, no record-object allocation
 ```
 
 `with` is the standard pattern for producing updated versions of immutable data. In event-sourced systems, it is the mechanism that applies an event to a projection: `projection with { Status = OrderStatus.Submitted }`. In API layers, it maps an update DTO to a domain object without mutating the original.
@@ -408,19 +408,31 @@ public sealed class CreateOrderRequest
 }
 ```
 
-`System.Text.Json` deserializes JSON into this type without consulting nullable annotations. If the incoming JSON omits `CustomerName`, the deserializer assigns `null` to a property the type declares as non-nullable. No exception is thrown during deserialization — the null propagates to later code that accesses `CustomerName`, where a `NullReferenceException` appears far from the original input boundary:
+`System.Text.Json` deserializes JSON at runtime, so two separate questions must be modeled explicitly: whether a property must be present, and whether a present property may contain `null`. If the incoming JSON omits a non-nullable property that is not marked required, the object can still be created with a `null` value:
 
 ```csharp
-var request = JsonSerializer.Deserialize<CreateOrderRequest>("""{"Discount":5}""");
+public sealed class LegacyCreateOrderRequest
+{
+    public string CustomerName { get; init; }
+    public decimal Discount { get; init; }
+}
+
+var request = JsonSerializer.Deserialize<LegacyCreateOrderRequest>("""{"Discount":5}""");
 Console.WriteLine(request!.CustomerName.Length); // NullReferenceException
 ```
 
-The `required` keyword prevents callers from constructing the type in C# without supplying `CustomerName`, but `required` is also a compile-time constraint. The deserializer bypasses it unless the JSON source generator or a custom converter enforces the requirement.
+The `required` keyword prevents callers from constructing the type in C# without supplying `CustomerName`, and `System.Text.Json` also treats `required` properties as required during deserialization. If the JSON payload omits a required property, deserialization fails with `JsonException`. `[JsonRequired]` expresses the same JSON requirement without making the property required for ordinary C# object initializers, which is useful for older language versions, non-C# consumers, or source-generation scenarios where `required` is awkward.
 
-The `[JsonRequired]` attribute from `System.Text.Json` changes deserialization behavior: the deserializer throws a `JsonException` when the annotated property is missing from the JSON payload. This provides a runtime safety net that aligns with the intent expressed by the non-nullable annotation:
+Requiredness and nullability are orthogonal. A property can be required and nullable (`required string? Notes` means the JSON property must be present but may be `null`), or optional and non-nullable (`string Name` means the property may be absent unless another rule marks it required). Starting in .NET 9, `JsonSerializerOptions.RespectNullableAnnotations` can enforce non-nullable reference annotations for explicit `null` values on supported properties, fields, and constructor parameters:
 
 ```csharp
+using System.Text.Json;
 using System.Text.Json.Serialization;
+
+var options = new JsonSerializerOptions
+{
+    RespectNullableAnnotations = true
+};
 
 public sealed class CreateOrderRequest
 {
@@ -431,14 +443,14 @@ public sealed class CreateOrderRequest
 }
 ```
 
-The deserialization now fails at the boundary:
+The deserialization now fails at the boundary when `CustomerName` is missing because it is required, and can also fail when `CustomerName` is explicitly `null` if nullable annotations are respected:
 
 ```csharp
 // JsonException: JSON property 'CustomerName' is required.
 var request = JsonSerializer.Deserialize<CreateOrderRequest>("""{"Discount":5}""");
 ```
 
-The broader principle is that nullable reference types describe a static contract, but data from external systems — JSON payloads, database rows, message queues — enters the process at runtime and must be validated at that boundary. Treating deserialized objects as trusted without validation is the most common way nullable reference types fail to deliver their intended benefit.
+The broader principle is that nullable reference types describe a static contract, while data from external systems — JSON payloads, database rows, message queues — enters the process at runtime. Use `required` / `[JsonRequired]` for presence, `RespectNullableAnnotations` or validation for explicit nulls, and domain validation for business rules. Treating deserialized objects as trusted without boundary validation is the most common way nullable reference types fail to deliver their intended benefit.
 
 ### Null-Coalescing And Null-Conditional Operators
 
@@ -686,7 +698,7 @@ Collections such as `Dictionary` and `HashSet` depend on equality and hash codes
 
 Equality design has real downstream consequences. It affects hash-based collections, caching, deduplication, set operations, testing semantics, and sometimes persistence behavior. Equality should be treated as part of the type's meaning, not as a mechanical override required by tooling.
 
-Records receive structural equality through compiler-generated overrides of `Equals(object)`, `GetHashCode`, `==`, `!=`, and `IEquatable<T>.Equals`. Each generated method compares every instance field or positional property for equality. The compiler also overrides `EqualityContract` to ensure that two records of different types (even derived ones) are never equal. This generation is what makes `record class` and `record struct` behave differently from plain `class` and `struct` by default.
+Records receive structural equality through compiler-generated overrides of `Equals(object)`, `GetHashCode`, `==`, `!=`, and `IEquatable<T>.Equals`. Each generated method compares the record's equality-participating members. For `record class`, the compiler also uses an `EqualityContract` to ensure that two record objects of different runtime record types are not equal even when their visible data matches. `record struct` does not need that inheritance guard because structs cannot inherit from other structs. This generation is what makes `record class` and `record struct` behave differently from plain `class` and `struct` by default.
 
 The `EqualityComparer<T>.Default` property reflects this distinction:
 
@@ -763,7 +775,7 @@ UserDto? dto = default;          // null (UserDto is a reference type)
 Money money = default;           // Amount=0, Currency=null
 ```
 
-The interaction with nullable reference types is subtle. `default(string)` produces `null`, but the compiler does not warn when assigning it to a non-nullable `string` variable if the variable is uninitialized at the point of assignment — the flow analysis tracks definite assignment, not value correctness. Explicit use of `default!` (null-forgiving) suppresses warnings for reference types:
+The interaction with nullable reference types is subtle. `default(string)` produces `null`, and assigning it directly to a non-nullable `string` normally produces a nullable warning. Explicit use of `default!` (null-forgiving) suppresses that warning for reference types:
 
 ```csharp
 string name = default!; // Compiler is silenced, but name is null at runtime.

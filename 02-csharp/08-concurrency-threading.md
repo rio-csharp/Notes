@@ -176,19 +176,19 @@ private volatile bool _shutdownRequested;
 
 public void RequestShutdown()
 {
-    _shutdownRequested = true; // write is immediately visible to all processors
+    _shutdownRequested = true; // volatile write
 }
 
 public void ProcessLoop()
 {
-    while (!_shutdownRequested) // read always goes to memory — not cached in register
+    while (!_shutdownRequested) // volatile read; not hoisted out of the loop
     {
         // work
     }
 }
 ```
 
-Without `volatile`, the JIT might hoist `_shutdownRequested` into a register once and never check memory again, causing the loop to run forever. With `volatile`, every read goes to main memory and every write is immediately published.
+Without `volatile`, the JIT might hoist `_shutdownRequested` into a register once and never check the field again, causing the loop to run forever. With `volatile`, the compiler and runtime preserve volatile read/write ordering guarantees for that field. This does **not** mean every read goes to "main memory," and it does **not** guarantee that a write is immediately visible to every processor at the same instant.
 
 `volatile` is a narrow tool. It does not make `_count++` atomic (read-modify-write is still three operations), it does not prevent all reorderings (only around the volatile field itself), and it adds a small per-access cost. For most synchronization needs, `lock` or `Interlocked` are safer, clearer choices. `volatile` is most appropriate for simple flags — shutdown signals, status indicators — where a single write communicates a signal to readers and atomicity of compound operations is not required.
 
@@ -209,7 +209,7 @@ public void Increment()
 
 The strength of `lock` is that it protects a critical section rather than a single variable. That makes it useful when several related mutations must happen together. Its danger is that poorly scoped lock regions can become bottlenecks or deadlock hazards.
 
-**`lock` is `Monitor.Enter` / `Monitor.Exit`.** The C# `lock` statement compiles to a `try/finally` block wrapping `Monitor.Enter` and `Monitor.Exit`:
+**`lock` on a reference object is `Monitor.Enter` / `Monitor.Exit`.** When the lock expression is an ordinary reference type such as `object`, the C# `lock` statement compiles to a `try/finally` block wrapping `Monitor.Enter` and `Monitor.Exit`:
 
 ```csharp
 // lock (_gate) { body } compiles approximately to:
@@ -227,7 +227,7 @@ finally
 
 The `lockTaken` flag ensures `Monitor.Exit` is called only when the lock was successfully acquired, preventing corrupted state if `Monitor.Enter` throws. This `try/finally` structure means exceptions that escape the critical section still release the lock — which is usually correct but can leave protected state partially mutated.
 
-**`System.Threading.Lock` (.NET 9).** .NET 9 introduced the `Lock` class as the recommended replacement for locking on `object`. `Lock` provides clearer intent (the type name specifies its purpose) and enables future JIT optimizations specific to lock operations:
+**`System.Threading.Lock` (.NET 9 / C# 13).** .NET 9 introduced the `Lock` class as the recommended replacement for locking on `object`. `Lock` provides clearer intent (the type name specifies its purpose) and uses specialized compiler support when the `lock` expression is statically known to be `System.Threading.Lock`:
 
 ```csharp
 private readonly Lock _gate = new();
@@ -241,9 +241,9 @@ public void Increment()
 }
 ```
 
-The `lock` keyword works with both `object` and `Lock` instances. `Lock` is preferred for new code; `object` remains valid for existing codebases and is not deprecated. The behavioral semantics are identical — `lock` on a `Lock` instance compiles to the same `Monitor.Enter`/`Monitor.Exit` try/finally pattern.
+The `lock` keyword works with both `object` and `Lock` instances. `Lock` is preferred for new code; `object` remains valid for existing codebases and is not deprecated. The generated code is different: when the compiler knows the expression is exactly `System.Threading.Lock`, `lock (_gate)` is equivalent to `using (_gate.EnterScope()) { ... }`. If the same instance is first converted to `object`, the compiler falls back to monitor-based locking, which is why keeping the field typed as `Lock` matters.
 
-**`lock` cannot span `await`.** `Monitor` tracks thread ownership. When a thread calls `Monitor.Enter`, it owns the lock; only that same thread can call `Monitor.Exit`. If an `await` occurs inside a `lock` block, the continuation after the `await` may execute on a different thread. When that new thread attempts to exit the monitor (via the `finally` block), `Monitor.Exit` throws a `SynchronizationLockException` because the calling thread does not own the lock. The compiler prevents this situation for the simple `lock` keyword — it produces error CS1996 ("Cannot await in the body of a lock statement") — but code using `Monitor.Enter` / `Monitor.Exit` directly can fall into this trap at runtime.
+**`lock` cannot span `await`.** Monitor-based locking tracks thread ownership, and `System.Threading.Lock` scopes are also synchronous critical sections. If an `await` occurs inside a critical section, the continuation after the `await` may execute later on a different thread while the protected state remains logically locked. The compiler prevents this situation for the `lock` keyword — it produces an error when `await` appears in the body of a `lock` statement. Code using lower-level primitives directly can still create equivalent hazards at runtime.
 
 This thread-affinity constraint is the reason `SemaphoreSlim` (which is not thread-affine) replaces `lock` in asynchronous code paths.
 
@@ -489,7 +489,7 @@ public void PushUndo(int operationId)
 }
 ```
 
-Each thread sees its own stack; no lock is needed. `ThreadLocal<T>` is most useful for pooling per-thread resources — `StringBuilder` instances, scratch buffers, or accumulated state that is later aggregated — and for scenarios where the same logical field must be distinct across threads.
+Each thread sees its own `ThreadLocal<T>` value; no lock is needed for access to that per-thread value. `ThreadLocal<T>` is most useful for pooling per-thread resources — `StringBuilder` instances, scratch buffers, or accumulated state that is later aggregated — and for scenarios where the same logical field must be distinct across threads.
 
 The `ThreadStaticAttribute` provides similar isolation for static fields but does not support initialization — each thread sees `default(T)` until explicitly set. `ThreadLocal<T>` wraps this with initialization and value disposal.
 

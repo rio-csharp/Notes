@@ -406,25 +406,19 @@ _ = await _dbContext.Orders
 
 But `DateTime.DayOfWeek` and many formatting methods do not translate. The safe approach is to verify with `ToQueryString()` or to perform date arithmetic using translatable methods.
 
-**`GroupBy` with complex keys.** Simple key selectors translate; anonymous types and nested projections may trigger client evaluation:
+**`GroupBy` with complex keys.** Translation support depends on both the provider and the final query shape. Simple grouping with aggregates is commonly translatable; grouping that returns nested group objects or depends on provider-specific date/member translations may fail:
 
 ```csharp
-// Likely translates: simple property key
-_ = orders.GroupBy(o => o.Status);
+// Commonly translates when followed by an aggregate projection
+_ = orders
+    .GroupBy(o => o.Status)
+    .Select(g => new { Status = g.Key, Count = g.Count() });
 
-// May trigger client evaluation: composite key with projection
+// May fail depending on provider support for CreatedAt.Month and grouping shape
 _ = orders.GroupBy(o => new { o.CustomerId, Month = o.CreatedAt.Month });
 ```
 
-**Detecting client evaluation.** EF Core can be configured to throw when any part of a query evaluates on the client:
-
-```csharp
-// In DbContext configuration:
-optionsBuilder.ConfigureWarnings(w =>
-    w.Throw(RelationalEventId.QueryPossibleUnintendedClientEvaluationWarning));
-```
-
-With this warning promoted to an error, any query that falls back to client evaluation — even partially — produces an exception during development rather than silently degrading at runtime. This makes translation boundaries explicit during testing rather than leaving them to be discovered in production.
+**Detecting client evaluation.** In modern EF Core, untranslatable expressions outside the top-level projection usually throw at runtime rather than silently falling back to client evaluation. Top-level projections can still contain client-side logic after the provider has fetched the required data. The practical checks are to inspect `ToQueryString()`, keep filtering and joining provider-translatable, and run integration tests against the real provider rather than relying only on the compiler.
 
 ## Multiple Enumeration
 

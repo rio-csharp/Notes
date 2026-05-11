@@ -138,7 +138,7 @@ The performance gap is not theoretical. In a tight loop reading a property 1,000
 | `PropertyInfo.GetValue` (uncached) | ~1× | Requires annotation |
 | `PropertyInfo.GetValue` (cached) | ~5× | Requires annotation |
 | `Delegate.CreateDelegate` | ~50× | Requires annotation |
-| Source-generated accessor | ~100× | Fully compatible |
+| Source-generated accessor | ~100× | Best compatibility when generated code avoids reflection-only patterns |
 
 For the hottest paths, cached delegates or source-generated code outperform `PropertyInfo.GetValue` entirely. This trade-off appears in serializers, object mappers, validation frameworks, and plugin systems. Reflection provides flexibility at startup or configuration time; cached delegates and generated code become necessary when the same operation is repeated under load.
 
@@ -200,6 +200,6 @@ dotnet publish -c Release -p:PublishTrimmed=true
 # Run integration tests against the published output
 ```
 
-After migration, the serializer reads pre-generated metadata. Serialization of declared types no longer triggers reflection, trim warnings for those types disappear, and the application becomes one step closer to NativeAOT compatibility. The migration is incremental: types can be added to the context one at a time while the rest of the application continues using reflection-based serialization. The runtime cost is zero for types in the context; types outside it continue to pay the reflection cost.
+After migration, the serializer reads pre-generated metadata. Serialization of declared types no longer needs runtime type-shape discovery, trim warnings for those types disappear, and the application becomes one step closer to NativeAOT compatibility. The migration is incremental: types can be added to the context one at a time while the rest of the application continues using reflection-based serialization. Types in the context avoid the reflection startup cost; types outside it continue to pay that cost.
 
 Reflection remains appropriate for startup work, configuration, framework glue, diagnostics, tests, and infrequent operations. In hot paths, repeated reflection should be cached, converted to delegates, or replaced with generated code. Reflection provides flexibility; explicit or generated code provides predictability and performance. The right choice depends on whether dynamism or throughput is the primary concern.

@@ -407,9 +407,10 @@ This is one of the places where Minimal APIs develop their own local structure r
 
 ### Built-in Validation For Minimal APIs (.NET 10)
 
-Starting in .NET 10, Minimal APIs include built-in validation support via `AddValidation()`. Rather than relying on `[ApiController]`'s automatic model-state validation (which is controller-only) or writing manual validation in every handler, this registers a validation filter that applies across the endpoint surface:
+Starting in .NET 10, Minimal APIs include built-in validation support via `AddValidation()`. Rather than relying on `[ApiController]`'s automatic model-state validation (which is controller-only) or writing manual validation in every handler, this registers validation services and lets ASP.NET Core add endpoint validation filters for supported Minimal API parameters:
 
 ```csharp
+// In .NET 10, the unified validation APIs live in Microsoft.Extensions.Validation.
 builder.Services.AddValidation();
 
 var app = builder.Build();
@@ -424,7 +425,7 @@ app.MapPost("/orders", (CreateOrderRequest request) =>
 app.Run();
 ```
 
-The `AddValidation()` call discovers validators registered in the DI container (FluentValidation, data annotations, custom `IValidator<T>` implementations) and wires them into an endpoint filter. Handlers receive only pre-validated input. For projects that do not use controllers, this brings validation parity without adopting the full MVC pipeline.
+The built-in Minimal API validation path is based on `System.ComponentModel.DataAnnotations` attributes and `IValidatableObject`. ASP.NET Core discovers types used by Minimal API handlers and adds endpoint filters that validate query, header, and request-body data before the handler runs. Handlers receive only pre-validated input when validation succeeds. Validation can be disabled for specific endpoints with `DisableValidation()`. Third-party validators such as FluentValidation can still be integrated, but they are not what `AddValidation()` automatically discovers by default.
 
 ## Returning DTOs Instead Of Persistence Models
 

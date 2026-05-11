@@ -141,7 +141,7 @@ This three-tier system means the same GC, threading, or diagnostics behavior can
 
 Build-time and run-time responsibilities are distinct, and conflating them leads to misdiagnosed failures.
 
-**Build time** involves the SDK: restoring packages, compiling C# to IL, and producing assemblies. No CLR execution occurs at this stage.
+**Build time** involves the SDK: restoring packages, compiling C# to IL, and producing assemblies. The application itself is not started, even though the SDK, MSBuild tasks, analyzers, and source generators may execute managed code as part of the build process.
 
 ```text
 dotnet build
@@ -166,7 +166,7 @@ dotnet MyApp.dll
 
 The .NET platform has gone through three major eras, and the naming still causes confusion.
 
-**.NET Framework** (2002–2019) is the original Windows-only implementation. It shipped as part of Windows itself (installed in the Global Assembly Cache) and was tightly coupled to the operating system. Its APIs — including ASP.NET Web Forms, WCF, and Windows Forms — are Windows-specific by design. Microsoft ceased active feature development on .NET Framework after version 4.8.1, though it remains supported on Windows for existing enterprise applications.
+**.NET Framework** (2002–2019) is the original Windows-only implementation. It is installed machine-wide, uses the Global Assembly Cache for shared strong-named assemblies, and is tightly coupled to Windows. Its application models include ASP.NET Web Forms, WCF, Windows Forms, and WPF. Microsoft ceased active feature development on .NET Framework after version 4.8.1, though it remains supported on Windows for existing enterprise applications.
 
 **.NET Core** (2016–2020) was a ground-up rewrite designed for cross-platform execution, higher performance, and modular deployment. It introduced side-by-side runtime installation (no GAC dependency), a redesigned ASP.NET stack (ASP.NET Core), and a significantly faster execution pipeline. .NET Core 3.1 was the last release under the "Core" branding.
 
@@ -185,7 +185,7 @@ The engineering differences between these generations are substantial:
 
 Modern .NET is the target for all new development. .NET Framework survives in enterprises with large Windows-only codebases that have not been migrated. The rest of this book assumes modern .NET unless .NET Framework is explicitly discussed.
 
-**.NET Standard** was an intermediate compatibility layer that defined a shared API surface across .NET implementations. A library targeting .NET Standard 2.0 could run on both .NET Framework 4.6.1+ and modern .NET. With the unification under .NET 5 and later, .NET Standard has become less relevant for new work — modern .NET itself is the API standard. .NET Standard 2.1 is still useful when a library must target both modern .NET and .NET Framework, but for libraries that only target modern .NET, targeting `net8.0` (or later) directly is the recommended approach.
+**.NET Standard** was an intermediate compatibility layer that defined a shared API surface across .NET implementations. A library targeting .NET Standard 2.0 can run on both .NET Framework 4.6.1+ and modern .NET. .NET Standard 2.1 is supported by .NET Core 3.0+, modern .NET, and Mono, but **not** by .NET Framework. With the unification under .NET 5 and later, .NET Standard has become less relevant for new work: use `netstandard2.0` only when a library must still support .NET Framework, and target `net8.0` or later directly when all consumers are on modern .NET.
 
 ## Target Framework
 
@@ -251,7 +251,7 @@ The project file can capture these as publishing defaults:
 </PropertyGroup>
 ```
 
-At startup, single-file applications extract bundled dependencies to a temporary directory. This extraction affects cold-start latency and can reduce visibility for diagnostic tools that expect individual assembly files on disk.
+In .NET 5 and later, bundled managed assemblies are loaded from memory rather than extracted as individual files. Native libraries and compatibility modes can still require extraction, controlled by settings such as `IncludeNativeLibrariesForSelfExtract` and `IncludeAllContentForSelfExtract`. The practical caveat is that APIs depending on assembly file paths change behavior: for bundled assemblies, `Assembly.Location` returns an empty string, so code should use `AppContext.BaseDirectory` for files deployed next to the executable.
 
 Self-contained and single-file publishing require a runtime identifier (`win-x64`, `linux-x64`, `osx-arm64`) because the output includes platform-specific runtime binaries. This is a common point of confusion: framework-dependent publish output (without single-file) is platform-neutral IL assemblies, while self-contained and single-file output is inherently platform-specific.
 
@@ -285,11 +285,11 @@ Beyond file size, deployment mode affects patching strategy, diagnostics, and st
 |---|---|---|---|
 | Framework-dependent | Machine-installed shared runtime | Small artifacts, centralized patching | Runtime must be present and compatible |
 | Self-contained | Bundled with application | Predictable runtime, no machine prerequisites | Larger artifacts, manual re-publish for patches |
-| Single-file | Bundled as one executable | Simple distribution | Extraction overhead at startup, less transparent diagnostics |
+| Single-file | Bundled as one executable | Simple distribution | Platform-specific output, assembly path APIs behave differently, possible native-file extraction |
 | Native AOT | Compiled to native code | Fastest startup, lowest memory, no runtime dependency | Limited reflection, longer builds, platform-specific |
 | ReadyToRun | Pre-compiled IL + native code | Faster startup, full JIT compatibility | Larger assemblies, longer builds |
 
-Framework-dependent applications benefit from centrally patched runtimes — a security update to the shared runtime protects all applications without re-publishing. Self-contained applications must be republished to update the bundled runtime. Single-file applications extract to a temporary directory at startup, which affects cold-start performance and diagnostic tooling visibility.
+Framework-dependent applications benefit from centrally patched runtimes — a security update to the shared runtime protects all applications without re-publishing. Self-contained applications must be republished to update the bundled runtime. Single-file applications simplify distribution, but they change file-location assumptions and may extract native dependencies depending on publish settings.
 
 These trade-offs mean deployment mode is both an engineering decision and an operational one. Consider three representative scenarios:
 

@@ -176,7 +176,7 @@ public static void ZeroMemory<T>(Span<T> buffer) where T : unmanaged
 }
 ```
 
-`Span<T>.Clear()` is itself constrained to `unmanaged` types because it operates on raw memory. The constraint propagates up to any generic API that delegates to memory-level operations.
+`Span<T>.Clear()` itself works for any `T`: it writes the default value for each element, including `null` for reference fields. The `unmanaged` constraint becomes necessary when the algorithm treats values as raw bytes — for example with `sizeof(T)`, `stackalloc T[...]`, unmanaged interop, or `MemoryMarshal.AsBytes`. The constraint should therefore appear only when the API truly depends on unmanaged layout, not merely because the method touches a span.
 
 ### The `INumber<T>` Constraint (.NET 7+)
 
@@ -552,7 +552,7 @@ The `default` keyword also works with the `where T : struct` constraint, where i
 
 ## Static Abstract Interface Members And Generic Factories
 
-Static abstract interface members, introduced in C# 11 and .NET 7, allow interfaces to declare static methods, operators, and properties that implementing types must provide. The runtime dispatches these through constrained calls — the JIT emits a direct call to the concrete type's static method rather than a virtual dispatch through an interface slot.
+Static abstract interface members, introduced in C# 11 and .NET 7, allow interfaces to declare static methods, operators, and properties that implementing types must provide. The compiler can then type-check static calls such as `T.Zero`, `T.Parse(...)`, or `left + right` against the generic constraint instead of relying on `dynamic`, reflection, or hand-written overloads.
 
 ### Generic Math And Beyond
 
@@ -596,8 +596,8 @@ public static T CreateDefault<T>() where T : IFactory<T>
 }
 ```
 
-`T.Create()` resolves at the call site to the concrete type's static method. The JIT emits a direct call — there is no virtual dispatch, no reflection, no `Activator.CreateInstance`. The constraint `IFactory<T>` guarantees at compile time that `T` has a `Create()` method, and the runtime resolves it through the constrained call mechanism that `callvirt` with a constrained prefix provides.
+`T.Create()` resolves through the static abstract interface member contract. The important point for API design is that there is no reflection and no `Activator.CreateInstance`; the constraint `IFactory<T>` guarantees at compile time that `T` has a suitable `Create()` method.
 
 This pattern replaces patterns that previously required `new()` constraints (which cannot accept parameters) or reflection-based factory registrations. The static abstract member carries the implementation contract without requiring a runtime instance of the interface.
 
-Most application code consumes static abstract members indirectly through libraries — generic math in `System.Numerics`, JSON serialization contracts in `System.Text.Json`, and parsing in `IParsable<T>`. The pattern belongs in a professional understanding of modern C# because it extends generic expressiveness without abandoning compile-time verification.
+Most application code consumes static abstract members indirectly through libraries — generic math in `System.Numerics`, parsing in `IParsable<T>`, and factory-style abstractions in infrastructure code. The pattern belongs in a professional understanding of modern C# because it extends generic expressiveness without abandoning compile-time verification.

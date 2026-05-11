@@ -97,39 +97,13 @@ Do not store raw secrets in Git.
 
 ## Health Checks
 
-ASP.NET Core:
+Kubernetes probes answer different operational questions:
 
-```csharp
-builder.Services.AddHealthChecks()
-    .AddDbContextCheck<AppDbContext>();
+- **liveness**: should this container be restarted?
+- **readiness**: should this pod receive traffic?
+- **startup**: has this slow-starting container finished booting?
 
-app.MapHealthChecks("/health");
-```
-
-Kubernetes:
-
-```yaml
-livenessProbe:
-  httpGet:
-    path: /health
-    port: 8080
-  initialDelaySeconds: 10
-  periodSeconds: 30
-readinessProbe:
-  httpGet:
-    path: /health
-    port: 8080
-  initialDelaySeconds: 5
-  periodSeconds: 10
-```
-
-Liveness:
-
-- should the container be restarted?
-
-Readiness:
-
-- should the pod receive traffic?
+The important design rule is that liveness should stay shallow. Expensive dependency checks, such as database connectivity, usually belong in readiness so a temporary database incident removes pods from traffic without causing restart storms. A fuller ASP.NET Core probe split appears later in this chapter.
 
 ## Resource Requests And Limits
 

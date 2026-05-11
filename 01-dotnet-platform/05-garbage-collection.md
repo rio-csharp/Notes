@@ -8,14 +8,14 @@ This chapter establishes the runtime model that performance and troubleshooting 
 
 The GC eliminates manual memory management and the class of bugs that come with it:
 
-- **No manual release** — developers don't write `free` or `delete`; the GC prevents memory leaks from forgotten deallocations.
+- **No manual release for managed objects** — developers don't write `free` or `delete`; the GC removes the class of bugs caused by forgotten deallocations. It does not prevent retention bugs where reachable objects are kept longer than intended.
 - **Fast allocation** — allocating from the managed heap is adding a value to a pointer, nearly as fast as stack allocation.
-- **Automatic reclamation** — objects no longer in use are reclaimed, their memory cleared, and the space made available for future allocations. Managed objects get clean memory by default; constructors need not initialize every field.
-- **Memory safety** — the GC guarantees an object cannot use memory belonging to another object (no use-after-free).
+- **Automatic reclamation** — objects no longer reachable become eligible for reclamation, and their space can be reused for future allocations. Managed objects get zero-initialized memory when allocated; constructors need not initialize every field.
+- **Memory safety** — in safe managed code, object references remain valid while objects are reachable and cannot be used after the GC reclaims them. `unsafe` code and native interop can still violate memory safety if used incorrectly.
 
 ## Virtual Memory Fundamentals
 
-The GC operates on virtual memory, not physical memory directly. Each process has its own virtual address space (2 GB user-mode on 32-bit by default). Virtual memory exists in three states:
+The GC operates on virtual memory, not physical memory directly. Each process has its own virtual address space. On 64-bit processes this address space is large enough that commit limits and memory pressure usually matter more than address-space exhaustion; on 32-bit processes, address-space fragmentation can still be a practical limit. Virtual memory is commonly described in three states:
 
 | State | Meaning |
 |-------|---------|
@@ -23,7 +23,7 @@ The GC operates on virtual memory, not physical memory directly. Each process ha
 | **Reserved** | Blocked for this process but not yet backed by physical storage. |
 | **Committed** | Assigned to physical storage (RAM or page file). |
 
-Virtual address space can fragment — a 2 GB allocation can fail even with 2 GB total free if no single contiguous block is large enough. The GC allocates and frees virtual memory via Windows `VirtualAlloc` / `VirtualFree`; the page file is used even when physical memory pressure is low.
+Virtual address space can fragment — a large allocation can fail even with enough total free address space if no single contiguous block is available. The GC reserves and commits memory through operating-system virtual-memory APIs (`VirtualAlloc` / `VirtualFree` on Windows, analogous APIs on Unix-like systems). Committed memory consumes OS commit budget, backed by RAM and, where configured, paging storage.
 
 ## Managed Heap And Reachability
 
@@ -55,16 +55,7 @@ The .NET GC is generational because most objects die young. Collecting only youn
 
 ### Ephemeral Generations and Segments
 
-Gen 0 and Gen 1 are called **ephemeral generations** and live in the **ephemeral segment**. When the GC acquires a new segment, it becomes the ephemeral segment; the old ephemeral segment becomes a Gen 2 segment. The size of the ephemeral segment varies by GC mode and bitness:
-
-| GC Mode | 32-bit | 64-bit |
-|---------|--------|--------|
-| Workstation GC | 16 MB | 256 MB |
-| Server GC (≤ 4 logical CPUs) | 64 MB | 4 GB |
-| Server GC (> 4 logical CPUs) | 32 MB | 2 GB |
-| Server GC (> 8 logical CPUs) | 16 MB | 1 GB |
-
-The amount of freed memory from an ephemeral GC is bounded by the ephemeral segment size.
+Gen 0 and Gen 1 are called **ephemeral generations** and live in the GC's young-object allocation area. The exact segment or region sizes are runtime implementation details and change with GC mode, processor count, DATAS, memory limits, and .NET version. The stable rule is conceptual: ephemeral collections focus on young objects, so their cost is normally much lower than a full Gen 2 collection.
 
 ### Survival and Promotions
 
@@ -148,9 +139,9 @@ A garbage collection proceeds through three phases (the official documentation u
 3. Compact phase — Reclaim space occupied by dead objects and compact survivors towards the older end of the segment.
 ```
 
-Before a GC starts, **all managed threads are suspended** except the thread that triggered the collection.
+During the blocking portions of a GC, managed threads are suspended at safe points so the collector can inspect and update object references consistently. Background GC reduces the length of these stop-the-world pauses for Gen 2 collections, but Gen 0/Gen 1 foreground collections and some full-collection phases still suspend managed execution.
 
-Compaction only occurs when a collection finds a significant number of unreachable objects. If all objects survive, compaction is skipped. For Gen 2 collections, survivors may be moved to an older segment. The LOH is normally not compacted (copying large objects is expensive), but can be compacted on demand via `GCSettings.LargeObjectHeapCompactionMode` or automatically when a hard memory limit is set (container limit, `GCHeapHardLimit`, or `GCHeapHardLimitPercent`).
+Compaction only occurs when the collector decides the benefit justifies moving survivors. If most objects survive, compaction may be skipped or limited. For Gen 2 collections, survivors remain in the oldest generation. The LOH is normally swept rather than compacted because copying large objects is expensive, but it can be compacted on demand via `GCSettings.LargeObjectHeapCompactionMode`. With `System.GC.ConserveMemory` / `DOTNET_GCConserveMemory`, the runtime may also compact the LOH automatically when fragmentation is high.
 
 ## SOH, LOH, And POH
 
@@ -203,7 +194,7 @@ The recommended pattern for LOH-heavy workloads is to **allocate a reusable pool
 
 **Workstation GC** is optimized for client applications and lower resource usage. It is the default for desktop and non-server workloads. Workstation GC uses a single heap and collects on the thread that triggered the collection (concurrent with other managed threads for Gen 2 background collections, but Gen 0 and Gen 1 collections are blocking). This mode minimizes memory footprint and thread count at the cost of lower throughput under sustained allocation.
 
-**Server GC** is optimized for throughput on multi-core machines. Server GC is the default for ASP.NET Core applications. In .NET 9 and later, Server GC uses the Dynamic Adaptation to Application Sizes (DATAS) strategy: it starts with a single heap and dynamically adds or removes heaps based on load, reducing memory usage in containerized environments. Before DATAS (and still configurable via `GCHeapCount`), Server GC creates one heap per logical processor, each with a dedicated GC thread, enabling parallel collection across all heaps. Server GC threads run at `THREAD_PRIORITY_HIGHEST`, and collections happen in parallel, reducing pause time for a given allocation rate compared to workstation mode.
+**Server GC** is optimized for throughput on multi-core machines and is the default for ASP.NET Core applications. Traditionally, Server GC creates multiple heaps and dedicated GC threads so collection work can run in parallel. In .NET 9 and later, Server GC enables Dynamic Adaptation to Application Sizes (DATAS) by default: the GC can start with fewer heaps and dynamically add or remove heaps based on load, reducing memory usage in bursty or containerized workloads. `GCHeapCount` and related settings still allow explicit tuning when a workload needs it. Server GC improves throughput under sustained allocation, but it can use more memory and threads than Workstation GC.
 
 Configuration typically lives in the project file:
 

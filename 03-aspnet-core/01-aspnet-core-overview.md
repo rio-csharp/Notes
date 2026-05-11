@@ -74,8 +74,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddOpenApi();
 builder.Services.AddScoped<IOrderService, OrderService>();
 
 var app = builder.Build();
@@ -87,6 +86,11 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHealthChecks("/health");
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
 
 app.Run();
 ```
@@ -117,7 +121,7 @@ This arrangement is common because edge infrastructure often handles TLS termina
 
 ## Endpoint Styles: Controllers And Minimal APIs
 
-ASP.NET Core supports two endpoint programming models: Minimal APIs and controllers. The official guidance as of .NET 10 is that Minimal APIs are the recommended approach for new projects, while controllers remain available for larger applications that benefit from MVC conventions, advanced model binding extensibility, or OData support. The two styles coexist in the same pipeline and can be mixed within a single application.
+ASP.NET Core supports two endpoint programming models: Minimal APIs and controllers. Current templates and documentation often favor Minimal APIs for new HTTP API projects, while controllers remain appropriate for applications that benefit from MVC conventions, advanced model binding extensibility, filters, or OData support. The two styles coexist in the same pipeline and can be mixed within a single application.
 
 Controller-based endpoints are more structured:
 

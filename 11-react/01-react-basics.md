@@ -323,6 +323,6 @@ After the action function completes, React automatically resets uncontrolled for
 
 ## React 19: The React Compiler
 
-React 19 ships with the React Compiler (formerly known as React Forget), which automatically handles memoization at build time. The compiler understands component code and automatically wraps values and functions in `useMemo`, `useCallback`, and `React.memo` where appropriate. This eliminates the need for manual memoization in most cases.
+React Compiler is the build-time optimizer used with modern React projects. It analyzes components and hooks, then inserts memoization-equivalent optimizations in compiled output so many manual `useMemo`, `useCallback`, and `React.memo` usages become unnecessary.
 
-The React Compiler supports incremental adoption -- teams can enable it per file or per function using opt-in directives. While the compiler reduces the need for manual optimization, understanding the concepts of memoization (explained in Chapter 11, Section 03) remains important for debugging edge cases and writing compiler-friendly code.
+The compiler supports incremental adoption through configuration modes and directives such as `"use memo"` / `"use no memo"`. It reduces manual optimization work, but understanding memoization (explained in Chapter 11, Section 03) remains important for profiling, debugging edge cases, and writing compiler-friendly code.

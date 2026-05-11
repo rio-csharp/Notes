@@ -54,8 +54,6 @@ Password reset is effectively a credential-recovery flow and should be treated w
 - never sends a new password directly by email;
 - invalidates the token after successful use.
 
-Security design extends beyond storage primitives into user-facing workflows: a secure reset process issues a short-lived, single-use token, stores only a hash of that token, and avoids revealing account existence more than necessary.
-
 ## Audit And Sensitive Logging
 
 Authentication events and reset attempts often deserve logging, but logs must never become a second secret store. Raw passwords, reset tokens, refresh tokens, and full authorization headers should not appear in logs. Good security logging records the event context without preserving the credential.

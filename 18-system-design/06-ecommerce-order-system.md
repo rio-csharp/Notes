@@ -103,7 +103,7 @@ Frontend
 
 ## Idempotency
 
-Checkout may be retried. The client sends an idempotency key in the request header (or request body), and the server guarantees that the same key results in the same outcome, even if the request is submitted multiple times.
+Checkout may be retried. The client sends an idempotency key in the request header (or request body), and the server stores the first accepted result for that key so repeated submissions return the same logical outcome instead of creating duplicate orders or charges.
 
 ```http
 Idempotency-Key: checkout-user-123-cart-456

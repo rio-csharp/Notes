@@ -99,7 +99,7 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "MyApp.Api.dll"]
@@ -140,15 +140,15 @@ Avoid running as root when possible.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-RUN adduser --disabled-password --home /app appuser
-USER appuser
-
 COPY --from=build /app/publish .
 
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
+USER app
 ENTRYPOINT ["dotnet", "MyApp.Api.dll"]
 ```
+
+.NET 8+ Linux images include a built-in non-root `app` user and default ASP.NET Core container port `8080`. `ASPNETCORE_HTTP_PORTS` is the simpler port-setting variable for modern ASP.NET Core hosting; use `ASPNETCORE_URLS` only when the application needs the older URL-based format or legacy hosting behavior.
 
 ## React Dockerfile
 

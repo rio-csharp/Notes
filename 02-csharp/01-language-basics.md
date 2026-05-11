@@ -378,34 +378,38 @@ public sealed class OrderService(IOrderRepository repository, ILogger<OrderServi
 }
 ```
 
-The compiler captures a primary constructor parameter as a private field only when that parameter is referenced in an instance member — a method body, property accessor, or field initializer. Parameters used exclusively in the constructor body itself (for argument validation or passing to a base constructor) remain ordinary constructor parameters and are never stored as fields:
+The compiler captures a primary constructor parameter as a private field only when that parameter is referenced in an instance member — a method body, property accessor, or field initializer. Parameters used only for base-constructor arguments or other initialization expressions can remain ordinary constructor parameters and are not stored as fields by the declaring type:
 
 ```csharp
+public abstract class RetryComponent(int maxRetries)
+{
+    protected int MaxRetries { get; } = maxRetries;
+}
+
 public sealed class ReportGenerator(
     ITemplateEngine engine,      // captured: used in GenerateAsync
     IAuditLogger audit,          // captured: used in _logPrefix initializer
-    int maxRetries)              // NOT captured: used only in constructor body
+    int maxRetries)              // NOT captured here: passed to base constructor
+    : RetryComponent(Validate(maxRetries))
 {
     private readonly string _logPrefix = $"ReportGen-{audit.Id}";
-
-    public ReportGenerator(ITemplateEngine engine, IAuditLogger audit, int maxRetries)
-        : this(engine, audit, maxRetries)
-    {
-        if (maxRetries <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maxRetries));
-        }
-    }
 
     public async Task<string> GenerateAsync(ReportRequest request)
     {
         var template = await engine.LoadAsync(request.TemplateId);
         return template.Render(request.Data);
     }
+
+    private static int Validate(int value)
+    {
+        return value > 0
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value));
+    }
 }
 ```
 
-In this example, `engine` appears in `GenerateAsync` and `audit` appears in a field initializer — both are captured as private fields. The `maxRetries` parameter appears only in the explicit constructor body for validation and is never stored.
+In this example, `engine` appears in `GenerateAsync` and `audit` appears in a field initializer — both are captured as private fields. The `maxRetries` parameter is used only during initialization and is not stored as a field unless another instance member later refers to it.
 
 This distinction matters for two reasons. First, captured parameters increase the object's size; if a parameter looks like a dependency but is never used beyond construction, it silently adds a field. Second, captured fields follow normal GC reachability rules, so the captured `ITemplateEngine` reference keeps the engine alive for the lifetime of the `ReportGenerator`. For dependency-heavy services this is usually harmless, but it is worth keeping in mind when designing types with primary constructors.
 
@@ -426,7 +430,7 @@ Like other modern syntax features, collection expressions are best treated as a 
 
 ## Record Structs
 
-C# 10 introduced `record struct`, combining value-type allocation with compiler-generated equality and `ToString`. A `record struct` lives on the stack (or inlined into a containing object) like any struct, but the compiler synthesizes `Equals`, `GetHashCode`, `ToString`, `==`, `!=`, and `IEquatable<T>` based on the struct's fields — the same machinery that `record class` provides, but without the heap allocation and reference semantics:
+C# 10 introduced `record struct`, combining value-type semantics with compiler-generated equality and `ToString`. Like any struct, a `record struct` is stored inline in its containing context: it may be a stack local, a field inside a heap object, an array element, or a field in an async state machine. The compiler synthesizes `Equals`, `GetHashCode`, `ToString`, `==`, `!=`, and `IEquatable<T>` based on the struct's fields — the same value-oriented machinery that `record class` provides, but without reference identity:
 
 ```csharp
 public readonly record struct Money(decimal Amount, string Currency);
@@ -437,7 +441,7 @@ var b = new Money(10m, "USD");
 Console.WriteLine(a == b); // true — structural equality
 ```
 
-The critical differences from a plain `readonly struct` are the compiler-generated equality members. A plain struct inherits `ValueType.Equals`, which uses reflection by default and is slow; a `record struct` gets field-by-field comparison generated at compile time. The difference from a `record class` is value semantics: copying a `record struct` produces an independent copy, and a `record struct` variable can never be null.
+The critical differences from a plain `readonly struct` are the compiler-generated equality members. A plain struct inherits `ValueType.Equals`, whose default implementation is a runtime-provided field comparison and can be much slower than hand-written equality; a `record struct` gets field-by-field comparison generated at compile time. The difference from a `record class` is value semantics: copying a `record struct` produces an independent copy, and a non-nullable `record struct` variable cannot be null.
 
 `record struct` is a natural fit for small, immutable value objects where structural equality is semantically correct: coordinates, version numbers, measurement units, composite keys. It is less suitable for types that carry many fields (equality cost grows with field count), types that need inheritance (`record struct` does not support `abstract` or `virtual` members beyond what `struct` permits), or types large enough that value-type copying becomes a measurable cost.
 

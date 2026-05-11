@@ -132,7 +132,7 @@ Suspense fallbacks are committed synchronously -- when a component suspends, Rea
 
 ### React Compiler and Render Optimization
 
-The React Compiler (stable in React 19) automatically memoizes components, values, and functions at build time. It understands the rules of React and wraps code in `useMemo`, `useCallback`, and `React.memo` where appropriate, without manual annotations. This means many optimization patterns described later in this section (memoization, stable references, `React.memo`) are handled automatically for code compiled with the React Compiler.
+React Compiler automatically memoizes components, values, and functions at build time for code it compiles. It understands the rules of React and emits optimized code rather than requiring developers to manually annotate every stable value with `useMemo`, `useCallback`, or `React.memo`. This means many optimization patterns described later in this section are handled automatically when the compiler is enabled.
 
 The compiler does not change the rendering model itself -- components still render, reconcile, and commit in the same cycle. What changes is which re-renders are skipped: the compiler ensures that only components whose props or state actually changed re-execute, reducing unnecessary work. For new projects, adopting the compiler early means starting with good rendering performance by default. For existing projects, the compiler can be enabled incrementally on a per-file basis.
 
