@@ -22,7 +22,7 @@ const combinedMarkdownForPdfFile = path.join(tempDir, "notes-for-pdf.md");
 const pdfHtmlFile = path.join(tempDir, "notes-for-pdf.html");
 const epubCssFile = path.join(tempDir, "epub.css");
 
-const ignoredDirs = new Set([".git", ".github", ".claude", "node_modules", "dist", "tools"]);
+const ignoredDirs = new Set([".git", ".github", ".claude", ".agents", ".deepseek", "node_modules", "dist", "tools"]);
 const preferredFrontMatter = ["README.md"];
 
 const bookTitle = ".NET + Fullstack Engineering Notes";
@@ -198,12 +198,13 @@ async function buildCombinedMarkdown(files) {
   }
 
   for (const group of groups) {
-    sections.push(`## ${partLabel(group.folder)}`);
-    sections.push("");
+    // Skip the artificial part heading for the root README; let its own H1 start the body.
+    if (group.folder !== "README.md") {
+      sections.push(`## ${partLabel(group.folder)}`);
+      sections.push("");
+    }
     for (const file of group.files) {
       const content = await readFileForBook(file);
-      sections.push("");
-      sections.push("\\newpage");
       sections.push("");
       sections.push(content.trim());
       sections.push("");
